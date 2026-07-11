@@ -135,6 +135,76 @@
   .footer-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:10px;}
   .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;margin-left:6px;}
   .pill.aggr{background:var(--gold);color:#1a1508;}
+
+  /* --- Stage animations --- */
+
+  /* Dice roll (Skirmish) */
+  .dice-row{display:flex;justify-content:center;gap:32px;margin:18px 0 6px;}
+  .dice-col{text-align:center;}
+  .dice-col .who{font-weight:700;margin-bottom:8px;font-size:14px;}
+  .die{
+    width:64px;height:64px;border-radius:14px;margin:0 auto;
+    background:linear-gradient(160deg,#fff,#d8dce4);color:#161226;
+    font-size:30px;font-weight:800;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 6px 16px rgba(0,0,0,.45), inset 0 0 0 2px #c3c8d4;
+  }
+  .die.rolling{ animation: dieShake .12s linear infinite; }
+  .die.settled{ animation: dieSettle .45s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes dieShake{
+    0%{transform:rotate(-8deg) scale(1);}
+    50%{transform:rotate(8deg) scale(1.06);}
+    100%{transform:rotate(-8deg) scale(1);}
+  }
+  @keyframes dieSettle{
+    0%{transform:scale(1.35) rotate(12deg);}
+    60%{transform:scale(0.9) rotate(-5deg);}
+    100%{transform:scale(1) rotate(0);}
+  }
+  .skirmish-result{margin-top:14px;font-size:19px;font-weight:800;text-align:center;color:var(--gold);}
+
+  /* Floating resource/Influence gain popup */
+  @keyframes popGain{
+    0%{opacity:0;transform:translate(-50%,0) scale(.8);}
+    18%{opacity:1;transform:translate(-50%,-10px) scale(1.08);}
+    100%{opacity:0;transform:translate(-50%,-44px) scale(1);}
+  }
+  .gain-popup{
+    position:fixed;z-index:80;font-weight:800;font-size:13px;pointer-events:none;
+    transform:translate(-50%,0);
+    animation:popGain 1.1s ease-out forwards;
+  }
+  .gain-popup.good{color:var(--good);text-shadow:0 0 10px rgba(82,201,138,.55);}
+  .gain-popup.bad{color:var(--bad);text-shadow:0 0 10px rgba(239,91,80,.55);}
+
+  /* Round-begins banner */
+  @keyframes roundBannerIn{
+    0%{opacity:0;transform:translate(-50%,-50%) scale(.8);}
+    18%{opacity:1;transform:translate(-50%,-50%) scale(1.08);}
+    28%{transform:translate(-50%,-50%) scale(1);}
+    82%{opacity:1;}
+    100%{opacity:0;transform:translate(-50%,-50%) scale(1);}
+  }
+  #roundBanner{
+    position:fixed;top:40%;left:50%;z-index:70;pointer-events:none;
+    font-size:34px;font-weight:800;letter-spacing:1.5px;color:var(--gold);
+    text-shadow:0 0 30px rgba(240,200,90,.5),0 2px 8px rgba(0,0,0,.6);
+    animation:roundBannerIn 1.8s ease forwards;
+    white-space:nowrap;
+  }
+
+  /* New-card-drawn entrance */
+  @keyframes cardEnter{
+    0%{opacity:0;transform:translateY(16px) scale(.92);}
+    100%{opacity:1;transform:translateY(0) scale(1);}
+  }
+  .tcard.card-new{ animation: cardEnter .45s ease; }
+
+  /* Just-taken board site flash */
+  @keyframes locTaken{
+    0%{box-shadow:0 0 0 0 rgba(240,200,90,.75);}
+    100%{box-shadow:0 0 0 16px rgba(240,200,90,0);}
+  }
+  .loc.just-taken{ animation: locTaken .6s ease; }
 </style>
 </head>
 <body>
@@ -290,6 +360,23 @@ const CARD_DEFS = {
 };
 const DECK_TEMPLATE = Object.keys(CARD_DEFS);
 
+/* Balanced hand ordering: highest average combat value first, ties broken
+   alphabetically, so a hand always reads left-to-right the same way no
+   matter what order the cards were drawn in. Wildcard's average (3.5) is
+   treated as its sort value. Since each player's deck has exactly one of
+   each card id, cards can always be identified and removed by id - display
+   order never has to match array index, so sorting is purely cosmetic and
+   never risks selecting or discarding the wrong card. */
+const CARD_SORT_ORDER = Object.keys(CARD_DEFS).sort((a,b)=>{
+  const va = CARD_DEFS[a].mod===null ? 3.5 : CARD_DEFS[a].mod;
+  const vb = CARD_DEFS[b].mod===null ? 3.5 : CARD_DEFS[b].mod;
+  if(vb!==va) return vb-va;
+  return CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name);
+});
+function sortHand(hand){
+  return hand.slice().sort((a,b)=> CARD_SORT_ORDER.indexOf(a)-CARD_SORT_ORDER.indexOf(b));
+}
+
 /* Eight sites, each with a free Basic action and a pricier Advanced one —
    sixteen meaningful choices on an eight-slot board. */
 const LOCATIONS = [
@@ -423,6 +510,9 @@ const online = {
 };
 let pendingGuestDecision = null;
 let pendingGuestCommit = null;
+const handRenderCache = {}; // playerIdx -> Set of card ids already shown, so only truly new draws animate in
+let prevBoardSnapshot = null; // locId -> owner idx|null, so only the just-taken site flashes
+const stageBanner = {lastRound: 0}; // tracks which round's banner has already been shown
 
 function wsSend(msg){
   if(online.ws && online.ws.readyState===1) online.ws.send(JSON.stringify(msg));
@@ -482,19 +572,26 @@ function handleHostIncomingAction(msg){
   } else if(msg.kind==='skirmishDecision'){
     if(pendingGuestDecision){ const cb=pendingGuestDecision; pendingGuestDecision=null; cb(msg.attack); }
   } else if(msg.kind==='commit'){
-    if(pendingGuestCommit){ const cb=pendingGuestCommit; pendingGuestCommit=null; cb(msg.troops, (msg.cardIdx===undefined?null:msg.cardIdx)); }
+    if(pendingGuestCommit){ const cb=pendingGuestCommit; pendingGuestCommit=null; cb(msg.troops, (msg.cardId===undefined?null:msg.cardId)); }
   }
 }
 
 function handleGuestSocketMessage(msg){
   if(msg.type==='joined'){
     online.enabled = true; online.isHost = false; online.myIndex = 1;
+    stageBanner.lastRound = 0;
+    delete handRenderCache[0]; delete handRenderCache[1];
+    prevBoardSnapshot = null;
     document.getElementById('joinStatus').textContent = `Connected! Waiting for the host to start the game…`;
   } else if(msg.type==='error'){
     document.getElementById('joinStatus').textContent = msg.message;
   } else if(msg.type==='state'){
     state = msg.state;
     document.getElementById('setup').classList.add('hidden');
+    if(state.round !== stageBanner.lastRound){
+      showRoundBanner(`Round ${state.round}`);
+      stageBanner.lastRound = state.round;
+    }
     if(state.phase==='ended'){
       document.getElementById('game').classList.add('hidden');
       showEndScreen();
@@ -508,7 +605,7 @@ function handleGuestSocketMessage(msg){
       (attack)=> wsSend({type:'action', kind:'skirmishDecision', attack}));
   } else if(msg.type==='requestCommit'){
     showCommitModal(msg.playerName, msg.maxTroops, msg.hand,
-      (troops, cardIdx)=> wsSend({type:'action', kind:'commit', troops, cardIdx}));
+      (troops, cardId)=> wsSend({type:'action', kind:'commit', troops, cardId}));
   } else if(msg.type==='peerLeft'){
     alert('The host disconnected.');
   }
@@ -528,9 +625,10 @@ function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, 
 }
 
 function showCommitModal(playerName, maxTroops, hand, onSubmit){
-  let selectedCard = null;
-  const cardOptsHtml = hand.map((c,i)=>`
-    <div class="opt" data-idx="${i}">
+  let selectedCardId = null;
+  const sorted = sortHand(hand);
+  const cardOptsHtml = sorted.map((c)=>`
+    <div class="opt" data-card="${c}">
       <b>${CARD_DEFS[c].name}</b><br>${CARD_DEFS[c].desc}
     </div>`).join('') || '<span style="color:var(--muted)">No cards in hand.</span>';
 
@@ -554,20 +652,20 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit){
 
   document.querySelectorAll('#cardSelect .opt').forEach(el=>{
     el.onclick = ()=>{
-      const idx = Number(el.dataset.idx);
-      if(selectedCard===idx){ selectedCard=null; el.classList.remove('selected'); }
+      const cardId = el.dataset.card;
+      if(selectedCardId===cardId){ selectedCardId=null; el.classList.remove('selected'); }
       else {
         document.querySelectorAll('#cardSelect .opt').forEach(o=>o.classList.remove('selected'));
-        selectedCard = idx; el.classList.add('selected');
+        selectedCardId = cardId; el.classList.add('selected');
       }
     };
   });
 
   document.getElementById('commitBtn').onclick = ()=>{
     const troops = Number(slider.value);
-    const cardIdx = selectedCard;
+    const cardId = selectedCardId;
     hideModal();
-    onSubmit(troops, cardIdx);
+    onSubmit(troops, cardId);
   };
 }
 
@@ -578,6 +676,9 @@ function startGame(){
   online.enabled = (mode==='host');
   online.isHost = (mode==='host');
   online.myIndex = 0;
+  delete handRenderCache[0]; delete handRenderCache[1];
+  prevBoardSnapshot = null;
+  stageBanner.lastRound = 0;
 
   BOT_TICK_MS = {normal:500, fast:150, instant:20}[document.getElementById('botSpeed').value] ?? 500;
   const demoLoop = mode==='demo' && document.getElementById('demoLoop').checked;
@@ -621,6 +722,8 @@ function beginRound(){
   s.phase = 'draft';
 
   log(`<b>— Round ${s.round} begins —</b> ${s.players[s.firstPlayerIdx].name} drafts first.`);
+  showRoundBanner(`Round ${s.round}`);
+  stageBanner.lastRound = s.round;
   renderAll();
   maybeAutoPick();
 }
@@ -685,6 +788,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(tier==='advanced') player.ore = Math.max(0, player.ore-1);
       player.credits += gain;
       log(`${player.name} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?' (paid 1 Ore)':''}.`);
+      popupGain(playerIdx, `+${gain} Credits`, true);
       break;
     }
     case 'quarry': {
@@ -692,6 +796,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
       player.ore += oreGain; player.troops += troopGain;
       log(`${player.name} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      popupGain(playerIdx, `+${oreGain} Ore, +${troopGain} Troops`, true);
       break;
     }
     case 'garrison': {
@@ -699,6 +804,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(tier==='advanced'){ player.ore = Math.max(0, player.ore-1); player.aggressorBonus=1; } else { player.aggressorBonus=0; }
       player.troops += troopGain; player.isAggressor = true;
       log(`${player.name} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
+      popupGain(playerIdx, `+${troopGain} Troops - Aggressor!`, true);
       break;
     }
     case 'outpost': {
@@ -708,9 +814,11 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(player.credits>=need.credits && player.ore>=need.ore){
         player.credits-=need.credits; player.ore-=need.ore; player.influence+=reward;
         log(`${player.name} invests in the <b>Outpost</b> (${tier}) -> pays ${need.credits} Credits + ${need.ore} Ore for +${reward} Influence.`);
+        popupGain(playerIdx, `+${reward} Influence`, true);
       } else {
         player.influence += consolation;
         log(`${player.name} eyes the <b>Outpost</b> (${tier}) but can't afford it -> consolation +${consolation} Influence.`);
+        popupGain(playerIdx, `+${consolation} Influence`, true);
       }
       break;
     }
@@ -719,6 +827,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
       drawCard(player, draws);
       log(`${player.name} studies the <b>Archive</b> (${tier}) -> draws ${draws} Tactic card${draws>1?'s':''}${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      popupGain(playerIdx, `+${draws} Card${draws>1?'s':''}`, true);
       break;
     }
     case 'foundry': {
@@ -726,6 +835,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(tier==='advanced') player.troops = Math.max(0, player.troops-1);
       player.credits += crGain; player.ore += oreGain;
       log(`${player.name} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?' (paid 1 Troop)':''}.`);
+      popupGain(playerIdx, `+${crGain} Credits, +${oreGain} Ore`, true);
       break;
     }
     case 'bazaar': {
@@ -733,10 +843,12 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(player.ore>=2){
         player.ore-=2; player.credits+=crGain;
         log(`${player.name} trades at the <b>Bazaar</b> (${tier}) -> trades 2 Ore for +${crGain} Credits.`);
+        popupGain(playerIdx, `+${crGain} Credits`, true);
       } else {
         const consolation = tier==='advanced'?2:1;
         player.credits += consolation;
         log(`${player.name} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credits.`);
+        popupGain(playerIdx, `+${consolation} Credits`, true);
       }
       break;
     }
@@ -746,19 +858,21 @@ function applyLocationEffect(playerIdx, locId, tier){
         if(player.credits>=2 && player.ore>=1){
           player.credits-=2; player.ore-=1; player.influence+=reward;
           log(`${player.name} prays at the <b>Shrine</b> (advanced) -> pays 2 Credits + 1 Ore for +${reward} Influence.`);
+          popupGain(playerIdx, `+${reward} Influence`, true);
         } else {
           player.influence += 1;
           log(`${player.name} can't afford the deep Shrine rite -> +1 Influence instead.`);
+          popupGain(playerIdx, `+1 Influence`, true);
         }
       } else {
         player.influence += reward;
         log(`${player.name} prays at the <b>Shrine</b> (basic) -> +${reward} Influence.`);
+        popupGain(playerIdx, `+${reward} Influence`, true);
       }
       break;
     }
   }
   applyCaps(player);
-  renderAll();
 }
 
 function applyCaps(player){
@@ -878,8 +992,9 @@ function collectCommit(playerIdx, onDone){
     return;
   }
 
-  const applyCommit = (troops, cardIdx)=>{
-    const card = (cardIdx!==null && cardIdx!==undefined) ? player.hand.splice(cardIdx,1)[0] : null;
+  const applyCommit = (troops, cardId)=>{
+    const idx = cardId ? player.hand.indexOf(cardId) : -1;
+    const card = idx>=0 ? player.hand.splice(idx,1)[0] : null;
     skirmishCtx[role] = {troops, card};
     player.troops -= troops;
     onDone();
@@ -887,7 +1002,7 @@ function collectCommit(playerIdx, onDone){
 
   if(online.enabled && playerIdx!==online.myIndex){
     pendingGuestCommit = applyCommit;
-    wsSend({type:'requestCommit', role, playerName:player.name, maxTroops:player.troops, hand:player.hand});
+    wsSend({type:'requestCommit', role, playerName:player.name, maxTroops:player.troops, hand:sortHand(player.hand)});
     return;
   }
 
@@ -937,57 +1052,103 @@ function resolveSkirmish(){
 
   const aggRoll = rollD6();
   const defRoll = rollD6();
-  let aggTotal = aggRoll + aggCommit.troops + aggMod.mod + (aggressor.aggressorBonus||0);
-  let defTotal = defRoll + defCommit.troops + defMod.mod;
+  const aggTotal = aggRoll + aggCommit.troops + aggMod.mod + (aggressor.aggressorBonus||0);
+  const defTotal = defRoll + defCommit.troops + defMod.mod;
 
-  log(`<b>Skirmish!</b> ${aggressor.name} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
-      `${defender.name} rolls ${defRoll} + ${defCommit.troops} troops${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.`);
+  // The numbers are already locked in - the dice-roll animation is a
+  // suspense/legibility beat, not a source of new information.
+  animateDiceRoll(aggressor.name, defender.name, aggRoll, defRoll, aggTotal, defTotal, ()=>{
+    log(`<b>Skirmish!</b> ${aggressor.name} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
+        `${defender.name} rolls ${defRoll} + ${defCommit.troops} troops${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.`);
 
-  if(aggCommit.card) aggressor.discard.push(aggCommit.card);
-  if(defCommit.card) defender.discard.push(defCommit.card);
+    if(aggCommit.card) aggressor.discard.push(aggCommit.card);
+    if(defCommit.card) defender.discard.push(defCommit.card);
 
-  if(aggTotal===defTotal){
-    log(`It's a tie — both sides lose their committed Troops, no Influence changes.`);
-  } else {
-    const aggWins = aggTotal > defTotal;
-    const winner = aggWins ? aggressor : defender;
-    const loser = aggWins ? defender : aggressor;
-    const loserCommit = aggWins ? defCommit : aggCommit;
-    let margin = Math.abs(aggTotal-defTotal);
+    if(aggTotal===defTotal){
+      log(`It's a tie — both sides lose their committed Troops, no Influence changes.`);
+    } else {
+      const aggWins = aggTotal > defTotal;
+      const winner = aggWins ? aggressor : defender;
+      const loser = aggWins ? defender : aggressor;
+      const loserCommit = aggWins ? defCommit : aggCommit;
+      let margin = Math.abs(aggTotal-defTotal);
 
-    if(loserCommit.card==='guard') margin = Math.max(0, margin-1);
+      if(loserCommit.card==='guard') margin = Math.max(0, margin-1);
 
-    const gained = Math.min(margin,4);
-    winner.influence += gained;
+      const gained = Math.min(margin,4);
+      winner.influence += gained;
+      popupGain(state.players.indexOf(winner), `+${gained} Influence`, true);
 
-    if(winner===aggressor && aggCommit.card==='rally') winner.influence += 1;
-    if(winner===defender && defCommit.card==='rally') winner.influence += 1;
+      if(winner===aggressor && aggCommit.card==='rally') winner.influence += 1;
+      if(winner===defender && defCommit.card==='rally') winner.influence += 1;
 
-    if(loser===defender && loserCommit.card==='feint'){
-      defender.troops += defCommit.troops;
-      log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
-    } else if(loser===aggressor && loserCommit.card==='feint'){
-      aggressor.troops += aggCommit.troops;
-      log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
-    } else if(loserCommit.card==='ambush'){
-      loser.troops = Math.max(0, loser.troops-1);
-      log(`${loser.name}'s own Ambush backfires — 1 extra Troop lost.`);
+      if(loser===defender && loserCommit.card==='feint'){
+        defender.troops += defCommit.troops;
+        log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
+      } else if(loser===aggressor && loserCommit.card==='feint'){
+        aggressor.troops += aggCommit.troops;
+        log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
+      } else if(loserCommit.card==='ambush'){
+        loser.troops = Math.max(0, loser.troops-1);
+        log(`${loser.name}'s own Ambush backfires — 1 extra Troop lost.`);
+      }
+
+      log(`<b>${winner.name} wins the Skirmish</b> by ${Math.abs(aggTotal-defTotal)} (margin ${margin} after modifiers) -> +${gained} Influence.`);
+
+      [aggCommit,defCommit].forEach(c=>{
+        if(c.card==='scout'){
+          const p = c===aggCommit ? aggressor : defender;
+          drawCard(p,1);
+          log(`${p.name}'s Scout draws an extra card.`);
+        }
+      });
     }
 
-    log(`<b>${winner.name} wins the Skirmish</b> by ${Math.abs(aggTotal-defTotal)} (margin ${margin} after modifiers) -> +${gained} Influence.`);
+    applyCaps(aggressor); applyCaps(defender);
+    skirmishCtx = null;
+    endRound();
+  });
+}
 
-    [aggCommit,defCommit].forEach(c=>{
-      if(c.card==='scout'){
-        const p = c===aggCommit ? aggressor : defender;
-        drawCard(p,1);
-        log(`${p.name}'s Scout draws an extra card.`);
-      }
-    });
-  }
+function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal, onDone){
+  const rollMs = clamp(BOT_TICK_MS*3, 150, 900);
+  const holdMs = clamp(BOT_TICK_MS*4, 250, 1300);
 
-  applyCaps(aggressor); applyCaps(defender);
-  skirmishCtx = null;
-  endRound();
+  showModal('Skirmish - Rolling the Dice', `
+    <div class="dice-row">
+      <div class="dice-col"><div class="who">${aggName} (Aggressor)</div><div class="die rolling" id="dieAgg">?</div></div>
+      <div class="dice-col"><div class="who">${defName} (Defender)</div><div class="die rolling" id="dieDef">?</div></div>
+    </div>
+    <div id="diceResultArea" style="text-align:center;color:var(--muted);font-size:13px;margin-top:10px">Rolling...</div>
+  `);
+
+  const dieAgg = document.getElementById('dieAgg');
+  const dieDef = document.getElementById('dieDef');
+  const tickMs = Math.max(40, Math.round(rollMs/12));
+  const interval = setInterval(()=>{
+    dieAgg.textContent = String(1+Math.floor(Math.random()*6));
+    dieDef.textContent = String(1+Math.floor(Math.random()*6));
+  }, tickMs);
+
+  setTimeout(()=>{
+    clearInterval(interval);
+    if(!dieAgg.isConnected) return;
+    dieAgg.textContent = String(aggRoll);
+    dieDef.textContent = String(defRoll);
+    dieAgg.classList.remove('rolling'); dieAgg.classList.add('settled');
+    dieDef.classList.remove('rolling'); dieDef.classList.add('settled');
+    const resultEl = document.getElementById('diceResultArea');
+    if(resultEl){
+      let verdict;
+      if(aggTotal===defTotal) verdict = "It's a tie!";
+      else if(aggTotal>defTotal) verdict = `${aggName} wins the Skirmish!`;
+      else verdict = `${defName} wins the Skirmish!`;
+      resultEl.innerHTML = `<div>Totals (dice + troops + cards): <b>${aggTotal}</b> vs <b>${defTotal}</b></div>` +
+        `<div class="skirmish-result ${aggTotal===defTotal?'':'win'}">${verdict}</div>`;
+    }
+  }, rollMs);
+
+  setTimeout(()=>{ hideModal(); onDone(); }, rollMs + holdMs);
 }
 
 /* ------------------------------ Round end ------------------------------ */
@@ -1015,6 +1176,37 @@ function showModal(title, bodyHtml){
 }
 function hideModal(){
   document.getElementById('skirmishModal').classList.add('hidden');
+}
+
+/* Floating "+3 Credits"-style badge near a player's HUD card. Appended to
+   body (not inside a container that gets innerHTML-replaced) so its CSS
+   animation can finish and remove it without being interrupted by a
+   re-render, then it removes itself once the animation ends. */
+function popupGain(playerIdx, text, good){
+  const cardEl = document.querySelector(`#playerCards .player-card.p${playerIdx+1}`);
+  if(!cardEl) return;
+  const rect = cardEl.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = `gain-popup ${good?'good':'bad'}`;
+  el.textContent = text;
+  el.style.left = `${rect.left + rect.width/2}px`;
+  el.style.top = `${rect.top}px`;
+  document.body.appendChild(el);
+  el.addEventListener('animationend', ()=> el.remove());
+  setTimeout(()=>{ if(el.isConnected) el.remove(); }, 1500); // fallback if animationend never fires
+}
+
+/* Big dramatic "Round N begins" banner - shown once per round, purely
+   cosmetic, removes itself after its CSS animation finishes. */
+function showRoundBanner(text){
+  const old = document.getElementById('roundBanner');
+  if(old) old.remove();
+  const el = document.createElement('div');
+  el.id = 'roundBanner';
+  el.textContent = text;
+  document.body.appendChild(el);
+  el.addEventListener('animationend', ()=> el.remove());
+  setTimeout(()=>{ if(el.isConnected) el.remove(); }, 2200);
 }
 
 /* -------------------------------- Render -------------------------------- */
@@ -1056,8 +1248,11 @@ function renderBoard(){
     : (state.phase==='draft' && activeIdx!==null && state.players[activeIdx].type==='human');
   const actor = humanCanPick ? state.players[online.enabled?online.myIndex:activeIdx] : null;
 
+  const newSnapshot = {};
   el.innerHTML = LOCATIONS.map(loc=>{
     const taken = state.board ? state.board[loc.id] : null;
+    newSnapshot[loc.id] = taken ? taken.owner : null;
+    const justTaken = !!taken && prevBoardSnapshot && prevBoardSnapshot[loc.id]===null;
     const pickable = humanCanPick && !taken;
     const advAffordable = actor ? canAffordExtra(loc, actor) : false;
 
@@ -1079,11 +1274,12 @@ function renderBoard(){
     }
 
     return `
-      <div class="loc ${pickable?'pickable':''}" data-loc="${loc.id}">
+      <div class="loc ${pickable?'pickable':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
         <h3>${loc.name}</h3>
         ${body}
       </div>`;
   }).join('');
+  prevBoardSnapshot = newSnapshot;
 
   if(humanCanPick){
     el.querySelectorAll('.tier-btn').forEach(btn=>{
@@ -1104,10 +1300,16 @@ function renderHand(){
   }
   const player = state.players[showIdx];
   if(!player || (!online.enabled && player.type!=='human')){ el.innerHTML = '<span style="color:var(--muted)">No human player — sit back and watch the bots duel.</span>'; return; }
+
+  const prevSeen = handRenderCache[showIdx] || new Set();
+  const sorted = sortHand(player.hand);
+  handRenderCache[showIdx] = new Set(player.hand);
+
   el.innerHTML = `<div style="width:100%;color:var(--muted);font-size:12px;margin-bottom:4px">${player.name}'s hand:</div>` +
-    (player.hand.map(c=>{
+    (sorted.map(c=>{
       const def = CARD_DEFS[c];
-      return `<div class="tcard"><b>${def.name}</b><br>${def.desc}</div>`;
+      const isNew = !prevSeen.has(c);
+      return `<div class="tcard${isNew?' card-new':''}"><b>${def.name}</b><br>${def.desc}</div>`;
     }).join('') || '<span style="color:var(--muted)">Empty hand.</span>');
 }
 
