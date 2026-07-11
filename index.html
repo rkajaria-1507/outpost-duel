@@ -146,6 +146,59 @@
   .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;margin-left:6px;}
   .pill.aggr{background:var(--gold);color:#1a1508;}
 
+  /* --- Setup: mode cards --- */
+  .mode-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:4px;}
+  .mode-card{
+    border:2px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;background:rgba(255,255,255,.02);
+    transition:border-color .15s,background .15s,transform .1s;
+  }
+  .mode-card:hover{border-color:var(--gold);transform:translateY(-1px);}
+  .mode-card.selected{border-color:var(--gold);background:rgba(240,200,90,.08);box-shadow:0 0 0 1px var(--gold);}
+  .mode-card h4{margin:0 0 4px;font-size:15px;}
+  .mode-card p{margin:0;font-size:12px;color:var(--muted);line-height:1.4;}
+
+  /* --- Sound toggle --- */
+  .sound-toggle{
+    display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:20px;padding:6px 12px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none;
+  }
+  .sound-toggle:hover{border-color:var(--gold);color:var(--text);}
+  .sound-toggle.on{color:var(--good);}
+
+  /* --- Round stepper --- */
+  .round-stepper{display:flex;align-items:center;gap:4px;}
+  .round-stepper .step{
+    width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+    transition:all .25s;
+  }
+  .round-stepper .step.done{background:var(--gold-dim);border-color:var(--gold);color:var(--gold);}
+  .round-stepper .step.active{background:var(--gold);border-color:var(--gold);color:#1a1508;box-shadow:0 0 12px rgba(240,200,90,.6);}
+  .round-stepper .connector{width:10px;height:2px;background:var(--line);}
+  .round-stepper .connector.done{background:var(--gold);}
+
+  /* --- Influence race track --- */
+  .influence-track{display:flex;flex-direction:column;gap:7px;margin-top:12px;}
+  .track-row{display:flex;align-items:center;gap:10px;}
+  .track-label{width:100px;font-size:12px;color:var(--muted);text-align:right;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .track-bar{flex:1;height:14px;background:rgba(255,255,255,.05);border-radius:8px;overflow:hidden;border:1px solid var(--line);}
+  .track-fill{height:100%;border-radius:8px;transition:width .6s cubic-bezier(.22,1,.36,1);}
+  .track-fill.p1{background:linear-gradient(90deg,var(--p1),#ff9a8d);}
+  .track-fill.p2{background:linear-gradient(90deg,var(--p2),#8ec3ff);}
+  .track-value{width:26px;font-weight:800;color:var(--gold);font-size:13px;flex-shrink:0;}
+
+  /* --- Turn banner --- */
+  .turn-banner{
+    font-size:13px;color:var(--muted);margin-top:2px;
+  }
+  .turn-banner b{color:var(--gold);}
+
+  /* --- End-screen stats table --- */
+  .stats-table{width:100%;max-width:520px;margin:18px auto 0;border-collapse:collapse;font-size:13px;}
+  .stats-table th,.stats-table td{padding:8px 10px;text-align:center;border-bottom:1px solid var(--line);}
+  .stats-table th{color:var(--muted);font-weight:600;text-align:left;}
+  .stats-table td:first-child, .stats-table th:first-child{text-align:left;color:var(--muted);}
+
   /* --- Stage animations --- */
 
   /* Dice roll (Skirmish) */
@@ -225,16 +278,33 @@
     <div class="title-banner"><h1>Outpost Duel</h1></div>
     <p class="subtitle">Two rival outposts, six rounds, one Influence track. Eight contested sites, each with a basic and an advanced tier — draft wisely, gamble on the Skirmish. Skill sets you up, the dice decide the margin.</p>
 
-    <div class="row">
-      <div class="col">
-        <label>How will you play?</label>
-        <select id="gameMode">
-          <option value="local">Same screen (hotseat)</option>
-          <option value="host">Online — Host a room</option>
-          <option value="join">Online — Join a room</option>
-          <option value="demo">Demo — watch two bots play</option>
-        </select>
+    <label>How will you play?</label>
+    <div class="mode-cards" id="modeCards">
+      <div class="mode-card selected" data-mode="local">
+        <h4>Same Screen</h4>
+        <p>Two players, one device, pass and play.</p>
       </div>
+      <div class="mode-card" data-mode="host">
+        <h4>Host Online</h4>
+        <p>Create a room and share the code with a friend on another device.</p>
+      </div>
+      <div class="mode-card" data-mode="join">
+        <h4>Join Online</h4>
+        <p>Enter a friend's room code to play from your own device.</p>
+      </div>
+      <div class="mode-card" data-mode="demo">
+        <h4>Demo</h4>
+        <p>Sit back and watch two bots duel it out automatically.</p>
+      </div>
+    </div>
+    <select id="gameMode" class="hidden">
+      <option value="local">Same screen (hotseat)</option>
+      <option value="host">Online — Host a room</option>
+      <option value="join">Online — Join a room</option>
+      <option value="demo">Demo — watch two bots play</option>
+    </select>
+
+    <div class="row" style="margin-top:14px;align-items:flex-end">
       <div class="col">
         <label>Bot thinking speed</label>
         <select id="botSpeed">
@@ -242,6 +312,9 @@
           <option value="fast">Fast</option>
           <option value="instant">Instant</option>
         </select>
+      </div>
+      <div class="col" style="flex:0">
+        <div class="sound-toggle on" id="soundToggle">Sound: On</div>
       </div>
     </div>
 
@@ -315,8 +388,21 @@
     <div id="hud" class="card-panel">
       <div class="stat-block" id="playerCards"></div>
       <div style="text-align:right">
-        <div style="color:var(--muted);font-size:13px">Round</div>
-        <div style="font-size:26px;font-weight:800" id="roundLabel">1 / 6</div>
+        <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end">
+          <div class="sound-toggle on" id="soundToggleGame">Sound: On</div>
+          <div>
+            <div style="color:var(--muted);font-size:13px">Round</div>
+            <div style="font-size:26px;font-weight:800" id="roundLabel">1 / 6</div>
+          </div>
+        </div>
+        <div class="round-stepper" id="roundStepper" style="justify-content:flex-end;margin-top:6px"></div>
+      </div>
+    </div>
+
+    <div class="card-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+        <div class="influence-track" id="influenceTrack" style="flex:1;min-width:220px"></div>
+        <div class="turn-banner" id="turnBanner"></div>
       </div>
     </div>
 
@@ -421,6 +507,66 @@ const LOCATIONS = [
 const TOTAL_ROUNDS = 6;
 const CAPS = {credits:8, ore:6, troops:6};
 let BOT_TICK_MS = 500;
+
+/* ------------------------------ Sound ------------------------------
+   Tiny synthesized sound effects via Web Audio - no external asset files.
+   Browsers block audio until a user gesture, so the AudioContext is only
+   created/resumed lazily on first use (which always happens inside a
+   click handler somewhere in this app). */
+let audioCtx = null;
+let soundOn = localStorage.getItem('od_sound') !== 'off';
+
+function ensureAudioCtx(){
+  if(!audioCtx){
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(!Ctx) return null;
+    audioCtx = new Ctx();
+  }
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function beep(freq, durationMs, type, volume, delayMs){
+  if(!soundOn) return;
+  try{
+    const ctx = ensureAudioCtx();
+    if(!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    const startAt = ctx.currentTime + (delayMs||0)/1000;
+    gain.gain.setValueAtTime(volume||0.12, startAt);
+    gain.gain.exponentialRampToValueAtTime(0.001, startAt + durationMs/1000);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(startAt);
+    osc.stop(startAt + durationMs/1000 + 0.03);
+  }catch(e){ /* audio unavailable - fail silently, sound is cosmetic */ }
+}
+
+const sfx = {
+  click: ()=> beep(520, 70, 'triangle', 0.12),
+  diceTick: ()=> beep(260+Math.random()*140, 35, 'square', 0.05),
+  diceSettle: ()=>{ beep(180,160,'sawtooth',0.18); beep(360,160,'sawtooth',0.12,50); },
+  gain: ()=>{ beep(700,90,'sine',0.12); beep(950,120,'sine',0.09,60); },
+  win: ()=> [523,659,784,1047].forEach((f,i)=> beep(f,190,'triangle',0.15,i*95)),
+  lose: ()=> [392,330,262].forEach((f,i)=> beep(f,240,'sine',0.13,i*130)),
+};
+
+function setSoundUI(){
+  [document.getElementById('soundToggle'), document.getElementById('soundToggleGame')].forEach(el=>{
+    if(!el) return;
+    el.textContent = `Sound: ${soundOn?'On':'Off'}`;
+    el.classList.toggle('on', soundOn);
+  });
+}
+function toggleSound(){
+  soundOn = !soundOn;
+  localStorage.setItem('od_sound', soundOn?'on':'off');
+  ensureAudioCtx();
+  setSoundUI();
+  if(soundOn) sfx.click();
+}
 
 const RULES_HTML = `
   <p><b>Objective.</b> Play 6 rounds. Whoever has the most Influence at the end wins. Equal Influence is a draw.</p>
@@ -536,6 +682,7 @@ function wsUrl(){
 
 function updateModeUI(){
   const mode = document.getElementById('gameMode').value;
+  document.querySelectorAll('.mode-card').forEach(c=> c.classList.toggle('selected', c.dataset.mode===mode));
   document.getElementById('onlinePanel').classList.toggle('hidden', mode!=='host' && mode!=='join');
   document.getElementById('hostPanel').classList.toggle('hidden', mode!=='host');
   document.getElementById('joinPanel').classList.toggle('hidden', mode!=='join');
@@ -1140,6 +1287,7 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
   const interval = setInterval(()=>{
     dieAgg.textContent = String(1+Math.floor(Math.random()*6));
     dieDef.textContent = String(1+Math.floor(Math.random()*6));
+    sfx.diceTick();
   }, tickMs);
 
   setTimeout(()=>{
@@ -1149,6 +1297,7 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
     dieDef.textContent = String(defRoll);
     dieAgg.classList.remove('rolling'); dieAgg.classList.add('settled');
     dieDef.classList.remove('rolling'); dieDef.classList.add('settled');
+    sfx.diceSettle();
     const resultEl = document.getElementById('diceResultArea');
     if(resultEl){
       let verdict;
@@ -1214,6 +1363,7 @@ document.addEventListener('keydown', (e)=>{
    animation can finish and remove it without being interrupted by a
    re-render, then it removes itself once the animation ends. */
 function popupGain(playerIdx, text, good){
+  if(good) sfx.gain();
   const cardEl = document.querySelector(`#playerCards .player-card.p${playerIdx+1}`);
   if(!cardEl) return;
   const rect = cardEl.getBoundingClientRect();
@@ -1246,10 +1396,53 @@ function renderAll(){
   renderHud();
   renderBoard();
   renderHand();
+  renderInfluenceTrack();
+  renderRoundStepper();
+  renderTurnBanner();
   document.getElementById('roundLabel').textContent = `${state.round} / ${TOTAL_ROUNDS}`;
   const phaseNames = {draw:'Drawing cards…', draft:'Drafting the board', 'skirmish-decide':'Skirmish decision', 'skirmish-commit':'Skirmish in progress', ended:'Game over'};
   document.getElementById('phaseLabel').textContent = phaseNames[state.phase] ? `— ${phaseNames[state.phase]}` : '';
   if(online.enabled && online.isHost) wsSend({type:'state', state});
+}
+
+function renderInfluenceTrack(){
+  const el = document.getElementById('influenceTrack');
+  if(!el) return;
+  const [p1,p2] = state.players;
+  const maxScale = Math.max(20, p1.influence, p2.influence, 1) + 4;
+  el.innerHTML = [p1,p2].map((p,i)=>`
+    <div class="track-row">
+      <div class="track-label">${p.name}</div>
+      <div class="track-bar"><div class="track-fill p${i+1}" style="width:${Math.min(100, p.influence/maxScale*100)}%"></div></div>
+      <div class="track-value">${p.influence}</div>
+    </div>`).join('');
+}
+
+function renderRoundStepper(){
+  const el = document.getElementById('roundStepper');
+  if(!el) return;
+  const parts = [];
+  for(let n=1; n<=TOTAL_ROUNDS; n++){
+    const cls = n<state.round || state.phase==='ended' ? 'done' : n===state.round ? 'active' : '';
+    if(n>1) parts.push(`<div class="connector ${n-1<state.round?'done':''}"></div>`);
+    parts.push(`<div class="step ${cls}">${n}</div>`);
+  }
+  el.innerHTML = parts.join('');
+}
+
+function renderTurnBanner(){
+  const el = document.getElementById('turnBanner');
+  if(!el) return;
+  const activeIdx = currentPicker();
+  if(state.phase==='draft' && activeIdx!==null){
+    const player = state.players[activeIdx];
+    const isMe = online.enabled ? activeIdx===online.myIndex : player.type==='human';
+    el.innerHTML = isMe ? `<b>Your turn</b> to draft a site.` : `Waiting on <b>${player.name}</b> to draft...`;
+  } else if(state.phase==='skirmish-decide' || state.phase==='skirmish-commit'){
+    el.innerHTML = `<b>Skirmish</b> in progress...`;
+  } else {
+    el.innerHTML = '';
+  }
 }
 
 function renderHud(){
@@ -1314,7 +1507,7 @@ function renderBoard(){
 
   if(humanCanPick){
     el.querySelectorAll('.tier-btn').forEach(btn=>{
-      btn.onclick = (e)=>{ e.stopPropagation(); humanPick(btn.dataset.loc, btn.dataset.tier); };
+      btn.onclick = (e)=>{ e.stopPropagation(); sfx.click(); humanPick(btn.dataset.loc, btn.dataset.tier); };
     });
   }
 }
@@ -1354,15 +1547,38 @@ function showEndScreen(){
   const end = document.getElementById('endScreen');
   end.classList.remove('hidden');
   const [p1,p2] = state.players;
-  let headline;
-  if(p1.influence===p2.influence) headline = "It's a draw!";
-  else headline = `${p1.influence>p2.influence?p1.name:p2.name} wins!`;
+  let headline, winnerIdx;
+  if(p1.influence===p2.influence){ headline = "It's a draw!"; winnerIdx = -1; }
+  else if(p1.influence>p2.influence){ headline = `${p1.name} wins!`; winnerIdx = 0; }
+  else { headline = `${p2.name} wins!`; winnerIdx = 1; }
+
+  if(winnerIdx!==-1){
+    if(!online.enabled || winnerIdx===online.myIndex) sfx.win();
+    else sfx.lose();
+  }
+
+  function statRow(label, key, fmt){
+    const v1 = fmt ? fmt(p1[key]) : p1[key];
+    const v2 = fmt ? fmt(p2[key]) : p2[key];
+    return `<tr><td>${label}</td><td>${v1}</td><td>${v2}</td></tr>`;
+  }
+
   end.innerHTML = `
     <h1>${headline}</h1>
     <div class="row" style="justify-content:center">
       <div class="player-card p1"><div class="name">${p1.name}<span class="influence-badge">${p1.influence} Influence</span></div></div>
       <div class="player-card p2"><div class="name">${p2.name}<span class="influence-badge">${p2.influence} Influence</span></div></div>
     </div>
+    <table class="stats-table">
+      <thead><tr><th>Final tally</th><th>${p1.name}</th><th>${p2.name}</th></tr></thead>
+      <tbody>
+        ${statRow('Influence','influence')}
+        ${statRow('Credits','credits')}
+        ${statRow('Ore','ore')}
+        ${statRow('Troops','troops')}
+        ${statRow('Cards in hand','hand',h=>h.length)}
+      </tbody>
+    </table>
     <div class="footer-actions" style="justify-content:center;margin-top:20px">
       <button id="playAgain">Play Again</button>
     </div>
@@ -1384,8 +1600,30 @@ function showEndScreen(){
   }
 }
 
-document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('startBtn').addEventListener('click', ()=>{ ensureAudioCtx(); sfx.click(); startGame(); });
 document.getElementById('gameMode').addEventListener('change', updateModeUI);
+
+document.querySelectorAll('.mode-card').forEach(card=>{
+  card.addEventListener('click', ()=>{
+    ensureAudioCtx();
+    document.getElementById('gameMode').value = card.dataset.mode;
+    document.querySelectorAll('.mode-card').forEach(c=>c.classList.remove('selected'));
+    card.classList.add('selected');
+    updateModeUI();
+  });
+});
+
+document.getElementById('soundToggle').addEventListener('click', toggleSound);
+document.getElementById('soundToggleGame').addEventListener('click', toggleSound);
+setSoundUI();
+
+window.addEventListener('beforeunload', (e)=>{
+  const gameVisible = !document.getElementById('game').classList.contains('hidden');
+  if(state && state.phase!=='ended' && gameVisible){
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 
 document.getElementById('createRoomBtn').addEventListener('click', ()=>{
   document.getElementById('hostStatus').textContent = 'Connecting…';
