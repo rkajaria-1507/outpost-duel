@@ -188,6 +188,10 @@
   .footer-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:10px;}
   .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;margin-left:6px;}
   .pill.aggr{background:var(--gold);color:#1a1508;}
+  .objective-line{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4;}
+  .objective-line b{color:var(--gold);}
+  .obj-status{font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);}
+  .obj-status.met{color:var(--good);}
 
   /* --- Setup: mode cards --- */
   .mode-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:4px;}
@@ -687,6 +691,8 @@ const RULES_HTML = `
     <li>Higher total wins. The winner gains Influence equal to the margin between the two totals, capped at 4 Influence. A tie means no Influence changes hands, but both sides still lose their committed Troops. Cards like Fortify, Berserker, Scout, and Sabotage apply their effect regardless of who wins.</li>
   </ol>
 
+  <p><b>Objectives.</b> Each player is randomly dealt one Objective at the start of the game - visible to both sides in the HUD, so you can see exactly what your opponent is racing for (and decide whether to deny it to them). Fulfilling your Objective by the end of Round 6 grants a bonus to Influence on top of everything else, so the board fight is only half the game.</p>
+
   <p><b>Ways to play.</b> Same screen: two people share one device and take turns. Online: one person hosts a room and gets a short code, the other joins with that code to play from a separate device. Demo: both seats are bots and the game plays itself automatically at your choice of speed, optionally looping into a new game when one ends.</p>
 `;
 
@@ -710,8 +716,28 @@ function makePlayer(name, type){
     credits:2, ore:1, troops:1, influence:0,
     deck: makeDeck(), discard:[], hand:[],
     isAggressor:false, aggressorBonus:0,
+    skirmishWins:0, skirmishLosses:0, advancedPicks:0,
+    // Store only the id - the full definition (with its check function) can't
+    // survive JSON.stringify over the online-play WebSocket relay, so it's
+    // looked back up from the shared client-side OBJECTIVES array instead.
+    objectiveId: OBJECTIVES[Math.floor(Math.random()*OBJECTIVES.length)].id,
   };
 }
+function getObjective(player){
+  return OBJECTIVES.find(o=>o.id===player.objectiveId);
+}
+
+/* Public race-condition objectives - both players can see both targets, which
+   adds tension (deny the site your opponent needs) without requiring any
+   hidden-information plumbing over the network relay. */
+const OBJECTIVES = [
+  {id:'warlord',       name:'Warlord',       desc:'Win 3 or more Skirmishes.',                         bonus:4, check:p=> p.skirmishWins>=3},
+  {id:'unscathed',     name:'Unscathed',     desc:'Fight at least one Skirmish and never lose one.',    bonus:4, check:p=> (p.skirmishWins+p.skirmishLosses)>0 && p.skirmishLosses===0},
+  {id:'industrialist', name:'Industrialist', desc:'Take the Advanced tier 4 or more times.',            bonus:4, check:p=> p.advancedPicks>=4},
+  {id:'financier',     name:'Financier',     desc:'End the game with 7 or more Credits.',               bonus:4, check:p=> p.credits>=7},
+  {id:'prospector',    name:'Prospector',    desc:'End the game with 6 or more Ore.',                   bonus:4, check:p=> p.ore>=6},
+  {id:'archivist',     name:'Archivist',     desc:'End the game with 5 or more cards in hand.',         bonus:4, check:p=> p.hand.length>=5},
+];
 
 function log(msg){
   state.logEntries.push(msg);
@@ -1021,6 +1047,7 @@ function applyLocationEffect(playerIdx, locId, tier){
   const player = state.players[playerIdx];
   state.board[locId] = {owner:playerIdx, tier};
   state.pickQueue.shift();
+  if(tier==='advanced') player.advancedPicks++;
 
   switch(locId){
     case 'market': {
@@ -1319,6 +1346,7 @@ function resolveSkirmish(){
       const winner = aggWins ? aggressor : defender;
       const loser = aggWins ? defender : aggressor;
       const loserCommit = aggWins ? defCommit : aggCommit;
+      winner.skirmishWins++; loser.skirmishLosses++;
       let margin = Math.abs(aggTotal-defTotal);
 
       if(loserCommit.card==='guard') margin = Math.max(0, margin-1);
@@ -1423,6 +1451,13 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
 function endRound(){
   state.players.forEach(applyCaps);
   if(state.round >= TOTAL_ROUNDS){
+    state.players.forEach(p=>{
+      const obj = getObjective(p);
+      if(obj && obj.check(p)){
+        p.influence += obj.bonus;
+        log(`${p.name} completes their objective <b>${obj.name}</b> -> +${obj.bonus} Influence.`);
+      }
+    });
     state.phase = 'ended';
     renderAll();
     showEndScreen();
@@ -1556,6 +1591,7 @@ function renderHud(){
   el.innerHTML = state.players.map((p,i)=>{
     const activeIdx = currentPicker();
     const isActive = state.phase==='draft' && activeIdx===i;
+    const obj = getObjective(p);
     return `
     <div class="player-card p${i+1} ${isActive?'active':''}">
       <div class="name"><span>${p.name} ${p.type==='bot'?'(Bot)':''}</span><span class="influence-badge">${p.influence} Influence</span></div>
@@ -1566,6 +1602,7 @@ function renderHud(){
         <span>Cards: ${p.hand.length}</span>
         ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
       </div>
+      ${obj?`<div class="objective-line">Objective: <b>${obj.name}</b> - ${obj.desc} <span class="obj-status ${obj.check(p)?'met':''}">${obj.check(p)?'met':'not yet'}</span></div>`:''}
     </div>`;
   }).join('');
 }
@@ -1663,6 +1700,7 @@ function showEndScreen(){
   const end = document.getElementById('endScreen');
   end.classList.remove('hidden');
   const [p1,p2] = state.players;
+  const obj1 = getObjective(p1), obj2 = getObjective(p2);
   let headline, winnerIdx;
   if(p1.influence===p2.influence){ headline = "It's a draw!"; winnerIdx = -1; }
   else if(p1.influence>p2.influence){ headline = `${p1.name} wins!`; winnerIdx = 0; }
@@ -1693,6 +1731,7 @@ function showEndScreen(){
         ${statRow('Ore','ore')}
         ${statRow('Troops','troops')}
         ${statRow('Cards in hand','hand',h=>h.length)}
+        <tr><td>Objective</td><td>${obj1.name}${obj1.check(p1)?' (met, +'+obj1.bonus+')':''}</td><td>${obj2.name}${obj2.check(p2)?' (met, +'+obj2.bonus+')':''}</td></tr>
       </tbody>
     </table>
     <div class="footer-actions" style="justify-content:center;margin-top:20px">
