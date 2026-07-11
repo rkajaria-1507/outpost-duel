@@ -10,24 +10,32 @@
     --p1:#ef5b50; --p1-dim:#4a2320; --p2:#4a93ff; --p2-dim:#1a2c47;
     --gold:#f0c85a; --gold-dim:#5a4a1e; --text:#eef1f8; --muted:#8d97ad; --good:#52c98a; --bad:#ef5b50;
     --adv:#c77dff;
+    /* Tabletop theme: warm parchment cards/tiles and ivory dice on a wood table */
+    --wood-light:#8a6238; --wood-mid:#5a3d22; --wood-dark:#3a2712;
+    --felt:#1f4d3a; --felt-dark:#132e21;
+    --parchment:#f3e6c8; --parchment-2:#e8d6ab; --parchment-line:#b89355;
+    --ink:#2a1f12; --ink-soft:#4a3418; --ink-muted:#6b5636;
+    --font-display: Georgia, 'Palatino Linotype', 'Book Antiqua', serif;
   }
   *{box-sizing:border-box;}
   body{
     margin:0; font-family:"Segoe UI",Tahoma,sans-serif; color:var(--text); min-height:100vh; padding:20px;
+    /* A wood game-table under everything - the strongest single signal of "board game" */
     background:
-      radial-gradient(ellipse 900px 500px at 15% -5%, rgba(240,200,90,.10), transparent 60%),
-      radial-gradient(ellipse 900px 600px at 85% 0%, rgba(74,147,255,.10), transparent 60%),
-      radial-gradient(ellipse 1200px 800px at 50% 110%, rgba(239,91,80,.08), transparent 60%),
-      linear-gradient(180deg,#0d1220,#080b12 60%);
+      repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0px, rgba(0,0,0,.05) 1px, transparent 1px, transparent 5px),
+      radial-gradient(ellipse 1100px 650px at 50% -8%, rgba(240,200,90,.09), transparent 60%),
+      radial-gradient(ellipse 900px 700px at 100% 100%, rgba(0,0,0,.35), transparent 55%),
+      linear-gradient(160deg, #3a2712, #26190d 55%, #180f07);
     background-attachment:fixed;
   }
+  h1,h2,h3,.title-banner h1,.loc h3,.tcard b,.player-card .name,.dice-col .who{ font-family: var(--font-display); }
   h1,h2,h3{margin:0 0 8px;}
   .wrap{max-width:1160px;margin:0 auto;}
   .hidden{display:none !important;}
   .card-panel{
     background:linear-gradient(180deg,var(--panel),#131a28);
-    border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px;
-    box-shadow:0 6px 24px rgba(0,0,0,.25);
+    border:1px solid var(--gold-dim);border-radius:14px;padding:18px;margin-bottom:16px;
+    box-shadow:0 8px 24px rgba(0,0,0,.4);
   }
   button{
     font-family:inherit;cursor:pointer;border:none;border-radius:8px;padding:10px 16px;
@@ -78,29 +86,33 @@
   .influence-badge{font-weight:800;color:var(--gold);}
   /* Board */
   #boardFrame{
-    position:relative;border:3px solid var(--gold-dim);border-radius:16px;padding:18px;
+    position:relative;border-radius:18px;padding:20px;
+    border:10px solid var(--wood-mid);
+    border-image:linear-gradient(135deg,var(--wood-light),var(--wood-mid) 45%,var(--wood-dark)) 1;
     background:
-      radial-gradient(ellipse at 25% 15%, rgba(240,200,90,.07), transparent 55%),
-      radial-gradient(ellipse at 80% 85%, rgba(74,147,255,.06), transparent 55%),
-      linear-gradient(160deg,#1a2233,#12172455);
-    box-shadow: inset 0 0 40px rgba(0,0,0,.35);
+      radial-gradient(ellipse at 30% 10%, rgba(240,200,90,.10), transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(0,0,0,.35), transparent 60%),
+      linear-gradient(160deg, var(--felt), var(--felt-dark) 80%);
+    box-shadow: inset 0 0 50px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.5);
   }
   #boardFrame::before{
-    content:'';position:absolute;inset:6px;border:1px solid rgba(240,200,90,.25);border-radius:11px;pointer-events:none;
+    content:'';position:absolute;inset:8px;border:1px solid rgba(240,200,90,.25);border-radius:11px;pointer-events:none;
   }
   #board{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
   @media (max-width:820px){ #board{grid-template-columns:repeat(2,1fr);} }
   .loc{
-    border:2px solid var(--line);border-radius:12px;padding:12px;background:linear-gradient(160deg,var(--panel2),#161d2c);
+    border:2px solid var(--parchment-line);border-radius:10px;padding:12px;
+    background:linear-gradient(160deg,var(--parchment),var(--parchment-2));color:var(--ink);
+    box-shadow:0 4px 10px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.35);
     display:flex;flex-direction:column;gap:6px;min-height:150px;position:relative;transition:border-color .15s,transform .1s;
   }
   .loc.pickable{border-color:var(--gold);}
   .loc h3{display:flex;align-items:center;gap:8px;margin-bottom:2px;font-size:15px;}
   .tier-row{
     display:flex;justify-content:space-between;align-items:center;gap:8px;
-    background:rgba(0,0,0,.22);border-radius:8px;padding:6px 8px;font-size:12px;
+    background:rgba(20,15,8,.82);color:#f3e6c8;border-radius:8px;padding:6px 8px;font-size:12px;
   }
-  .tier-row.advanced{background:rgba(199,125,255,.12);border:1px solid rgba(199,125,255,.35);}
+  .tier-row.advanced{background:rgba(60,20,80,.72);border:1px solid rgba(199,125,255,.45);}
   .tier-tag{font-size:10px;font-weight:800;letter-spacing:.5px;padding:1px 6px;border-radius:20px;}
   .tier-tag.basic{background:#33415c;color:var(--text);}
   .tier-tag.advanced{background:var(--adv);color:#1a0d2a;}
@@ -118,16 +130,18 @@
   /* Hand */
   #hand{display:flex;gap:10px;flex-wrap:wrap;}
   .tcard{
-    border:1px solid var(--line);background:linear-gradient(160deg,var(--panel2),#151b29);border-radius:10px;padding:10px;
-    width:160px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.25);
+    border:2px solid var(--parchment-line);border-radius:12px;padding:11px;
+    background:linear-gradient(160deg,var(--parchment),var(--parchment-2));color:var(--ink);
+    width:150px;min-height:150px;font-size:13px;
+    box-shadow:0 3px 8px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.4);
   }
-  .tcard b{color:var(--gold);}
-  .tcard-top{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+  .tcard b{color:var(--ink-soft);}
+  .tcard-top{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
   .tcard-power{
-    background:var(--gold);color:#1a1508;font-weight:800;font-size:12px;
+    background:var(--ink-soft);color:var(--parchment);font-weight:800;font-size:12px;
     padding:1px 7px;border-radius:6px;flex-shrink:0;min-width:22px;text-align:center;
   }
-  .tcard-desc{color:var(--text);opacity:.9;line-height:1.4;}
+  .tcard-desc{color:var(--ink);opacity:.85;line-height:1.4;}
   .hand-group{width:100%;margin-bottom:10px;}
   .hand-group-label{
     font-size:11px;font-weight:800;letter-spacing:.8px;color:var(--gold);
@@ -158,10 +172,14 @@
   .troop-picker input[type=range]{flex:1;}
   .card-select{display:flex;flex-wrap:wrap;margin:10px 0;}
   .card-select .opt{
-    border:1px solid var(--line);border-radius:8px;padding:8px;cursor:pointer;font-size:12px;width:140px;background:var(--panel2);
+    border:2px solid var(--parchment-line);border-radius:10px;padding:9px;cursor:pointer;font-size:12px;width:150px;
+    background:linear-gradient(160deg,var(--parchment),var(--parchment-2));color:var(--ink);
+    box-shadow:0 2px 6px rgba(0,0,0,.3);
   }
-  .card-select .opt:hover{border-color:var(--gold);}
-  .card-select .opt.selected{border-color:var(--gold);background:#3a3013;}
+  .card-select .opt .tcard-desc{color:var(--ink);opacity:.85;}
+  .card-select .opt b{color:var(--ink-soft);}
+  .card-select .opt:hover{border-color:var(--gold);transform:translateY(-1px);}
+  .card-select .opt.selected{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold), 0 2px 6px rgba(0,0,0,.3);}
   #endScreen{text-align:center;padding:44px 20px;}
   #endScreen h1{
     font-size:38px;
@@ -234,9 +252,10 @@
   .dice-card b{color:var(--adv);}
   .die{
     width:64px;height:64px;border-radius:14px;margin:0 auto;
-    background:linear-gradient(160deg,#fff,#d8dce4);color:#161226;
+    background:linear-gradient(160deg,#fff8ec,#e6d9b8);color:var(--ink);
+    font-family:var(--font-display);
     font-size:30px;font-weight:800;display:flex;align-items:center;justify-content:center;
-    box-shadow:0 6px 16px rgba(0,0,0,.45), inset 0 0 0 2px #c3c8d4;
+    box-shadow:0 6px 16px rgba(0,0,0,.5), inset 0 0 0 2px var(--parchment-line);
   }
   .die.rolling{ animation: dieShake .12s linear infinite; }
   .die.settled{ animation: dieSettle .45s cubic-bezier(.34,1.56,.64,1); }
