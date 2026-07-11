@@ -142,7 +142,7 @@
 
   <!-- SETUP SCREEN -->
   <div id="setup" class="card-panel">
-    <div class="title-banner"><h1>⚔️ Outpost Duel</h1></div>
+    <div class="title-banner"><h1>Outpost Duel</h1></div>
     <p class="subtitle">Two rival outposts, six rounds, one Influence track. Eight contested sites, each with a basic and an advanced tier — draft wisely, gamble on the Skirmish. Skill sets you up, the dice decide the margin.</p>
 
     <div class="row">
@@ -225,19 +225,14 @@
     </div>
 
     <details style="margin-top:14px;color:var(--muted);font-size:13px">
-      <summary style="cursor:pointer">How to play</summary>
-      <div style="margin-top:8px;line-height:1.6">
-        <b>Goal:</b> Most Influence after 6 rounds wins.<br>
-        <b>Each round:</b> draw 2 Tactic cards → draft the 8 board slots (3 picks each, snake order — 2 slots go unused every round, so choosing what to skip matters) → resolve a Skirmish if someone took the Garrison → resources cap and the round ends.<br>
-        <b>Board:</b> every site offers a free <b>Basic</b> action and a pricier <b>Advanced</b> one with a bigger payoff — Market, Quarry, Garrison, Outpost, Archive, Foundry, Bazaar, Shrine. Eight sites, sixteen ways to play them.<br>
-        <b>Skirmish:</b> the Aggressor may attack. Both sides commit troops (spent either way) and may play one hidden Tactic card as a modifier. 1d6 + troops + card modifier (+ Garrison Advanced bonus) per side — higher total wins Influence equal to the margin (capped at 4).
-      </div>
+      <summary style="cursor:pointer">Full Rules</summary>
+      <div id="rulesContent" style="margin-top:10px;line-height:1.7"></div>
     </details>
   </div>
 
   <!-- GAME SCREEN -->
   <div id="game" class="hidden">
-    <div id="demoBanner" class="hidden">🤖 DEMO MODE — two bots duel it out 🤖</div>
+    <div id="demoBanner" class="hidden">DEMO MODE — two bots duel it out</div>
     <div id="hud" class="card-panel">
       <div class="stat-block" id="playerCards"></div>
       <div style="text-align:right">
@@ -247,8 +242,11 @@
     </div>
 
     <div class="card-panel">
-      <h3>Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
-      <div id="board"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
+        <button type="button" class="secondary" id="rulesBtn">Rules</button>
+      </div>
+      <div id="board" style="margin-top:10px"></div>
     </div>
 
     <div class="card-panel">
@@ -295,35 +293,85 @@ const DECK_TEMPLATE = Object.keys(CARD_DEFS);
 /* Eight sites, each with a free Basic action and a pricier Advanced one —
    sixteen meaningful choices on an eight-slot board. */
 const LOCATIONS = [
-  {id:'market',   name:'Market',   icon:'🏪',
+  {id:'market',   name:'Market',
     basic:{label:'+3 Credits'},
     advanced:{label:'+6 Credits', cost:{ore:1}, note:'pay 1 Ore'}},
-  {id:'quarry',   name:'Quarry',   icon:'⛏️',
+  {id:'quarry',   name:'Quarry',
     basic:{label:'+2 Ore, +1 Troop'},
     advanced:{label:'+4 Ore, +2 Troops', cost:{credits:1}, note:'pay 1 Credit'}},
-  {id:'garrison', name:'Garrison', icon:'🛡️',
-    basic:{label:'+2 Troops · become Aggressor'},
-    advanced:{label:'+4 Troops · Aggressor +1 combat', cost:{ore:1}, note:'pay 1 Ore'}},
-  {id:'outpost',  name:'Outpost',  icon:'🏛️',
-    basic:{label:'Pay 3c+2o → +4 Influence'},
-    advanced:{label:'Pay 5c+3o → +7 Influence', cost:{}, note:'big investment'}},
-  {id:'archive',  name:'Archive',  icon:'📜',
+  {id:'garrison', name:'Garrison',
+    basic:{label:'+2 Troops, become Aggressor'},
+    advanced:{label:'+4 Troops, Aggressor gets +1 combat', cost:{ore:1}, note:'pay 1 Ore'}},
+  {id:'outpost',  name:'Outpost',
+    basic:{label:'Pay 3 Credits + 2 Ore -> +4 Influence'},
+    advanced:{label:'Pay 5 Credits + 3 Ore -> +7 Influence', cost:{}, note:'big investment'}},
+  {id:'archive',  name:'Archive',
     basic:{label:'Draw 1 Tactic card'},
     advanced:{label:'Draw 3 Tactic cards', cost:{credits:1}, note:'pay 1 Credit'}},
-  {id:'foundry',  name:'Foundry',  icon:'🔨',
+  {id:'foundry',  name:'Foundry',
     basic:{label:'+2 Credits, +1 Ore'},
     advanced:{label:'+4 Credits, +3 Ore', cost:{troops:1}, note:'pay 1 Troop'}},
-  {id:'bazaar',   name:'Bazaar',   icon:'💱',
-    basic:{label:'Trade 2 Ore → 3 Credits'},
-    advanced:{label:'Trade 2 Ore → 6 Credits', cost:{}, note:'needs 2 Ore'}},
-  {id:'shrine',   name:'Shrine',   icon:'⛩️',
+  {id:'bazaar',   name:'Bazaar',
+    basic:{label:'Trade 2 Ore for 3 Credits'},
+    advanced:{label:'Trade 2 Ore for 6 Credits', cost:{}, note:'needs 2 Ore'}},
+  {id:'shrine',   name:'Shrine',
     basic:{label:'+1 Influence'},
-    advanced:{label:'Pay 2c+1o → +3 Influence', cost:{}, note:'devotion rite'}},
+    advanced:{label:'Pay 2 Credits + 1 Ore -> +3 Influence', cost:{}, note:'devotion rite'}},
 ];
 
 const TOTAL_ROUNDS = 6;
 const CAPS = {credits:8, ore:6, troops:6};
 let BOT_TICK_MS = 500;
+
+const RULES_HTML = `
+  <p><b>Objective.</b> Play 6 rounds. Whoever has the most Influence at the end wins. Equal Influence is a draw.</p>
+
+  <p><b>Setup.</b> Each player starts with 2 Credits, 1 Ore, 1 Troop, 0 Influence, and a personal deck of 8 different Tactic cards (shuffled). Resource caps apply at all times: Credits max 8, Ore max 6, Troops max 6 - anything above the cap is lost at the end of a round.</p>
+
+  <p><b>Each round has four steps, in order:</b></p>
+  <ol>
+    <li><b>Draw.</b> Both players draw 2 Tactic cards from their own deck.</li>
+    <li><b>Draft.</b> The 8 board sites are drafted one pick at a time, 3 picks per player (6 picks total), in snake order: first player, second player, second player, first player, first player, second player. Two sites always go unused each round, so deciding what to skip is a real decision. The player who drafts first alternates every round. Taking a site immediately resolves its action for either its Basic tier (free) or its Advanced tier (costs extra resources, bigger payoff) - see Board Sites below.</li>
+    <li><b>Skirmish.</b> If a player took the Garrison this round, they become the Aggressor and may choose to attack the other player (the Defender). See Skirmish below. If nobody took the Garrison, this step is skipped.</li>
+    <li><b>Upkeep.</b> Resources above the caps are discarded, and the next round begins.</li>
+  </ol>
+
+  <p><b>Board Sites (Basic tier / Advanced tier):</b></p>
+  <ul>
+    <li><b>Market</b> - Basic: +3 Credits. Advanced (pay 1 Ore): +6 Credits.</li>
+    <li><b>Quarry</b> - Basic: +2 Ore and +1 Troop. Advanced (pay 1 Credit): +4 Ore and +2 Troops.</li>
+    <li><b>Garrison</b> - Basic: +2 Troops, become Aggressor this round. Advanced (pay 1 Ore): +4 Troops, become Aggressor with a permanent +1 bonus to your Skirmish total this round.</li>
+    <li><b>Outpost</b> - Basic: pay 3 Credits + 2 Ore for +4 Influence (if you can't afford it, +1 Influence instead). Advanced: pay 5 Credits + 3 Ore for +7 Influence (if you can't afford it, +2 Influence instead).</li>
+    <li><b>Archive</b> - Basic: draw 1 Tactic card. Advanced (pay 1 Credit): draw 3 Tactic cards.</li>
+    <li><b>Foundry</b> - Basic: +2 Credits and +1 Ore. Advanced (pay 1 Troop): +4 Credits and +3 Ore.</li>
+    <li><b>Bazaar</b> - Basic: trade 2 Ore for 3 Credits (if you don't have 2 Ore, +1 Credit instead). Advanced: trade 2 Ore for 6 Credits (if you don't have 2 Ore, +2 Credits instead).</li>
+    <li><b>Shrine</b> - Basic: +1 Influence, free. Advanced: pay 2 Credits + 1 Ore for +3 Influence (if you can't afford it, +1 Influence instead).</li>
+  </ul>
+
+  <p><b>Tactic Cards.</b> Your 8-card deck has one of each: Ambush, Feint, Rally, Overrun, Scout, Guard, Blitz, and Wildcard. They are only played face-down as a Skirmish modifier, never outside a Skirmish.</p>
+  <ul>
+    <li><b>Ambush</b> - +2 combat. If you still lose the Skirmish, you lose 1 extra Troop.</li>
+    <li><b>Feint</b> - +0 combat. If you lose, your committed Troops are returned to you instead of being lost.</li>
+    <li><b>Rally</b> - +1 combat. If you win, gain 1 extra bonus Influence.</li>
+    <li><b>Overrun</b> - +3 combat. Costs 1 Ore to play; if you have none, it acts as +0 instead.</li>
+    <li><b>Scout</b> - +1 combat. Draw 1 extra Tactic card after the Skirmish resolves.</li>
+    <li><b>Guard</b> - +1 combat. If you lose, reduce the winner's Influence gain from the margin by 1.</li>
+    <li><b>Blitz</b> - +2 combat if you are the Aggressor this round, otherwise +0.</li>
+    <li><b>Wildcard</b> - the modifier equals a fresh 6-sided die roll (1 to 6) each time it is played - high risk, high reward.</li>
+  </ul>
+
+  <p><b>Skirmish, step by step.</b></p>
+  <ol>
+    <li>The Aggressor decides whether to attack the Defender. Declining ends the round with no Skirmish.</li>
+    <li>If attacking, the Aggressor commits any number of their own Troops (from 0 up to everything they have) and may play one Tactic card face-down as a modifier.</li>
+    <li>The Defender does the same: commits any number of their Troops and may play one Tactic card face-down.</li>
+    <li>Committed Troops are spent by both sides no matter who wins (unless a card effect says otherwise, such as Feint).</li>
+    <li>Each side rolls one 6-sided die and adds: their committed Troops, their card's combat modifier, and (for the Aggressor only, if they took the Advanced Garrison this round) a further +1 bonus.</li>
+    <li>Higher total wins. The winner gains Influence equal to the margin between the two totals, capped at 4 Influence. A tie means no Influence changes hands, but both sides still lose their committed Troops.</li>
+  </ol>
+
+  <p><b>Ways to play.</b> Same screen: two people share one device and take turns. Online: one person hosts a room and gets a short code, the other joins with that code to play from a separate device. Demo: both seats are bots and the game plays itself automatically at your choice of speed, optionally looping into a new game when one ends.</p>
+`;
 
 let state = null;
 
@@ -636,21 +684,21 @@ function applyLocationEffect(playerIdx, locId, tier){
       const gain = tier==='advanced' ? 6 : 3;
       if(tier==='advanced') player.ore = Math.max(0, player.ore-1);
       player.credits += gain;
-      log(`${player.name} works the <b>Market</b> (${tier}) → +${gain} Credits${tier==='advanced'?' (paid 1 Ore)':''}.`);
+      log(`${player.name} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?' (paid 1 Ore)':''}.`);
       break;
     }
     case 'quarry': {
       const oreGain = tier==='advanced'?4:2, troopGain = tier==='advanced'?2:1;
       if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
       player.ore += oreGain; player.troops += troopGain;
-      log(`${player.name} works the <b>Quarry</b> (${tier}) → +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      log(`${player.name} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?' (paid 1 Credit)':''}.`);
       break;
     }
     case 'garrison': {
       const troopGain = tier==='advanced'?4:2;
       if(tier==='advanced'){ player.ore = Math.max(0, player.ore-1); player.aggressorBonus=1; } else { player.aggressorBonus=0; }
       player.troops += troopGain; player.isAggressor = true;
-      log(`${player.name} rallies the <b>Garrison</b> (${tier}) → +${troopGain} Troops. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
+      log(`${player.name} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
       break;
     }
     case 'outpost': {
@@ -659,10 +707,10 @@ function applyLocationEffect(playerIdx, locId, tier){
       const consolation = tier==='advanced' ? 2 : 1;
       if(player.credits>=need.credits && player.ore>=need.ore){
         player.credits-=need.credits; player.ore-=need.ore; player.influence+=reward;
-        log(`${player.name} invests in the <b>Outpost</b> (${tier}) → pays ${need.credits}c+${need.ore}o for +${reward} Influence.`);
+        log(`${player.name} invests in the <b>Outpost</b> (${tier}) -> pays ${need.credits} Credits + ${need.ore} Ore for +${reward} Influence.`);
       } else {
         player.influence += consolation;
-        log(`${player.name} eyes the <b>Outpost</b> (${tier}) but can't afford it → consolation +${consolation} Influence.`);
+        log(`${player.name} eyes the <b>Outpost</b> (${tier}) but can't afford it -> consolation +${consolation} Influence.`);
       }
       break;
     }
@@ -670,25 +718,25 @@ function applyLocationEffect(playerIdx, locId, tier){
       const draws = tier==='advanced' ? 3 : 1;
       if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
       drawCard(player, draws);
-      log(`${player.name} studies the <b>Archive</b> (${tier}) → draws ${draws} Tactic card${draws>1?'s':''}${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      log(`${player.name} studies the <b>Archive</b> (${tier}) -> draws ${draws} Tactic card${draws>1?'s':''}${tier==='advanced'?' (paid 1 Credit)':''}.`);
       break;
     }
     case 'foundry': {
       const crGain = tier==='advanced'?4:2, oreGain = tier==='advanced'?3:1;
       if(tier==='advanced') player.troops = Math.max(0, player.troops-1);
       player.credits += crGain; player.ore += oreGain;
-      log(`${player.name} runs the <b>Foundry</b> (${tier}) → +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?' (paid 1 Troop)':''}.`);
+      log(`${player.name} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?' (paid 1 Troop)':''}.`);
       break;
     }
     case 'bazaar': {
       const crGain = tier==='advanced'?6:3;
       if(player.ore>=2){
         player.ore-=2; player.credits+=crGain;
-        log(`${player.name} trades at the <b>Bazaar</b> (${tier}) → 2 Ore for +${crGain} Credits.`);
+        log(`${player.name} trades at the <b>Bazaar</b> (${tier}) -> trades 2 Ore for +${crGain} Credits.`);
       } else {
         const consolation = tier==='advanced'?2:1;
         player.credits += consolation;
-        log(`${player.name} visits the <b>Bazaar</b> (${tier}) without enough Ore → consolation +${consolation} Credits.`);
+        log(`${player.name} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credits.`);
       }
       break;
     }
@@ -697,14 +745,14 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(tier==='advanced'){
         if(player.credits>=2 && player.ore>=1){
           player.credits-=2; player.ore-=1; player.influence+=reward;
-          log(`${player.name} prays at the <b>Shrine</b> (advanced) → pays 2c+1o for +${reward} Influence.`);
+          log(`${player.name} prays at the <b>Shrine</b> (advanced) -> pays 2 Credits + 1 Ore for +${reward} Influence.`);
         } else {
           player.influence += 1;
-          log(`${player.name} can't afford the deep Shrine rite → +1 Influence instead.`);
+          log(`${player.name} can't afford the deep Shrine rite -> +1 Influence instead.`);
         }
       } else {
         player.influence += reward;
-        log(`${player.name} prays at the <b>Shrine</b> (basic) → +${reward} Influence.`);
+        log(`${player.name} prays at the <b>Shrine</b> (basic) -> +${reward} Influence.`);
       }
       break;
     }
@@ -926,7 +974,7 @@ function resolveSkirmish(){
       log(`${loser.name}'s own Ambush backfires — 1 extra Troop lost.`);
     }
 
-    log(`<b>${winner.name} wins the Skirmish</b> by ${Math.abs(aggTotal-defTotal)} (margin ${margin} after modifiers) → +${gained} Influence.`);
+    log(`<b>${winner.name} wins the Skirmish</b> by ${Math.abs(aggTotal-defTotal)} (margin ${margin} after modifiers) -> +${gained} Influence.`);
 
     [aggCommit,defCommit].forEach(c=>{
       if(c.card==='scout'){
@@ -988,12 +1036,12 @@ function renderHud(){
     const isActive = state.phase==='draft' && activeIdx===i;
     return `
     <div class="player-card p${i+1} ${isActive?'active':''}">
-      <div class="name"><span>${p.name} ${p.type==='bot'?'🤖':''}</span><span class="influence-badge">${p.influence} VP</span></div>
+      <div class="name"><span>${p.name} ${p.type==='bot'?'(Bot)':''}</span><span class="influence-badge">${p.influence} Influence</span></div>
       <div class="stats">
-        <span>₡ ${p.credits}</span>
-        <span>⛏ ${p.ore}</span>
-        <span>⚔ ${p.troops}</span>
-        <span>🂠 ${p.hand.length}</span>
+        <span>Credits: ${p.credits}</span>
+        <span>Ore: ${p.ore}</span>
+        <span>Troops: ${p.troops}</span>
+        <span>Cards: ${p.hand.length}</span>
         ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
       </div>
     </div>`;
@@ -1015,24 +1063,24 @@ function renderBoard(){
 
     let body;
     if(taken){
-      body = `<div class="taken-by p${taken.owner+1}">${state.players[taken.owner].name} — ${taken.tier==='advanced'?'Advanced':'Basic'}</div>`;
+      body = `<div class="taken-by p${taken.owner+1}">${state.players[taken.owner].name} (${taken.tier==='advanced'?'Advanced':'Basic'})</div>`;
     } else if(pickable){
       body = `
         <div class="tier-row"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span></div>
-        <div class="tier-row advanced"><span class="tier-tag advanced">ADV</span><span>${loc.advanced.label}</span></div>
+        <div class="tier-row advanced"><span class="tier-tag advanced">ADVANCED</span><span>${loc.advanced.label}</span></div>
         <div style="display:flex;gap:6px;margin-top:4px">
           <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic" style="flex:1">Take Basic</button>
-          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" style="flex:1" ${advAffordable?'':'disabled'}>Take Adv.${loc.advanced.note?` (${loc.advanced.note})`:''}</button>
+          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" style="flex:1" ${advAffordable?'':'disabled'}>Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}</button>
         </div>`;
     } else {
       body = `
         <div class="tier-row"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span></div>
-        <div class="tier-row advanced"><span class="tier-tag advanced">ADV</span><span>${loc.advanced.label}</span></div>`;
+        <div class="tier-row advanced"><span class="tier-tag advanced">ADVANCED</span><span>${loc.advanced.label}</span></div>`;
     }
 
     return `
       <div class="loc ${pickable?'pickable':''}" data-loc="${loc.id}">
-        <h3>${loc.icon} ${loc.name}</h3>
+        <h3>${loc.name}</h3>
         ${body}
       </div>`;
   }).join('');
@@ -1079,8 +1127,8 @@ function showEndScreen(){
   end.innerHTML = `
     <h1>${headline}</h1>
     <div class="row" style="justify-content:center">
-      <div class="player-card p1"><div class="name">${p1.name}<span class="influence-badge">${p1.influence} VP</span></div></div>
-      <div class="player-card p2"><div class="name">${p2.name}<span class="influence-badge">${p2.influence} VP</span></div></div>
+      <div class="player-card p1"><div class="name">${p1.name}<span class="influence-badge">${p1.influence} Influence</span></div></div>
+      <div class="player-card p2"><div class="name">${p2.name}<span class="influence-badge">${p2.influence} Influence</span></div></div>
     </div>
     <div class="footer-actions" style="justify-content:center;margin-top:20px">
       <button id="playAgain">Play Again</button>
@@ -1126,6 +1174,11 @@ document.getElementById('joinRoomBtn').addEventListener('click', ()=>{
   online.ws.onmessage = (ev)=> handleGuestSocketMessage(JSON.parse(ev.data));
   online.ws.onclose = ()=>{ document.getElementById('joinStatus').textContent = 'Disconnected from server.'; };
   online.ws.onerror = ()=>{ document.getElementById('joinStatus').textContent = 'Connection error.'; };
+});
+
+document.getElementById('rulesContent').innerHTML = RULES_HTML;
+document.getElementById('rulesBtn').addEventListener('click', ()=>{
+  showModal('Full Rules', RULES_HTML);
 });
 
 updateModeUI();
