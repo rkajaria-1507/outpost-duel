@@ -117,9 +117,19 @@
   /* Skirmish modal */
   #skirmishModal{
     position:fixed;inset:0;background:rgba(4,6,11,.8);display:flex;align-items:center;justify-content:center;z-index:50;
-    backdrop-filter:blur(2px);
+    backdrop-filter:blur(2px);padding:20px;
   }
-  #skirmishModal .box{background:linear-gradient(160deg,var(--panel),#111726);border:1px solid var(--gold);border-radius:14px;padding:22px;max-width:560px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  #skirmishModal .box{
+    background:linear-gradient(160deg,var(--panel),#111726);border:1px solid var(--gold);border-radius:14px;
+    padding:22px;max-width:620px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:4px;position:sticky;top:-22px;background:inherit;padding-top:2px;}
+  .modal-header h2{margin:0;}
+  .modal-close{
+    background:transparent;box-shadow:none;color:var(--muted);font-size:24px;line-height:1;
+    padding:2px 10px;border-radius:8px;flex-shrink:0;
+  }
+  .modal-close:hover{background:rgba(255,255,255,.08);color:var(--text);transform:none;filter:none;}
   .troop-picker{display:flex;align-items:center;gap:10px;margin:10px 0;}
   .troop-picker input[type=range]{flex:1;}
   .card-select{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;}
@@ -294,10 +304,9 @@
       </div>
     </div>
 
-    <details style="margin-top:14px;color:var(--muted);font-size:13px">
-      <summary style="cursor:pointer">Full Rules</summary>
-      <div id="rulesContent" style="margin-top:10px;line-height:1.7"></div>
-    </details>
+    <div class="footer-actions" style="justify-content:flex-start;margin-top:10px">
+      <button type="button" class="secondary" id="rulesBtnSetup">Full Rules</button>
+    </div>
   </div>
 
   <!-- GAME SCREEN -->
@@ -335,10 +344,13 @@
 
 </div>
 
-<!-- SKIRMISH MODAL -->
+<!-- SHARED MODAL (Skirmish decisions, Commit, Dice roll, Rules) -->
 <div id="skirmishModal" class="hidden">
   <div class="box">
-    <h2 id="skirmishTitle">Skirmish</h2>
+    <div class="modal-header">
+      <h2 id="skirmishTitle">Skirmish</h2>
+      <button type="button" class="modal-close hidden" id="modalCloseBtn" aria-label="Close">&times;</button>
+    </div>
     <div id="skirmishBody"></div>
   </div>
 </div>
@@ -1169,14 +1181,33 @@ function endRound(){
 
 /* -------------------------------- Modal -------------------------------- */
 
-function showModal(title, bodyHtml){
+/* dismissible:true adds a close (X) button plus backdrop-click / Escape
+   support - used for informational modals like Rules. Decision modals
+   (Skirmish attack/hold, troop commit) are NOT dismissible: they represent a
+   choice the game needs to continue, so they're only closed by picking one
+   of their own action buttons, same as before. */
+function showModal(title, bodyHtml, opts={}){
+  const dismissible = !!opts.dismissible;
+  const modal = document.getElementById('skirmishModal');
   document.getElementById('skirmishTitle').textContent = title;
   document.getElementById('skirmishBody').innerHTML = bodyHtml;
-  document.getElementById('skirmishModal').classList.remove('hidden');
+  document.getElementById('modalCloseBtn').classList.toggle('hidden', !dismissible);
+  modal.dataset.dismissible = dismissible ? '1' : '0';
+  modal.classList.remove('hidden');
+  modal.scrollTop = 0;
+  document.getElementById('skirmishBody').scrollTop = 0;
 }
 function hideModal(){
   document.getElementById('skirmishModal').classList.add('hidden');
 }
+document.getElementById('modalCloseBtn').addEventListener('click', hideModal);
+document.getElementById('skirmishModal').addEventListener('click', (e)=>{
+  if(e.target.id==='skirmishModal' && e.currentTarget.dataset.dismissible==='1') hideModal();
+});
+document.addEventListener('keydown', (e)=>{
+  const modal = document.getElementById('skirmishModal');
+  if(e.key==='Escape' && !modal.classList.contains('hidden') && modal.dataset.dismissible==='1') hideModal();
+});
 
 /* Floating "+3 Credits"-style badge near a player's HUD card. Appended to
    body (not inside a container that gets innerHTML-replaced) so its CSS
@@ -1378,10 +1409,11 @@ document.getElementById('joinRoomBtn').addEventListener('click', ()=>{
   online.ws.onerror = ()=>{ document.getElementById('joinStatus').textContent = 'Connection error.'; };
 });
 
-document.getElementById('rulesContent').innerHTML = RULES_HTML;
-document.getElementById('rulesBtn').addEventListener('click', ()=>{
-  showModal('Full Rules', RULES_HTML);
-});
+function openRulesModal(){
+  showModal('Full Rules', RULES_HTML, {dismissible:true});
+}
+document.getElementById('rulesBtn').addEventListener('click', openRulesModal);
+document.getElementById('rulesBtnSetup').addEventListener('click', openRulesModal);
 
 updateModeUI();
 </script>
