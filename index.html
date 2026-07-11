@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outpost Duel</title>
+<style>
+  :root{
+    --bg:#0b0e16; --panel:#161d2c; --panel2:#1c2438; --line:#2c374e;
+    --p1:#ef5b50; --p1-dim:#4a2320; --p2:#4a93ff; --p2-dim:#1a2c47;
+    --gold:#f0c85a; --gold-dim:#5a4a1e; --text:#eef1f8; --muted:#8d97ad; --good:#52c98a; --bad:#ef5b50;
+    --adv:#c77dff;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:"Segoe UI",Tahoma,sans-serif; color:var(--text); min-height:100vh; padding:20px;
+    background:
+      radial-gradient(ellipse 900px 500px at 15% -5%, rgba(240,200,90,.10), transparent 60%),
+      radial-gradient(ellipse 900px 600px at 85% 0%, rgba(74,147,255,.10), transparent 60%),
+      radial-gradient(ellipse 1200px 800px at 50% 110%, rgba(239,91,80,.08), transparent 60%),
+      linear-gradient(180deg,#0d1220,#080b12 60%);
+    background-attachment:fixed;
+  }
+  h1,h2,h3{margin:0 0 8px;}
+  .wrap{max-width:1160px;margin:0 auto;}
+  .hidden{display:none !important;}
+  .card-panel{
+    background:linear-gradient(180deg,var(--panel),#131a28);
+    border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px;
+    box-shadow:0 6px 24px rgba(0,0,0,.25);
+  }
+  button{
+    font-family:inherit;cursor:pointer;border:none;border-radius:8px;padding:10px 16px;
+    background:linear-gradient(180deg,#f5d477,var(--gold));color:#1a1508;font-weight:700;
+    transition:transform .08s, filter .12s, box-shadow .12s;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+  }
+  button:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px);}
+  button:active:not(:disabled){transform:scale(0.97);}
+  button:disabled{opacity:.35;cursor:not-allowed;filter:none;}
+  button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line);box-shadow:none;}
+  select,input[type=text]{
+    font-family:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:8px;
+  }
+  label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px;}
+  .row{display:flex;gap:16px;flex-wrap:wrap;}
+  .col{flex:1;min-width:220px;}
+  .title-banner{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;}
+  .title-banner h1{
+    font-size:32px;
+    background:linear-gradient(90deg,var(--gold),#fff2c9 40%,var(--gold));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    text-shadow:0 0 30px rgba(240,200,90,.25);
+    letter-spacing:.5px;
+  }
+  .subtitle{color:var(--muted);font-size:14px;margin:0 0 14px;}
+  /* Setup */
+  #setup .player-setup{border:1px solid var(--line);border-radius:10px;padding:14px;flex:1;min-width:240px;background:rgba(255,255,255,.02);}
+  #setup .player-setup.p1{border-color:var(--p1);}
+  #setup .player-setup.p2{border-color:var(--p2);}
+  #demoBanner{
+    display:flex;align-items:center;gap:10px;justify-content:center;
+    background:linear-gradient(90deg,var(--gold-dim),#2a2210,var(--gold-dim));
+    border:1px solid var(--gold);color:var(--gold);font-weight:700;letter-spacing:1px;
+    border-radius:10px;padding:8px;margin-bottom:14px;font-size:13px;
+  }
+  /* Header / stats */
+  #hud{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .stat-block{display:flex;gap:14px;flex-wrap:wrap;}
+  .player-card{border-radius:12px;padding:10px 14px;min-width:220px;border:2px solid transparent;transition:box-shadow .2s;}
+  .player-card.p1{background:linear-gradient(160deg,var(--p1-dim),#20110f);border-color:var(--p1);}
+  .player-card.p2{background:linear-gradient(160deg,var(--p2-dim),#0f1826);border-color:var(--p2);}
+  .player-card.active{box-shadow:0 0 0 3px var(--gold),0 0 18px rgba(240,200,90,.35);}
+  .player-card .name{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;}
+  .stats{display:flex;gap:8px;flex-wrap:wrap;}
+  .stats span{background:rgba(0,0,0,.3);padding:3px 8px;border-radius:6px;font-size:13px;}
+  .influence-badge{font-weight:800;color:var(--gold);}
+  /* Board */
+  #board{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;}
+  .loc{
+    border:2px solid var(--line);border-radius:12px;padding:12px;background:linear-gradient(160deg,var(--panel2),#161d2c);
+    display:flex;flex-direction:column;gap:6px;min-height:150px;position:relative;transition:border-color .15s,transform .1s;
+  }
+  .loc.pickable{border-color:var(--gold);}
+  .loc h3{display:flex;align-items:center;gap:8px;margin-bottom:2px;font-size:15px;}
+  .tier-row{
+    display:flex;justify-content:space-between;align-items:center;gap:8px;
+    background:rgba(0,0,0,.22);border-radius:8px;padding:6px 8px;font-size:12px;
+  }
+  .tier-row.advanced{background:rgba(199,125,255,.12);border:1px solid rgba(199,125,255,.35);}
+  .tier-tag{font-size:10px;font-weight:800;letter-spacing:.5px;padding:1px 6px;border-radius:20px;}
+  .tier-tag.basic{background:#33415c;color:var(--text);}
+  .tier-tag.advanced{background:var(--adv);color:#1a0d2a;}
+  .tier-btn{
+    border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:6px;
+    padding:5px 8px;font-size:11px;cursor:pointer;text-align:left;line-height:1.35;
+  }
+  .tier-btn:hover:not(:disabled){border-color:var(--gold);}
+  .tier-btn.advanced{border-color:rgba(199,125,255,.5);}
+  .tier-btn.advanced:hover:not(:disabled){border-color:var(--adv);}
+  .tier-btn:disabled{opacity:.3;cursor:not-allowed;}
+  .loc .taken-by{margin-top:auto;font-size:12px;font-weight:700;padding:6px 8px;border-radius:6px;text-align:center;}
+  .loc .taken-by.p1{background:var(--p1);color:#2a0e0b;}
+  .loc .taken-by.p2{background:var(--p2);color:#0b1c33;}
+  /* Hand */
+  #hand{display:flex;gap:10px;flex-wrap:wrap;}
+  .tcard{
+    border:1px solid var(--line);background:linear-gradient(160deg,var(--panel2),#151b29);border-radius:10px;padding:10px;
+    width:150px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.25);
+  }
+  .tcard b{color:var(--gold);}
+  /* Log */
+  #log{max-height:170px;overflow-y:auto;font-size:13px;line-height:1.55;color:var(--muted);}
+  #log .entry{margin-bottom:2px;}
+  #log .entry b{color:var(--text);}
+  /* Skirmish modal */
+  #skirmishModal{
+    position:fixed;inset:0;background:rgba(4,6,11,.8);display:flex;align-items:center;justify-content:center;z-index:50;
+    backdrop-filter:blur(2px);
+  }
+  #skirmishModal .box{background:linear-gradient(160deg,var(--panel),#111726);border:1px solid var(--gold);border-radius:14px;padding:22px;max-width:560px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  .troop-picker{display:flex;align-items:center;gap:10px;margin:10px 0;}
+  .troop-picker input[type=range]{flex:1;}
+  .card-select{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;}
+  .card-select .opt{
+    border:1px solid var(--line);border-radius:8px;padding:8px;cursor:pointer;font-size:12px;width:120px;background:var(--panel2);
+  }
+  .card-select .opt.selected{border-color:var(--gold);background:#3a3013;}
+  #endScreen{text-align:center;padding:44px 20px;}
+  #endScreen h1{
+    font-size:38px;
+    background:linear-gradient(90deg,var(--gold),#fff2c9,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .footer-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:10px;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;margin-left:6px;}
+  .pill.aggr{background:var(--gold);color:#1a1508;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- SETUP SCREEN -->
+  <div id="setup" class="card-panel">
+    <div class="title-banner"><h1>⚔️ Outpost Duel</h1></div>
+    <p class="subtitle">Two rival outposts, six rounds, one Influence track. Eight contested sites, each with a basic and an advanced tier — draft wisely, gamble on the Skirmish. Skill sets you up, the dice decide the margin.</p>
+
+    <div class="row">
+      <div class="col">
+        <label>How will you play?</label>
+        <select id="gameMode">
+          <option value="local">Same screen (hotseat)</option>
+          <option value="host">Online — Host a room</option>
+          <option value="join">Online — Join a room</option>
+          <option value="demo">Demo — watch two bots play</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>Bot thinking speed</label>
+        <select id="botSpeed">
+          <option value="normal" selected>Normal</option>
+          <option value="fast">Fast</option>
+          <option value="instant">Instant</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="onlinePanel" class="hidden" style="margin-top:12px">
+      <div id="hostPanel" class="hidden">
+        <button type="button" class="secondary" id="createRoomBtn">Create Room</button>
+        <div id="hostStatus" style="margin-top:10px;color:var(--muted)"></div>
+      </div>
+      <div id="joinPanel" class="hidden">
+        <label>Room Code (ask your friend to host and share it)</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="joinCode" maxlength="4" style="text-transform:uppercase;width:110px;letter-spacing:2px;text-align:center">
+          <button type="button" class="secondary" id="joinRoomBtn">Connect</button>
+        </div>
+        <div id="joinStatus" style="margin-top:10px;color:var(--muted)"></div>
+      </div>
+    </div>
+
+    <div id="demoPanel" class="hidden" style="margin-top:8px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="demoLoop"> Loop automatically (start a new game a few seconds after each one ends)
+      </label>
+    </div>
+
+    <div id="setupMain">
+      <div class="row" id="setupPlayersRow" style="margin-top:12px">
+        <div class="player-setup p1">
+          <h3 style="color:var(--p1)">Player 1</h3>
+          <label>Name</label>
+          <input type="text" id="p1name" value="Player 1">
+          <label style="margin-top:10px">Controlled by</label>
+          <select id="p1type">
+            <option value="human">Human</option>
+            <option value="bot">Bot</option>
+          </select>
+        </div>
+        <div class="player-setup p2">
+          <h3 style="color:var(--p2)">Player 2</h3>
+          <label>Name</label>
+          <input type="text" id="p2name" value="Player 2">
+          <label style="margin-top:10px">Controlled by</label>
+          <select id="p2type">
+            <option value="human">Human</option>
+            <option value="bot" selected>Bot</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div class="col">
+          <label>Bot difficulty (applies to any bot seat)</label>
+          <select id="botDifficulty">
+            <option value="easy">Easy (loose, more random)</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Hard (tight, near-optimal)</option>
+          </select>
+        </div>
+      </div>
+      <div class="footer-actions">
+        <button id="startBtn">Start Game</button>
+      </div>
+    </div>
+
+    <details style="margin-top:14px;color:var(--muted);font-size:13px">
+      <summary style="cursor:pointer">How to play</summary>
+      <div style="margin-top:8px;line-height:1.6">
+        <b>Goal:</b> Most Influence after 6 rounds wins.<br>
+        <b>Each round:</b> draw 2 Tactic cards → draft the 8 board slots (3 picks each, snake order — 2 slots go unused every round, so choosing what to skip matters) → resolve a Skirmish if someone took the Garrison → resources cap and the round ends.<br>
+        <b>Board:</b> every site offers a free <b>Basic</b> action and a pricier <b>Advanced</b> one with a bigger payoff — Market, Quarry, Garrison, Outpost, Archive, Foundry, Bazaar, Shrine. Eight sites, sixteen ways to play them.<br>
+        <b>Skirmish:</b> the Aggressor may attack. Both sides commit troops (spent either way) and may play one hidden Tactic card as a modifier. 1d6 + troops + card modifier (+ Garrison Advanced bonus) per side — higher total wins Influence equal to the margin (capped at 4).
+      </div>
+    </details>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div id="game" class="hidden">
+    <div id="demoBanner" class="hidden">🤖 DEMO MODE — two bots duel it out 🤖</div>
+    <div id="hud" class="card-panel">
+      <div class="stat-block" id="playerCards"></div>
+      <div style="text-align:right">
+        <div style="color:var(--muted);font-size:13px">Round</div>
+        <div style="font-size:26px;font-weight:800" id="roundLabel">1 / 6</div>
+      </div>
+    </div>
+
+    <div class="card-panel">
+      <h3>Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
+      <div id="board"></div>
+    </div>
+
+    <div class="card-panel">
+      <h3>Your Hand <span style="color:var(--muted);font-weight:400;font-size:13px">(tactic cards are only used during a Skirmish)</span></h3>
+      <div id="hand"></div>
+    </div>
+
+    <div class="card-panel">
+      <h3>Log</h3>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <!-- END SCREEN -->
+  <div id="endScreen" class="card-panel hidden"></div>
+
+</div>
+
+<!-- SKIRMISH MODAL -->
+<div id="skirmishModal" class="hidden">
+  <div class="box">
+    <h2 id="skirmishTitle">Skirmish</h2>
+    <div id="skirmishBody"></div>
+  </div>
+</div>
+
+<script>
+/* ---------------------------------------------------------------------
+   OUTPOST DUEL — self-contained 2-player hotseat/online/demo game
+--------------------------------------------------------------------- */
+
+const CARD_DEFS = {
+  ambush:  {name:"Ambush",  mod:2, desc:"+2 combat. If you still lose, lose 1 extra Troop."},
+  feint:   {name:"Feint",   mod:0, desc:"+0 combat. If you lose, your committed Troops are returned."},
+  rally:   {name:"Rally",   mod:1, desc:"+1 combat. If you win, gain +1 bonus Influence."},
+  overrun: {name:"Overrun", mod:3, desc:"+3 combat. Costs 1 Ore to play (else acts as +0)."},
+  scout:   {name:"Scout",   mod:1, desc:"+1 combat. Draw 1 extra card after the Skirmish resolves."},
+  guard:   {name:"Guard",   mod:1, desc:"+1 combat. If you lose, reduce the winner's margin by 1."},
+  blitz:   {name:"Blitz",   mod:2, desc:"+2 combat if you are the Aggressor this round, else +0."},
+  wild:    {name:"Wildcard",mod:null, desc:"Modifier equals a fresh d6 roll (1-6). High variance."},
+};
+const DECK_TEMPLATE = Object.keys(CARD_DEFS);
+
+/* Eight sites, each with a free Basic action and a pricier Advanced one —
+   sixteen meaningful choices on an eight-slot board. */
+const LOCATIONS = [
+  {id:'market',   name:'Market',   icon:'🏪',
+    basic:{label:'+3 Credits'},
+    advanced:{label:'+6 Credits', cost:{ore:1}, note:'pay 1 Ore'}},
+  {id:'quarry',   name:'Quarry',   icon:'⛏️',
+    basic:{label:'+2 Ore, +1 Troop'},
+    advanced:{label:'+4 Ore, +2 Troops', cost:{credits:1}, note:'pay 1 Credit'}},
+  {id:'garrison', name:'Garrison', icon:'🛡️',
+    basic:{label:'+2 Troops · become Aggressor'},
+    advanced:{label:'+4 Troops · Aggressor +1 combat', cost:{ore:1}, note:'pay 1 Ore'}},
+  {id:'outpost',  name:'Outpost',  icon:'🏛️',
+    basic:{label:'Pay 3c+2o → +4 Influence'},
+    advanced:{label:'Pay 5c+3o → +7 Influence', cost:{}, note:'big investment'}},
+  {id:'archive',  name:'Archive',  icon:'📜',
+    basic:{label:'Draw 1 Tactic card'},
+    advanced:{label:'Draw 3 Tactic cards', cost:{credits:1}, note:'pay 1 Credit'}},
+  {id:'foundry',  name:'Foundry',  icon:'🔨',
+    basic:{label:'+2 Credits, +1 Ore'},
+    advanced:{label:'+4 Credits, +3 Ore', cost:{troops:1}, note:'pay 1 Troop'}},
+  {id:'bazaar',   name:'Bazaar',   icon:'💱',
+    basic:{label:'Trade 2 Ore → 3 Credits'},
+    advanced:{label:'Trade 2 Ore → 6 Credits', cost:{}, note:'needs 2 Ore'}},
+  {id:'shrine',   name:'Shrine',   icon:'⛩️',
+    basic:{label:'+1 Influence'},
+    advanced:{label:'Pay 2c+1o → +3 Influence', cost:{}, note:'devotion rite'}},
+];
+
+const TOTAL_ROUNDS = 6;
+const CAPS = {credits:8, ore:6, troops:6};
+let BOT_TICK_MS = 500;
+
+let state = null;
+
+function rollD6(){ return 1 + Math.floor(Math.random()*6); }
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]] = [arr[j],arr[i]];
+  }
+  return arr;
+}
+function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+
+function makeDeck(){ return shuffle(DECK_TEMPLATE.slice()); }
+
+function makePlayer(name, type){
+  return {
+    name, type, // type: 'human' | 'bot'
+    credits:2, ore:1, troops:1, influence:0,
+    deck: makeDeck(), discard:[], hand:[],
+    isAggressor:false, aggressorBonus:0,
+  };
+}
+
+function log(msg){
+  state.logEntries.push(msg);
+  renderLog();
+}
+
+function drawCard(player, n=1){
+  for(let i=0;i<n;i++){
+    if(player.deck.length===0){
+      if(player.discard.length===0) return;
+      player.deck = shuffle(player.discard);
+      player.discard = [];
+    }
+    player.hand.push(player.deck.pop());
+  }
+}
+
+/* ------------------------------ Online play ------------------------------
+   Host runs the authoritative game engine (all functions below). The guest
+   is a thin client: it renders whatever `state` snapshot the host broadcasts,
+   and forwards its own clicks to the host as small action messages instead
+   of mutating anything locally. A dumb WebSocket relay (server.js) just pairs
+   host+guest by room code and forwards messages verbatim between them. */
+const online = {
+  enabled:false, isHost:false, ws:null, roomCode:null, myIndex:0, guestReady:false,
+};
+let pendingGuestDecision = null;
+let pendingGuestCommit = null;
+
+function wsSend(msg){
+  if(online.ws && online.ws.readyState===1) online.ws.send(JSON.stringify(msg));
+}
+function wsUrl(){
+  const proto = location.protocol==='https:' ? 'wss' : 'ws';
+  return `${proto}://${location.host}/ws`;
+}
+
+function updateModeUI(){
+  const mode = document.getElementById('gameMode').value;
+  document.getElementById('onlinePanel').classList.toggle('hidden', mode!=='host' && mode!=='join');
+  document.getElementById('hostPanel').classList.toggle('hidden', mode!=='host');
+  document.getElementById('joinPanel').classList.toggle('hidden', mode!=='join');
+  document.getElementById('demoPanel').classList.toggle('hidden', mode!=='demo');
+  document.getElementById('setupMain').classList.toggle('hidden', mode==='join');
+  const p1type = document.getElementById('p1type');
+  const p2type = document.getElementById('p2type');
+  if(mode==='host'){
+    p2type.value='human'; p2type.disabled=true; p1type.disabled=false;
+    document.getElementById('startBtn').disabled = !online.guestReady;
+  } else if(mode==='demo'){
+    p1type.value='bot'; p2type.value='bot'; p1type.disabled=true; p2type.disabled=true;
+    document.getElementById('startBtn').disabled=false;
+  } else {
+    p1type.disabled=false; p2type.disabled=false;
+    document.getElementById('startBtn').disabled=false;
+  }
+}
+
+function handleHostSocketMessage(msg){
+  if(msg.type==='hosted'){
+    online.roomCode = msg.code;
+    document.getElementById('hostStatus').textContent = `Room code: ${msg.code} — share this with your friend. Waiting for them to connect…`;
+  } else if(msg.type==='guestJoined'){
+    online.guestReady = true;
+    document.getElementById('hostStatus').textContent = `Friend connected! Click Start Game.`;
+    document.getElementById('startBtn').disabled = false;
+  } else if(msg.type==='peerLeft'){
+    online.guestReady = false;
+    if(!document.getElementById('setup').classList.contains('hidden')){
+      document.getElementById('hostStatus').textContent = `Your friend disconnected.`;
+      document.getElementById('startBtn').disabled = true;
+    } else log(`<b>Your friend disconnected.</b>`);
+  } else if(msg.type==='action'){
+    handleHostIncomingAction(msg);
+  }
+}
+
+function handleHostIncomingAction(msg){
+  if(msg.kind==='pick'){
+    const idx = currentPicker();
+    if(idx===1 && state.phase==='draft' && state.board[msg.locId]===null){
+      applyLocationEffect(1, msg.locId, msg.tier);
+      advanceDraftOrSkirmish();
+    }
+  } else if(msg.kind==='skirmishDecision'){
+    if(pendingGuestDecision){ const cb=pendingGuestDecision; pendingGuestDecision=null; cb(msg.attack); }
+  } else if(msg.kind==='commit'){
+    if(pendingGuestCommit){ const cb=pendingGuestCommit; pendingGuestCommit=null; cb(msg.troops, (msg.cardIdx===undefined?null:msg.cardIdx)); }
+  }
+}
+
+function handleGuestSocketMessage(msg){
+  if(msg.type==='joined'){
+    online.enabled = true; online.isHost = false; online.myIndex = 1;
+    document.getElementById('joinStatus').textContent = `Connected! Waiting for the host to start the game…`;
+  } else if(msg.type==='error'){
+    document.getElementById('joinStatus').textContent = msg.message;
+  } else if(msg.type==='state'){
+    state = msg.state;
+    document.getElementById('setup').classList.add('hidden');
+    if(state.phase==='ended'){
+      document.getElementById('game').classList.add('hidden');
+      showEndScreen();
+    } else {
+      document.getElementById('endScreen').classList.add('hidden');
+      document.getElementById('game').classList.remove('hidden');
+      renderAll();
+    }
+  } else if(msg.type==='requestSkirmishDecision'){
+    showSkirmishDecisionModal(msg.aggressorName, msg.defenderName, msg.defenderTroops, msg.defenderHandCount,
+      (attack)=> wsSend({type:'action', kind:'skirmishDecision', attack}));
+  } else if(msg.type==='requestCommit'){
+    showCommitModal(msg.playerName, msg.maxTroops, msg.hand,
+      (troops, cardIdx)=> wsSend({type:'action', kind:'commit', troops, cardIdx}));
+  } else if(msg.type==='peerLeft'){
+    alert('The host disconnected.');
+  }
+}
+
+function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, defenderHandCount, onDecision){
+  showModal("Skirmish Decision", `
+    <p>${aggressorName}, you hold the Garrison. Attack ${defenderName}?</p>
+    <p style="color:var(--muted);font-size:13px">Defender has ${defenderTroops} Troops, ${defenderHandCount} cards in hand.</p>
+    <div class="footer-actions">
+      <button class="secondary" id="skipAttack">Hold Back</button>
+      <button id="doAttack">Attack!</button>
+    </div>
+  `);
+  document.getElementById('skipAttack').onclick = ()=>{ hideModal(); onDecision(false); };
+  document.getElementById('doAttack').onclick = ()=>{ hideModal(); onDecision(true); };
+}
+
+function showCommitModal(playerName, maxTroops, hand, onSubmit){
+  let selectedCard = null;
+  const cardOptsHtml = hand.map((c,i)=>`
+    <div class="opt" data-idx="${i}">
+      <b>${CARD_DEFS[c].name}</b><br>${CARD_DEFS[c].desc}
+    </div>`).join('') || '<span style="color:var(--muted)">No cards in hand.</span>';
+
+  showModal(`${playerName} — Commit Troops`, `
+    <p>You have ${maxTroops} Troops available.</p>
+    <div class="troop-picker">
+      <span>0</span>
+      <input type="range" id="troopSlider" min="0" max="${maxTroops}" value="${Math.min(1,maxTroops)}">
+      <span>${maxTroops}</span>
+    </div>
+    <p>Committing: <b id="troopVal">${Math.min(1,maxTroops)}</b> Troops</p>
+    <p style="margin-top:10px">Optionally play one hidden Tactic card as a modifier:</p>
+    <div class="card-select" id="cardSelect">${cardOptsHtml}</div>
+    <div class="footer-actions">
+      <button id="commitBtn">Commit</button>
+    </div>
+  `);
+
+  const slider = document.getElementById('troopSlider');
+  slider.oninput = ()=> document.getElementById('troopVal').textContent = slider.value;
+
+  document.querySelectorAll('#cardSelect .opt').forEach(el=>{
+    el.onclick = ()=>{
+      const idx = Number(el.dataset.idx);
+      if(selectedCard===idx){ selectedCard=null; el.classList.remove('selected'); }
+      else {
+        document.querySelectorAll('#cardSelect .opt').forEach(o=>o.classList.remove('selected'));
+        selectedCard = idx; el.classList.add('selected');
+      }
+    };
+  });
+
+  document.getElementById('commitBtn').onclick = ()=>{
+    const troops = Number(slider.value);
+    const cardIdx = selectedCard;
+    hideModal();
+    onSubmit(troops, cardIdx);
+  };
+}
+
+/* ------------------------- Setup / round flow ------------------------- */
+
+function startGame(){
+  const mode = document.getElementById('gameMode').value;
+  online.enabled = (mode==='host');
+  online.isHost = (mode==='host');
+  online.myIndex = 0;
+
+  BOT_TICK_MS = {normal:500, fast:150, instant:20}[document.getElementById('botSpeed').value] ?? 500;
+  const demoLoop = mode==='demo' && document.getElementById('demoLoop').checked;
+
+  const p1name = document.getElementById('p1name').value.trim() || "Player 1";
+  const p2name = document.getElementById('p2name').value.trim() || "Player 2";
+  const p1type = mode==='demo' ? 'bot' : document.getElementById('p1type').value;
+  const p2type = (online.enabled || mode==='demo') ? (mode==='demo'?'bot':'human') : document.getElementById('p2type').value;
+  const difficulty = document.getElementById('botDifficulty').value;
+
+  state = {
+    round: 1,
+    difficulty,
+    mode,
+    demoLoop,
+    players: [makePlayer(p1name,p1type), makePlayer(p2name,p2type)],
+    board: null,
+    pickQueue: [],
+    logEntries: [],
+    firstPlayerIdx: 0,
+    phase: 'draw',
+  };
+
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('game').classList.remove('hidden');
+  document.getElementById('endScreen').classList.add('hidden');
+  document.getElementById('demoBanner').classList.toggle('hidden', mode!=='demo');
+
+  beginRound();
+}
+
+function beginRound(){
+  const s = state;
+  s.board = {};
+  LOCATIONS.forEach(l => s.board[l.id] = null);
+  s.players.forEach(p => { p.isAggressor=false; p.aggressorBonus=0; drawCard(p,2); });
+
+  s.firstPlayerIdx = (s.round % 2 === 1) ? 0 : 1;
+  const F = s.firstPlayerIdx, S = 1-F;
+  s.pickQueue = [F,S,S,F,F,S]; // 3 picks each, snake order
+  s.phase = 'draft';
+
+  log(`<b>— Round ${s.round} begins —</b> ${s.players[s.firstPlayerIdx].name} drafts first.`);
+  renderAll();
+  maybeAutoPick();
+}
+
+function currentPicker(){
+  return state.pickQueue.length ? state.pickQueue[0] : null;
+}
+
+function openLocations(){
+  return LOCATIONS.filter(l => state.board[l.id] === null);
+}
+
+function canAffordExtra(loc, player){
+  const cost = loc.advanced.cost || {};
+  return (player.credits>=(cost.credits||0)) && (player.ore>=(cost.ore||0)) && (player.troops>=(cost.troops||0));
+}
+
+function baseLocationValue(loc, player){
+  switch(loc.id){
+    case 'market': return 1.5;
+    case 'quarry': return 1.7;
+    case 'garrison': {
+      const afterTroops = player.troops + 2;
+      const opp = state.players[1-state.players.indexOf(player)];
+      return 1.4 + (afterTroops > opp.troops ? 0.8 : 0.2);
+    }
+    case 'outpost': return (player.credits>=3 && player.ore>=2) ? 3.2 : 0.6;
+    case 'archive': return 1.2;
+    case 'foundry': return 1.6;
+    case 'bazaar': return player.ore>=2 ? 1.5 : 0.4;
+    case 'shrine': return 1.0;
+  }
+  return 1;
+}
+
+function botChoosePick(playerIdx){
+  const player = state.players[playerIdx];
+  const opts = openLocations();
+  const jitter = {easy:0.9, normal:0.45, hard:0.15}[state.difficulty] ?? 0.45;
+  let best = null, bestScore = -Infinity;
+  opts.forEach(loc=>{
+    ['basic','advanced'].forEach(tier=>{
+      if(tier==='advanced' && !canAffordExtra(loc, player)) return;
+      const base = baseLocationValue(loc, player);
+      const val = tier==='advanced' ? base*1.6 : base;
+      const noise = (Math.random()*2-1) * jitter * val;
+      const score = val + noise;
+      if(score > bestScore){ bestScore = score; best = {locId:loc.id, tier}; }
+    });
+  });
+  return best;
+}
+
+function applyLocationEffect(playerIdx, locId, tier){
+  const player = state.players[playerIdx];
+  state.board[locId] = {owner:playerIdx, tier};
+  state.pickQueue.shift();
+
+  switch(locId){
+    case 'market': {
+      const gain = tier==='advanced' ? 6 : 3;
+      if(tier==='advanced') player.ore = Math.max(0, player.ore-1);
+      player.credits += gain;
+      log(`${player.name} works the <b>Market</b> (${tier}) → +${gain} Credits${tier==='advanced'?' (paid 1 Ore)':''}.`);
+      break;
+    }
+    case 'quarry': {
+      const oreGain = tier==='advanced'?4:2, troopGain = tier==='advanced'?2:1;
+      if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
+      player.ore += oreGain; player.troops += troopGain;
+      log(`${player.name} works the <b>Quarry</b> (${tier}) → +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      break;
+    }
+    case 'garrison': {
+      const troopGain = tier==='advanced'?4:2;
+      if(tier==='advanced'){ player.ore = Math.max(0, player.ore-1); player.aggressorBonus=1; } else { player.aggressorBonus=0; }
+      player.troops += troopGain; player.isAggressor = true;
+      log(`${player.name} rallies the <b>Garrison</b> (${tier}) → +${troopGain} Troops. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
+      break;
+    }
+    case 'outpost': {
+      const need = tier==='advanced' ? {credits:5,ore:3} : {credits:3,ore:2};
+      const reward = tier==='advanced' ? 7 : 4;
+      const consolation = tier==='advanced' ? 2 : 1;
+      if(player.credits>=need.credits && player.ore>=need.ore){
+        player.credits-=need.credits; player.ore-=need.ore; player.influence+=reward;
+        log(`${player.name} invests in the <b>Outpost</b> (${tier}) → pays ${need.credits}c+${need.ore}o for +${reward} Influence.`);
+      } else {
+        player.influence += consolation;
+        log(`${player.name} eyes the <b>Outpost</b> (${tier}) but can't afford it → consolation +${consolation} Influence.`);
+      }
+      break;
+    }
+    case 'archive': {
+      const draws = tier==='advanced' ? 3 : 1;
+      if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
+      drawCard(player, draws);
+      log(`${player.name} studies the <b>Archive</b> (${tier}) → draws ${draws} Tactic card${draws>1?'s':''}${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      break;
+    }
+    case 'foundry': {
+      const crGain = tier==='advanced'?4:2, oreGain = tier==='advanced'?3:1;
+      if(tier==='advanced') player.troops = Math.max(0, player.troops-1);
+      player.credits += crGain; player.ore += oreGain;
+      log(`${player.name} runs the <b>Foundry</b> (${tier}) → +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?' (paid 1 Troop)':''}.`);
+      break;
+    }
+    case 'bazaar': {
+      const crGain = tier==='advanced'?6:3;
+      if(player.ore>=2){
+        player.ore-=2; player.credits+=crGain;
+        log(`${player.name} trades at the <b>Bazaar</b> (${tier}) → 2 Ore for +${crGain} Credits.`);
+      } else {
+        const consolation = tier==='advanced'?2:1;
+        player.credits += consolation;
+        log(`${player.name} visits the <b>Bazaar</b> (${tier}) without enough Ore → consolation +${consolation} Credits.`);
+      }
+      break;
+    }
+    case 'shrine': {
+      const reward = tier==='advanced' ? 3 : 1;
+      if(tier==='advanced'){
+        if(player.credits>=2 && player.ore>=1){
+          player.credits-=2; player.ore-=1; player.influence+=reward;
+          log(`${player.name} prays at the <b>Shrine</b> (advanced) → pays 2c+1o for +${reward} Influence.`);
+        } else {
+          player.influence += 1;
+          log(`${player.name} can't afford the deep Shrine rite → +1 Influence instead.`);
+        }
+      } else {
+        player.influence += reward;
+        log(`${player.name} prays at the <b>Shrine</b> (basic) → +${reward} Influence.`);
+      }
+      break;
+    }
+  }
+  applyCaps(player);
+  renderAll();
+}
+
+function applyCaps(player){
+  player.credits = clamp(player.credits,0,CAPS.credits);
+  player.ore = clamp(player.ore,0,CAPS.ore);
+  player.troops = clamp(player.troops,0,CAPS.troops);
+}
+
+function humanPick(locId, tier){
+  const idx = currentPicker();
+  if(idx===null || state.phase!=='draft') return;
+  if(state.board[locId]!==null) return;
+
+  if(online.enabled){
+    if(online.isHost){
+      if(idx!==0) return;
+    } else {
+      wsSend({type:'action', kind:'pick', locId, tier});
+      return;
+    }
+  } else if(state.players[idx].type!=='human'){
+    return;
+  }
+
+  const loc = LOCATIONS.find(l=>l.id===locId);
+  if(tier==='advanced' && !canAffordExtra(loc, state.players[idx])) return;
+
+  applyLocationEffect(idx, locId, tier);
+  advanceDraftOrSkirmish();
+}
+
+function maybeAutoPick(){
+  if(state.phase!=='draft') return;
+  const idx = currentPicker();
+  if(idx===null) { advanceDraftOrSkirmish(); return; }
+  if(state.players[idx].type==='bot'){
+    setTimeout(()=>{
+      const pick = botChoosePick(idx);
+      applyLocationEffect(idx, pick.locId, pick.tier);
+      advanceDraftOrSkirmish();
+    }, BOT_TICK_MS);
+  }
+}
+
+function advanceDraftOrSkirmish(){
+  if(state.pickQueue.length>0){
+    renderAll();
+    maybeAutoPick();
+    return;
+  }
+  const aggressorIdx = state.players.findIndex(p=>p.isAggressor);
+  if(aggressorIdx===-1){
+    endRound();
+  } else {
+    state.phase = 'skirmish-decide';
+    renderAll();
+    promptAggressorDecision(aggressorIdx);
+  }
+}
+
+/* ------------------------------ Skirmish ------------------------------ */
+
+function promptAggressorDecision(aggressorIdx){
+  const aggressor = state.players[aggressorIdx];
+  const defenderIdx = 1-aggressorIdx;
+  const defender = state.players[defenderIdx];
+
+  if(aggressor.type==='bot'){
+    const wantsAttack = botWantsToAttack(aggressor, defender);
+    setTimeout(()=>{
+      if(wantsAttack) startSkirmishCommit(aggressorIdx, defenderIdx);
+      else { log(`${aggressor.name} holds back — no Skirmish this round.`); endRound(); }
+    }, BOT_TICK_MS);
+    return;
+  }
+
+  const decisionHandler = (attack)=>{
+    if(attack) startSkirmishCommit(aggressorIdx, defenderIdx);
+    else { log(`${aggressor.name} holds back — no Skirmish this round.`); endRound(); }
+  };
+
+  if(online.enabled && aggressorIdx!==online.myIndex){
+    pendingGuestDecision = decisionHandler;
+    wsSend({type:'requestSkirmishDecision', aggressorName:aggressor.name, defenderName:defender.name, defenderTroops:defender.troops, defenderHandCount:defender.hand.length});
+    return;
+  }
+
+  showSkirmishDecisionModal(aggressor.name, defender.name, defender.troops, defender.hand.length, decisionHandler);
+}
+
+function botWantsToAttack(aggressor, defender){
+  const aggression = {easy:0.5, normal:0.65, hard:0.8}[state.difficulty] ?? 0.65;
+  const advantage = aggressor.troops - defender.troops;
+  const chance = clamp(aggression + advantage*0.05, 0.15, 0.95);
+  return Math.random() < chance;
+}
+
+let skirmishCtx = null;
+
+function startSkirmishCommit(aggressorIdx, defenderIdx){
+  state.phase = 'skirmish-commit';
+  skirmishCtx = {aggressorIdx, defenderIdx, aggCommit:null, defCommit:null};
+  collectCommit(aggressorIdx, ()=> collectCommit(defenderIdx, ()=> resolveSkirmish()));
+}
+
+function collectCommit(playerIdx, onDone){
+  const player = state.players[playerIdx];
+  const role = (playerIdx===skirmishCtx.aggressorIdx) ? 'aggCommit' : 'defCommit';
+
+  if(player.type==='bot'){
+    const troops = botChooseTroops(player);
+    const cardIdx = botChooseCard(player);
+    const card = cardIdx>=0 ? player.hand.splice(cardIdx,1)[0] : null;
+    skirmishCtx[role] = {troops, card};
+    player.troops -= troops;
+    setTimeout(onDone, Math.max(60, BOT_TICK_MS*0.8));
+    return;
+  }
+
+  const applyCommit = (troops, cardIdx)=>{
+    const card = (cardIdx!==null && cardIdx!==undefined) ? player.hand.splice(cardIdx,1)[0] : null;
+    skirmishCtx[role] = {troops, card};
+    player.troops -= troops;
+    onDone();
+  };
+
+  if(online.enabled && playerIdx!==online.myIndex){
+    pendingGuestCommit = applyCommit;
+    wsSend({type:'requestCommit', role, playerName:player.name, maxTroops:player.troops, hand:player.hand});
+    return;
+  }
+
+  showCommitModal(player.name, player.troops, player.hand, applyCommit);
+}
+
+function botChooseTroops(player){
+  const frac = {easy:[0.2,0.6], normal:[0.3,0.75], hard:[0.4,0.9]}[state.difficulty] ?? [0.3,0.75];
+  const [lo,hi] = frac;
+  const pct = lo + Math.random()*(hi-lo);
+  return Math.round(player.troops * pct);
+}
+
+function botChooseCard(player){
+  if(player.hand.length===0) return -1;
+  const playChance = {easy:0.5, normal:0.7, hard:0.85}[state.difficulty] ?? 0.7;
+  if(Math.random() > playChance) return -1;
+  let best=0, bestVal=-1;
+  player.hand.forEach((c,i)=>{
+    const def = CARD_DEFS[c];
+    const val = def.mod===null ? 3.5 : def.mod;
+    if(val>bestVal){bestVal=val; best=i;}
+  });
+  return best;
+}
+
+function resolveSkirmish(){
+  const {aggressorIdx, defenderIdx, aggCommit, defCommit} = skirmishCtx;
+  const aggressor = state.players[aggressorIdx];
+  const defender = state.players[defenderIdx];
+
+  function cardModifier(commit, player, isAggressorSide){
+    if(!commit.card) return {mod:0, note:''};
+    const def = CARD_DEFS[commit.card];
+    let mod = def.mod;
+    let note = '';
+    if(commit.card==='wild'){ mod = rollD6(); note = ` (Wildcard rolled ${mod})`; }
+    if(commit.card==='blitz'){ mod = isAggressorSide ? 2 : 0; }
+    if(commit.card==='overrun'){
+      if(player.ore>=1){ player.ore-=1; } else { mod = 0; note = ' (no Ore, fizzled)'; }
+    }
+    return {mod, note, card:def.name};
+  }
+
+  const aggMod = cardModifier(aggCommit, aggressor, true);
+  const defMod = cardModifier(defCommit, defender, false);
+
+  const aggRoll = rollD6();
+  const defRoll = rollD6();
+  let aggTotal = aggRoll + aggCommit.troops + aggMod.mod + (aggressor.aggressorBonus||0);
+  let defTotal = defRoll + defCommit.troops + defMod.mod;
+
+  log(`<b>Skirmish!</b> ${aggressor.name} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
+      `${defender.name} rolls ${defRoll} + ${defCommit.troops} troops${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.`);
+
+  if(aggCommit.card) aggressor.discard.push(aggCommit.card);
+  if(defCommit.card) defender.discard.push(defCommit.card);
+
+  if(aggTotal===defTotal){
+    log(`It's a tie — both sides lose their committed Troops, no Influence changes.`);
+  } else {
+    const aggWins = aggTotal > defTotal;
+    const winner = aggWins ? aggressor : defender;
+    const loser = aggWins ? defender : aggressor;
+    const loserCommit = aggWins ? defCommit : aggCommit;
+    let margin = Math.abs(aggTotal-defTotal);
+
+    if(loserCommit.card==='guard') margin = Math.max(0, margin-1);
+
+    const gained = Math.min(margin,4);
+    winner.influence += gained;
+
+    if(winner===aggressor && aggCommit.card==='rally') winner.influence += 1;
+    if(winner===defender && defCommit.card==='rally') winner.influence += 1;
+
+    if(loser===defender && loserCommit.card==='feint'){
+      defender.troops += defCommit.troops;
+      log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
+    } else if(loser===aggressor && loserCommit.card==='feint'){
+      aggressor.troops += aggCommit.troops;
+      log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
+    } else if(loserCommit.card==='ambush'){
+      loser.troops = Math.max(0, loser.troops-1);
+      log(`${loser.name}'s own Ambush backfires — 1 extra Troop lost.`);
+    }
+
+    log(`<b>${winner.name} wins the Skirmish</b> by ${Math.abs(aggTotal-defTotal)} (margin ${margin} after modifiers) → +${gained} Influence.`);
+
+    [aggCommit,defCommit].forEach(c=>{
+      if(c.card==='scout'){
+        const p = c===aggCommit ? aggressor : defender;
+        drawCard(p,1);
+        log(`${p.name}'s Scout draws an extra card.`);
+      }
+    });
+  }
+
+  applyCaps(aggressor); applyCaps(defender);
+  skirmishCtx = null;
+  endRound();
+}
+
+/* ------------------------------ Round end ------------------------------ */
+
+function endRound(){
+  state.players.forEach(applyCaps);
+  if(state.round >= TOTAL_ROUNDS){
+    state.phase = 'ended';
+    renderAll();
+    showEndScreen();
+  } else {
+    state.round += 1;
+    state.phase = 'draw';
+    renderAll();
+    beginRound();
+  }
+}
+
+/* -------------------------------- Modal -------------------------------- */
+
+function showModal(title, bodyHtml){
+  document.getElementById('skirmishTitle').textContent = title;
+  document.getElementById('skirmishBody').innerHTML = bodyHtml;
+  document.getElementById('skirmishModal').classList.remove('hidden');
+}
+function hideModal(){
+  document.getElementById('skirmishModal').classList.add('hidden');
+}
+
+/* -------------------------------- Render -------------------------------- */
+
+function renderAll(){
+  renderHud();
+  renderBoard();
+  renderHand();
+  document.getElementById('roundLabel').textContent = `${state.round} / ${TOTAL_ROUNDS}`;
+  const phaseNames = {draw:'Drawing cards…', draft:'Drafting the board', 'skirmish-decide':'Skirmish decision', 'skirmish-commit':'Skirmish in progress', ended:'Game over'};
+  document.getElementById('phaseLabel').textContent = phaseNames[state.phase] ? `— ${phaseNames[state.phase]}` : '';
+  if(online.enabled && online.isHost) wsSend({type:'state', state});
+}
+
+function renderHud(){
+  const el = document.getElementById('playerCards');
+  el.innerHTML = state.players.map((p,i)=>{
+    const activeIdx = currentPicker();
+    const isActive = state.phase==='draft' && activeIdx===i;
+    return `
+    <div class="player-card p${i+1} ${isActive?'active':''}">
+      <div class="name"><span>${p.name} ${p.type==='bot'?'🤖':''}</span><span class="influence-badge">${p.influence} VP</span></div>
+      <div class="stats">
+        <span>₡ ${p.credits}</span>
+        <span>⛏ ${p.ore}</span>
+        <span>⚔ ${p.troops}</span>
+        <span>🂠 ${p.hand.length}</span>
+        ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderBoard(){
+  const el = document.getElementById('board');
+  const activeIdx = currentPicker();
+  const humanCanPick = online.enabled
+    ? (state.phase==='draft' && activeIdx===online.myIndex)
+    : (state.phase==='draft' && activeIdx!==null && state.players[activeIdx].type==='human');
+  const actor = humanCanPick ? state.players[online.enabled?online.myIndex:activeIdx] : null;
+
+  el.innerHTML = LOCATIONS.map(loc=>{
+    const taken = state.board ? state.board[loc.id] : null;
+    const pickable = humanCanPick && !taken;
+    const advAffordable = actor ? canAffordExtra(loc, actor) : false;
+
+    let body;
+    if(taken){
+      body = `<div class="taken-by p${taken.owner+1}">${state.players[taken.owner].name} — ${taken.tier==='advanced'?'Advanced':'Basic'}</div>`;
+    } else if(pickable){
+      body = `
+        <div class="tier-row"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span></div>
+        <div class="tier-row advanced"><span class="tier-tag advanced">ADV</span><span>${loc.advanced.label}</span></div>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic" style="flex:1">Take Basic</button>
+          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" style="flex:1" ${advAffordable?'':'disabled'}>Take Adv.${loc.advanced.note?` (${loc.advanced.note})`:''}</button>
+        </div>`;
+    } else {
+      body = `
+        <div class="tier-row"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span></div>
+        <div class="tier-row advanced"><span class="tier-tag advanced">ADV</span><span>${loc.advanced.label}</span></div>`;
+    }
+
+    return `
+      <div class="loc ${pickable?'pickable':''}" data-loc="${loc.id}">
+        <h3>${loc.icon} ${loc.name}</h3>
+        ${body}
+      </div>`;
+  }).join('');
+
+  if(humanCanPick){
+    el.querySelectorAll('.tier-btn').forEach(btn=>{
+      btn.onclick = (e)=>{ e.stopPropagation(); humanPick(btn.dataset.loc, btn.dataset.tier); };
+    });
+  }
+}
+
+function renderHand(){
+  const el = document.getElementById('hand');
+  let showIdx;
+  if(online.enabled){
+    showIdx = online.myIndex;
+  } else {
+    const activeIdx = currentPicker();
+    const humanIdx = state.players.findIndex(p=>p.type==='human');
+    showIdx = (state.phase==='draft' && activeIdx!==null && state.players[activeIdx].type==='human') ? activeIdx : (humanIdx>=0?humanIdx:0);
+  }
+  const player = state.players[showIdx];
+  if(!player || (!online.enabled && player.type!=='human')){ el.innerHTML = '<span style="color:var(--muted)">No human player — sit back and watch the bots duel.</span>'; return; }
+  el.innerHTML = `<div style="width:100%;color:var(--muted);font-size:12px;margin-bottom:4px">${player.name}'s hand:</div>` +
+    (player.hand.map(c=>{
+      const def = CARD_DEFS[c];
+      return `<div class="tcard"><b>${def.name}</b><br>${def.desc}</div>`;
+    }).join('') || '<span style="color:var(--muted)">Empty hand.</span>');
+}
+
+function renderLog(){
+  const el = document.getElementById('log');
+  el.innerHTML = state.logEntries.slice().reverse().map(e=>`<div class="entry">${e}</div>`).join('');
+}
+
+function showEndScreen(){
+  document.getElementById('game').classList.add('hidden');
+  const end = document.getElementById('endScreen');
+  end.classList.remove('hidden');
+  const [p1,p2] = state.players;
+  let headline;
+  if(p1.influence===p2.influence) headline = "It's a draw!";
+  else headline = `${p1.influence>p2.influence?p1.name:p2.name} wins!`;
+  end.innerHTML = `
+    <h1>${headline}</h1>
+    <div class="row" style="justify-content:center">
+      <div class="player-card p1"><div class="name">${p1.name}<span class="influence-badge">${p1.influence} VP</span></div></div>
+      <div class="player-card p2"><div class="name">${p2.name}<span class="influence-badge">${p2.influence} VP</span></div></div>
+    </div>
+    <div class="footer-actions" style="justify-content:center;margin-top:20px">
+      <button id="playAgain">Play Again</button>
+    </div>
+  `;
+  document.getElementById('playAgain').onclick = ()=>{
+    end.classList.add('hidden');
+    if(online.ws){ online.ws.close(); online.ws = null; }
+    online.enabled=false; online.isHost=false; online.guestReady=false; online.roomCode=null;
+    document.getElementById('gameMode').value = 'local';
+    updateModeUI();
+    document.getElementById('setup').classList.remove('hidden');
+  };
+
+  if(state.demoLoop && !online.enabled){
+    setTimeout(()=>{
+      end.classList.add('hidden');
+      startGame();
+    }, 3000);
+  }
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('gameMode').addEventListener('change', updateModeUI);
+
+document.getElementById('createRoomBtn').addEventListener('click', ()=>{
+  document.getElementById('hostStatus').textContent = 'Connecting…';
+  online.ws = new WebSocket(wsUrl());
+  online.isHost = true;
+  online.ws.onopen = ()=> wsSend({type:'host'});
+  online.ws.onmessage = (ev)=> handleHostSocketMessage(JSON.parse(ev.data));
+  online.ws.onclose = ()=>{ document.getElementById('hostStatus').textContent = 'Disconnected from server.'; };
+  online.ws.onerror = ()=>{ document.getElementById('hostStatus').textContent = 'Connection error.'; };
+});
+
+document.getElementById('joinRoomBtn').addEventListener('click', ()=>{
+  const code = document.getElementById('joinCode').value.trim().toUpperCase();
+  if(!code){ document.getElementById('joinStatus').textContent = 'Enter a room code first.'; return; }
+  document.getElementById('joinStatus').textContent = 'Connecting…';
+  online.ws = new WebSocket(wsUrl());
+  online.isHost = false;
+  online.ws.onopen = ()=> wsSend({type:'join', code});
+  online.ws.onmessage = (ev)=> handleGuestSocketMessage(JSON.parse(ev.data));
+  online.ws.onclose = ()=>{ document.getElementById('joinStatus').textContent = 'Disconnected from server.'; };
+  online.ws.onerror = ()=>{ document.getElementById('joinStatus').textContent = 'Connection error.'; };
+});
+
+updateModeUI();
+</script>
+</body>
+</html>
