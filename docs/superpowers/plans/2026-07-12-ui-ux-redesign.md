@@ -1,0 +1,642 @@
+# Outpost Duel UI/UX Redesign Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Reskin Outpost Duel to a warm earth-tone "Ops Dashboard" theme with colored vector icons, and fix the layout bug that causes horizontal overflow/cut-off board tiles.
+
+**Architecture:** This is a static vanilla-JS/HTML/CSS app (`index.html` + `css/style.css` + `js/game.js`, served by `server.js`). No build step, no test framework (`npm test` is a stub). All changes are CSS + small additive JS (an SVG icon helper and per-site icon/color lookup) — zero changes to game state, rules, or the `LOCATIONS`/`CARD_DEFS` data that drives game logic.
+
+**Tech Stack:** Vanilla JS, plain CSS (no preprocessor, no framework), inline SVG for icons.
+
+## Global Constraints
+
+- No game-logic changes: do not touch `state`, `LOCATIONS`, `CARD_DEFS`, `INTRIGUE_DEFS`, bot AI, or server/multiplayer code in `js/game.js` or `server.js`.
+- No new npm dependencies — this stays a zero-build static site.
+- Keep all existing CSS custom-property **names** (`--bg`, `--panel`, `--wood-*`, `--felt`, `--parchment*`, `--ink*`, etc.) — only their **values** change. This avoids touching every call site that references them and keeps the diff reviewable.
+- Preserve every existing animation (`dieShake`, `dieSettle`, `popGain`, `roundBannerIn`, `cardEnter`, `locTaken`) — recolor via the swapped tokens, don't remove or rename them.
+- Verification is manual, via the Browser pane preview (no automated test suite exists in this repo — `npm test` is a stub). Each task's steps say exactly what to click/resize/screenshot.
+
+---
+
+### Task 1: Earth-tone palette + layout overflow fix (CSS only)
+
+**Files:**
+- Modify: `css/style.css` (full-file rewrite — see rationale below)
+
+**Interfaces:**
+- Consumes: nothing (CSS-only, no JS dependency).
+- Produces: every CSS custom property in `:root` keeps its existing name but gets an earth-tone value; every class selector referenced by `js/game.js` (`.player-card`, `.loc`, `.tcard`, `.tier-row`, `.tier-btn`, `.intrigue-card`, `.game-layout`, `#board`, etc.) is unchanged in name, so Tasks 2 and 3 (which touch `js/game.js`) don't need to know anything changed here beyond colors.
+
+**Root cause of the overflow bug:** `.game-layout{grid-template-columns:300px 1fr 300px}` (old line 335) and `#board{grid-template-columns:repeat(4,1fr)}` (old line 94) both use bare `1fr` tracks. A bare `1fr` grid track defaults to `minmax(auto,1fr)`, where `auto` means "don't shrink below this track's min-content width." Because board tiles contain unbreakable button text ("Take Advanced (unlocks Round 2)"), the browser refuses to shrink those tracks below that text's width — so the grid blows out past the viewport instead of shrinking, which is exactly the cut-off-tiles-plus-horizontal-scrollbar symptom seen in the screenshot. The fix is `minmax(0,1fr)` on both, which allows the tracks to shrink to 0 and lets content wrap instead of overflowing.
+
+- [ ] **Step 1: Replace `css/style.css` in full**
+
+Replace the entire contents of `css/style.css` with:
+
+```css
+:root{
+    --bg:#f3e8d3; --panel:#fffaf0; --panel2:#f7ecd6; --line:#d8c4a0;
+    --p1:#b5502e; --p1-dim:#e8c9b0; --p2:#3a5a7a; --p2-dim:#c9d8e4;
+    --gold:#c98a2b; --gold-dim:#e8d2a0; --text:#4a3520; --muted:#8a7355; --good:#5a7a3a; --bad:#b5502e;
+    --adv:#8a5aa8;
+    /* Earth-tone theme: warm sand/terracotta board on a cream background */
+    --wood-light:#d8b888; --wood-mid:#a87c4a; --wood-dark:#6b4a28;
+    --felt:#e4d4b0; --felt-dark:#d0bc90;
+    --parchment:#fffaf0; --parchment-2:#f5e9d0; --parchment-line:#d8c4a0;
+    --ink:#4a3520; --ink-soft:#6b4a28; --ink-muted:#8a7355;
+    --font-display: Georgia, 'Palatino Linotype', 'Book Antiqua', serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:"Segoe UI",Tahoma,sans-serif; color:var(--text); min-height:100vh; padding:20px;
+    background:
+      repeating-linear-gradient(90deg, rgba(74,53,32,.04) 0px, rgba(74,53,32,.04) 1px, transparent 1px, transparent 5px),
+      radial-gradient(ellipse 1100px 650px at 50% -8%, rgba(201,138,43,.10), transparent 60%),
+      radial-gradient(ellipse 900px 700px at 100% 100%, rgba(181,80,46,.06), transparent 55%),
+      linear-gradient(160deg, #f3e8d3, #ecdcc0 55%, #e4d0ac);
+    background-attachment:fixed;
+  }
+  h1,h2,h3,.title-banner h1,.loc h3,.tcard b,.player-card .name,.dice-col .who{ font-family: var(--font-display); }
+  h1,h2,h3{margin:0 0 8px;}
+  .wrap{max-width:1160px;margin:0 auto;}
+  .hidden{display:none !important;}
+  .card-panel{
+    background:linear-gradient(180deg,var(--panel),#f2e4c8);
+    border:1px solid var(--gold-dim);border-radius:14px;padding:18px;margin-bottom:16px;
+    box-shadow:0 8px 24px rgba(74,53,32,.15);
+  }
+  button{
+    font-family:inherit;cursor:pointer;border:none;border-radius:8px;padding:10px 16px;
+    background:linear-gradient(180deg,#e0ab54,var(--gold));color:#2e1d08;font-weight:700;
+    transition:transform .08s, filter .12s, box-shadow .12s;
+    box-shadow:0 2px 0 rgba(74,53,32,.25);
+  }
+  button:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px);}
+  button:active:not(:disabled){transform:scale(0.97);}
+  button:disabled{opacity:.35;cursor:not-allowed;filter:none;}
+  button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line);box-shadow:none;}
+  select,input[type=text]{
+    font-family:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:8px;
+  }
+  label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px;}
+  .row{display:flex;gap:16px;flex-wrap:wrap;}
+  .col{flex:1;min-width:220px;}
+  .title-banner{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;}
+  .title-banner h1{
+    font-size:32px;
+    background:linear-gradient(90deg,var(--gold),#fff2c9 40%,var(--gold));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    text-shadow:0 0 30px rgba(201,138,43,.25);
+    letter-spacing:.5px;
+  }
+  .subtitle{color:var(--muted);font-size:14px;margin:0 0 14px;}
+  /* Setup */
+  #setup .player-setup{border:1px solid var(--line);border-radius:10px;padding:14px;flex:1;min-width:240px;background:rgba(74,53,32,.03);}
+  #setup .player-setup.p1{border-color:var(--p1);}
+  #setup .player-setup.p2{border-color:var(--p2);}
+  #demoBanner{
+    display:flex;align-items:center;gap:10px;justify-content:center;
+    background:linear-gradient(90deg,var(--gold-dim),#f2e4c8,var(--gold-dim));
+    border:1px solid var(--gold);color:var(--ink-soft);font-weight:700;letter-spacing:1px;
+    border-radius:10px;padding:8px;margin-bottom:14px;font-size:13px;
+  }
+  /* Header / stats */
+  #hud{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .stat-block{display:flex;gap:14px;flex-wrap:wrap;}
+  .player-card{border-radius:12px;padding:10px 14px;border:2px solid transparent;transition:box-shadow .2s;}
+  .player-card.p1{background:linear-gradient(160deg,var(--p1-dim),#f3ded0);border-color:var(--p1);}
+  .player-card.p2{background:linear-gradient(160deg,var(--p2-dim),#dce8f0);border-color:var(--p2);}
+  .player-card.active{box-shadow:0 0 0 3px var(--gold),0 0 18px rgba(201,138,43,.35);}
+  .player-card .name{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;}
+  .stats{display:flex;gap:8px;flex-wrap:wrap;}
+  .stats span{background:rgba(74,53,32,.08);padding:3px 8px;border-radius:6px;font-size:13px;display:inline-flex;align-items:center;}
+  .influence-badge{font-weight:800;color:var(--gold);}
+  /* Board */
+  #boardFrame{
+    position:relative;border-radius:18px;padding:20px;
+    border:10px solid var(--wood-mid);
+    border-image:linear-gradient(135deg,var(--wood-light),var(--wood-mid) 45%,var(--wood-dark)) 1;
+    background:
+      radial-gradient(ellipse at 30% 10%, rgba(201,138,43,.12), transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(74,53,32,.15), transparent 60%),
+      linear-gradient(160deg, var(--felt), var(--felt-dark) 80%);
+    box-shadow: inset 0 0 50px rgba(74,53,32,.25), 0 10px 28px rgba(74,53,32,.2);
+  }
+  #boardFrame::before{
+    content:'';position:absolute;inset:8px;border:1px solid rgba(201,138,43,.3);border-radius:11px;pointer-events:none;
+  }
+  #board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;}
+  @media (max-width:820px){ #board{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  .loc{
+    border:2px solid var(--parchment-line);border-radius:12px;padding:16px;
+    background:linear-gradient(160deg,var(--parchment),var(--parchment-2));color:var(--ink);
+    box-shadow:0 6px 14px rgba(74,53,32,.18), inset 0 0 0 1px rgba(255,255,255,.5);
+    display:flex;flex-direction:column;gap:9px;min-height:190px;position:relative;transition:border-color .15s,transform .1s,box-shadow .15s;
+  }
+  .loc.pickable{border-color:var(--gold);}
+  .loc.pickable:hover{transform:translateY(-2px);box-shadow:0 10px 20px rgba(74,53,32,.22), inset 0 0 0 1px rgba(255,255,255,.5);}
+  .loc.loc-taken{opacity:.92;}
+  .loc h3{display:flex;align-items:center;gap:8px;margin-bottom:2px;font-size:17px;}
+  .tier-row{
+    display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;
+    background:rgba(30,20,10,.82);color:#f3e6c8;border-radius:8px;padding:8px 10px;font-size:13px;
+  }
+  .tier-row.advanced{background:rgba(70,45,90,.6);border:1px solid rgba(138,90,168,.5);}
+  .tier-row.is-taken{box-shadow:inset 0 0 0 2px var(--gold);}
+  .tier-tag{font-size:10px;font-weight:800;letter-spacing:.5px;padding:1px 6px;border-radius:20px;flex-shrink:0;}
+  .tier-tag.basic{background:#5a4530;color:#f3e6c8;}
+  .tier-tag.advanced{background:var(--adv);color:#f3e6c8;}
+  .taken-tag{
+    font-size:10px;font-weight:800;letter-spacing:.3px;padding:2px 8px;border-radius:10px;margin-left:auto;
+  }
+  .taken-tag.p1{background:var(--p1);color:#fff6ee;}
+  .taken-tag.p2{background:var(--p2);color:#eef6ff;}
+  .tier-btn{
+    border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:6px;
+    padding:8px 10px;font-size:12px;cursor:pointer;text-align:left;line-height:1.35;
+  }
+  .tier-btn:hover:not(:disabled){border-color:var(--gold);}
+  .tier-btn.advanced{border-color:rgba(138,90,168,.5);}
+  .tier-btn.advanced:hover:not(:disabled){border-color:var(--adv);}
+  .tier-btn:disabled{opacity:.4;cursor:not-allowed;}
+  .tier-actions{display:flex;gap:6px;margin-top:8px;}
+  .tier-actions .tier-btn{flex:1;}
+  .loc-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  /* Hand */
+  #hand{display:flex;gap:10px;flex-wrap:wrap;}
+  .tcard{
+    border:2px solid var(--parchment-line);border-radius:12px;padding:11px;
+    background:linear-gradient(160deg,var(--parchment),var(--parchment-2));color:var(--ink);
+    width:150px;min-height:150px;font-size:13px;
+    box-shadow:0 3px 8px rgba(74,53,32,.15), inset 0 0 0 1px rgba(255,255,255,.5);
+  }
+  .tcard b{color:var(--ink-soft);}
+  .tcard-top{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .tcard-power{
+    background:var(--ink-soft);color:var(--parchment);font-weight:800;font-size:12px;
+    padding:1px 7px;border-radius:6px;flex-shrink:0;min-width:22px;text-align:center;
+  }
+  .tcard-desc{color:var(--ink);opacity:.85;line-height:1.4;}
+  .hand-group{width:100%;margin-bottom:10px;}
+  .hand-group-label{
+    font-size:11px;font-weight:800;letter-spacing:.8px;color:var(--gold);
+    text-transform:uppercase;margin-bottom:7px;width:100%;
+  }
+  .hand-group-cards{display:flex;gap:10px;flex-wrap:wrap;}
+  /* Log */
+  #log{max-height:170px;overflow-y:auto;font-size:13px;line-height:1.55;color:var(--muted);}
+  #log .entry{margin-bottom:2px;}
+  #log .entry b{color:var(--text);}
+  /* Skirmish modal */
+  #skirmishModal{
+    position:fixed;inset:0;background:rgba(40,28,16,.55);display:flex;align-items:center;justify-content:center;z-index:50;
+    backdrop-filter:blur(2px);padding:20px;
+  }
+  #skirmishModal .box{
+    background:linear-gradient(160deg,var(--panel),#f2e4c8);border:1px solid var(--gold);border-radius:14px;
+    padding:22px;max-width:620px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(74,53,32,.25);
+  }
+  .modal-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:4px;position:sticky;top:-22px;background:inherit;padding-top:2px;}
+  .modal-header h2{margin:0;}
+  .modal-close{
+    background:transparent;box-shadow:none;color:var(--muted);font-size:24px;line-height:1;
+    padding:2px 10px;border-radius:8px;flex-shrink:0;
+  }
+  .modal-close:hover{background:rgba(74,53,32,.08);color:var(--text);transform:none;filter:none;}
+  .troop-picker{display:flex;align-items:center;gap:10px;margin:10px 0;}
+  .troop-picker input[type=range]{flex:1;}
+  .card-select{display:flex;flex-wrap:wrap;margin:10px 0;}
+  .card-select .opt{
+    border:2px solid var(--parchment-line);border-radius:10px;padding:9px;cursor:pointer;font-size:12px;width:150px;
+    background:linear-gradient(160deg,var(--parchment),var(--parchment-2));color:var(--ink);
+    box-shadow:0 2px 6px rgba(74,53,32,.12);
+  }
+  .card-select .opt .tcard-desc{color:var(--ink);opacity:.85;}
+  .card-select .opt b{color:var(--ink-soft);}
+  .card-select .opt:hover{border-color:var(--gold);transform:translateY(-1px);}
+  .card-select .opt.selected{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold), 0 2px 6px rgba(74,53,32,.12);}
+  #endScreen{text-align:center;padding:44px 20px;}
+  #endScreen h1{
+    font-size:38px;
+    background:linear-gradient(90deg,var(--gold),#fff2c9,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .footer-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:10px;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;margin-left:6px;}
+  .pill.aggr{background:var(--gold);color:#2e1d08;}
+  .objective-line{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4;}
+  .objective-line b{color:var(--gold);}
+  .obj-status{font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);}
+  .obj-status.met{color:var(--good);}
+  .pill.momentum{background:var(--adv);color:#fff6ff;}
+
+  /* Intrigue cards - a distinct "conspiracy" look, separate from the
+     parchment Tactic cards, since they're a different kind of card entirely */
+  #intriguePanel{border-color:var(--adv);}
+  .intrigue-card{
+    border:2px solid var(--adv);border-radius:10px;padding:11px;width:180px;
+    background:linear-gradient(160deg,#f2e8fa,#e8dcf5);color:var(--text);
+    box-shadow:0 3px 8px rgba(74,53,32,.15), inset 0 0 0 1px rgba(138,90,168,.25);
+  }
+  .intrigue-card b{color:var(--adv);font-family:var(--font-display);font-size:14px;}
+  .intrigue-desc{font-size:12px;color:var(--muted);margin:6px 0 9px;line-height:1.4;}
+  .intrigue-play-btn{width:100%;}
+
+  /* --- Setup: mode cards --- */
+  .mode-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:4px;}
+  .mode-card{
+    border:2px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;background:rgba(74,53,32,.03);
+    transition:border-color .15s,background .15s,transform .1s;
+  }
+  .mode-card:hover{border-color:var(--gold);transform:translateY(-1px);}
+  .mode-card.selected{border-color:var(--gold);background:rgba(201,138,43,.10);box-shadow:0 0 0 1px var(--gold);}
+  .mode-card h4{margin:0 0 4px;font-size:15px;}
+  .mode-card p{margin:0;font-size:12px;color:var(--muted);line-height:1.4;}
+
+  /* --- Sound toggle --- */
+  .sound-toggle{
+    display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:20px;padding:6px 12px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none;
+  }
+  .sound-toggle:hover{border-color:var(--gold);color:var(--text);}
+  .sound-toggle.on{color:var(--good);}
+
+  /* --- Round stepper --- */
+  .round-stepper{display:flex;align-items:center;gap:4px;}
+  .round-stepper .step{
+    width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+    transition:all .25s;
+  }
+  .round-stepper .step.done{background:var(--gold-dim);border-color:var(--gold);color:var(--ink-soft);}
+  .round-stepper .step.active{background:var(--gold);border-color:var(--gold);color:#2e1d08;box-shadow:0 0 12px rgba(201,138,43,.6);}
+  .round-stepper .connector{width:10px;height:2px;background:var(--line);}
+  .round-stepper .connector.done{background:var(--gold);}
+
+  /* --- Influence race track --- */
+  .influence-track{display:flex;flex-direction:column;gap:7px;margin-top:12px;}
+  .track-row{display:flex;align-items:center;gap:10px;}
+  .track-label{width:100px;font-size:12px;color:var(--muted);text-align:right;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .track-bar{flex:1;height:14px;background:rgba(74,53,32,.08);border-radius:8px;overflow:hidden;border:1px solid var(--line);}
+  .track-fill{height:100%;border-radius:8px;transition:width .6s cubic-bezier(.22,1,.36,1);}
+  .track-fill.p1{background:linear-gradient(90deg,var(--p1),#d98a63);}
+  .track-fill.p2{background:linear-gradient(90deg,var(--p2),#7fa3c0);}
+  .track-value{width:26px;font-weight:800;color:var(--gold);font-size:13px;flex-shrink:0;}
+
+  /* --- Turn banner --- */
+  .turn-banner{
+    font-size:13px;color:var(--muted);margin-top:2px;
+  }
+  .turn-banner b{color:var(--gold);}
+
+  /* --- End-screen stats table --- */
+  .stats-table{width:100%;max-width:520px;margin:18px auto 0;border-collapse:collapse;font-size:13px;}
+  .stats-table th,.stats-table td{padding:8px 10px;text-align:center;border-bottom:1px solid var(--line);}
+  .stats-table th{color:var(--muted);font-weight:600;text-align:left;}
+  .stats-table td:first-child, .stats-table th:first-child{text-align:left;color:var(--muted);}
+
+  /* --- Stage animations --- */
+
+  /* Dice roll (Skirmish) */
+  .dice-row{display:flex;justify-content:center;gap:32px;margin:18px 0 6px;}
+  .dice-col{text-align:center;}
+  .dice-col .who{font-weight:700;margin-bottom:8px;font-size:14px;}
+  .dice-card{margin-top:9px;font-size:12px;color:var(--muted);min-height:16px;}
+  .dice-card b{color:var(--adv);}
+  .die{
+    width:64px;height:64px;border-radius:14px;margin:0 auto;
+    background:linear-gradient(160deg,#fff8ec,#e6d9b8);color:var(--ink);
+    font-family:var(--font-display);
+    font-size:30px;font-weight:800;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 6px 16px rgba(74,53,32,.25), inset 0 0 0 2px var(--parchment-line);
+  }
+  .die.rolling{ animation: dieShake .12s linear infinite; }
+  .die.settled{ animation: dieSettle .45s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes dieShake{
+    0%{transform:rotate(-8deg) scale(1);}
+    50%{transform:rotate(8deg) scale(1.06);}
+    100%{transform:rotate(-8deg) scale(1);}
+  }
+  @keyframes dieSettle{
+    0%{transform:scale(1.35) rotate(12deg);}
+    60%{transform:scale(0.9) rotate(-5deg);}
+    100%{transform:scale(1) rotate(0);}
+  }
+  .skirmish-result{margin-top:14px;font-size:19px;font-weight:800;text-align:center;color:var(--gold);}
+
+  /* Floating resource/Influence gain popup */
+  @keyframes popGain{
+    0%{opacity:0;transform:translate(-50%,0) scale(.8);}
+    18%{opacity:1;transform:translate(-50%,-10px) scale(1.08);}
+    100%{opacity:0;transform:translate(-50%,-44px) scale(1);}
+  }
+  .gain-popup{
+    position:fixed;z-index:80;font-weight:800;font-size:13px;pointer-events:none;
+    transform:translate(-50%,0);
+    animation:popGain 1.1s ease-out forwards;
+  }
+  .gain-popup.good{color:var(--good);text-shadow:0 0 10px rgba(90,122,58,.4);}
+  .gain-popup.bad{color:var(--bad);text-shadow:0 0 10px rgba(181,80,46,.4);}
+
+  /* Round-begins banner */
+  @keyframes roundBannerIn{
+    0%{opacity:0;transform:translate(-50%,-50%) scale(.8);}
+    18%{opacity:1;transform:translate(-50%,-50%) scale(1.08);}
+    28%{transform:translate(-50%,-50%) scale(1);}
+    82%{opacity:1;}
+    100%{opacity:0;transform:translate(-50%,-50%) scale(1);}
+  }
+  #roundBanner{
+    position:fixed;top:16%;left:50%;z-index:70;pointer-events:none;
+    font-size:34px;font-weight:800;letter-spacing:1.5px;color:#fff2c9;
+    text-shadow:0 2px 8px rgba(0,0,0,.35);
+    background:rgba(58,39,18,.85);border:1px solid rgba(201,138,43,.45);border-radius:16px;
+    padding:14px 32px;box-shadow:0 12px 40px rgba(74,53,32,.25);
+    animation:roundBannerIn 1.8s ease forwards;
+    white-space:nowrap;
+  }
+
+  /* New-card-drawn entrance */
+  @keyframes cardEnter{
+    0%{opacity:0;transform:translateY(16px) scale(.92);}
+    100%{opacity:1;transform:translateY(0) scale(1);}
+  }
+  .tcard.card-new{ animation: cardEnter .45s ease; }
+
+  /* Just-taken board site flash */
+  @keyframes locTaken{
+    0%{box-shadow:0 0 0 0 rgba(201,138,43,.75);}
+    100%{box-shadow:0 0 0 16px rgba(201,138,43,0);}
+  }
+  .loc.just-taken{ animation: locTaken .6s ease; }
+
+  /* --- Game screen: left (resources+hand) / center (board) / right (log) --- */
+  .game-layout{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr) minmax(0,300px);gap:16px;align-items:start;}
+  .game-col-left,.game-col-right{display:flex;flex-direction:column;gap:16px;min-width:0;}
+  .game-col-center{display:flex;flex-direction:column;gap:16px;min-width:0;}
+  #playerCardsPanel .stat-block{flex-direction:column;}
+  #playerCardsPanel .player-card{min-width:0;}
+  #logPanel{display:flex;flex-direction:column;}
+  #logPanel #log{max-height:none;flex:1;}
+  @media (min-width:901px){
+    #logPanel{position:sticky;top:16px;}
+    #logPanel #log{max-height:calc(100vh - 160px);}
+  }
+  @media (max-width:900px){
+    .game-layout{grid-template-columns:1fr;}
+    .game-col-center{order:1;}
+    .game-col-left{order:2;}
+    .game-col-right{order:3;}
+    #playerCardsPanel .stat-block{flex-direction:row;flex-wrap:wrap;}
+  }
+  @media (max-width:520px){
+    #board{grid-template-columns:1fr;}
+    .tier-btn{padding:9px 10px;font-size:12px;}
+    .dice-row{gap:16px;}
+  }
+
+  /* --- Rules modal tabs --- */
+  .rules-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;position:sticky;top:0;background:inherit;padding-top:2px;z-index:1;}
+  .rules-tab{
+    background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+    padding:7px 12px;border-radius:20px;font-size:12px;cursor:pointer;font-weight:600;
+  }
+  .rules-tab:hover{border-color:var(--gold);color:var(--text);}
+  .rules-tab.active{background:var(--gold);border-color:var(--gold);color:#2e1d08;}
+
+  /* --- Setup screen: tactical HUD flourishes --- */
+  .eyebrow{
+    font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--adv);margin-bottom:6px;display:block;
+  }
+  .hud-frame{position:relative;}
+  .hud-frame::before,.hud-frame::after{
+    content:'';position:absolute;width:16px;height:16px;border:2px solid var(--gold);opacity:.7;pointer-events:none;
+  }
+  .hud-frame::before{top:-2px;left:-2px;border-right:none;border-bottom:none;}
+  .hud-frame::after{bottom:-2px;right:-2px;border-left:none;border-top:none;}
+  #setup{position:relative;overflow:hidden;}
+  #setup::before{
+    content:'';position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background:
+      repeating-linear-gradient(0deg, rgba(201,138,43,.03) 0px, rgba(201,138,43,.03) 1px, transparent 1px, transparent 26px),
+      repeating-linear-gradient(90deg, rgba(201,138,43,.03) 0px, rgba(201,138,43,.03) 1px, transparent 1px, transparent 26px);
+  }
+  #setup > *{position:relative;z-index:1;}
+  @keyframes fadeSlideIn{
+    0%{opacity:0;transform:translateY(10px);}
+    100%{opacity:1;transform:translateY(0);}
+  }
+  #setup .title-banner{animation:fadeSlideIn .5s ease both;}
+  #setup .subtitle{animation:fadeSlideIn .5s ease .05s both;}
+  #setup .mode-card{animation:fadeSlideIn .45s ease both;}
+  #setup .mode-card:nth-child(1){animation-delay:.08s;}
+  #setup .mode-card:nth-child(2){animation-delay:.14s;}
+  #setup .mode-card:nth-child(3){animation-delay:.2s;}
+  #setup .mode-card:nth-child(4){animation-delay:.26s;}
+  .mode-card{position:relative;overflow:hidden;}
+  .mode-card .tag{
+    position:absolute;top:8px;right:8px;font-size:9px;font-weight:800;letter-spacing:.5px;
+    text-transform:uppercase;color:var(--muted);background:rgba(74,53,32,.08);padding:2px 7px;border-radius:10px;
+  }
+  .mode-card.selected .tag{color:var(--gold);}
+  .mode-card .selected-flag{
+    display:none;font-size:10px;font-weight:800;color:var(--gold);letter-spacing:.5px;text-transform:uppercase;margin-top:8px;
+  }
+  .mode-card.selected .selected-flag{display:block;}
+  .player-setup{position:relative;}
+  .player-setup::before,.player-setup::after{
+    content:'';position:absolute;width:14px;height:14px;border-color:currentColor;opacity:.55;pointer-events:none;
+  }
+  .player-setup::before{top:6px;left:6px;border-top:2px solid;border-left:2px solid;}
+  .player-setup::after{bottom:6px;right:6px;border-bottom:2px solid;border-right:2px solid;}
+```
+
+Note two intentional additions beyond a pure color swap, both required by later tasks and harmless on their own: `.tier-actions` / `.tier-actions .tier-btn{flex:1}` (Task 3 will use this to replace an inline style) and `.loc-icon` (Task 3 will use this for the site category badge). They do nothing until Task 3 references them, so this step is still independently verifiable.
+
+- [ ] **Step 2: Verify no game files were touched**
+
+Run: `git status --short`
+Expected: only `css/style.css` listed as modified.
+
+- [ ] **Step 3: Visual + overflow check in the browser preview**
+
+Start the dev server preview (`outpost-duel`, port 8642) if not already running, open it, and:
+1. On the setup screen: confirm background is warm sand/cream, not navy — no leftover dark colors.
+2. Start a **Demo** game with **Bot thinking speed: Normal** (not Instant, so the board stays visible) — or start a **Same Screen** game with both players set to Human so you fully control pacing.
+3. Once the board is showing, resize the browser viewport from ~900px to ~1920px wide in steps (900, 1000, 1100, 1280, 1600, 1920) and confirm at every step: no horizontal scrollbar, all 8 board tiles fully visible and readable (not cut off at the container edge).
+4. Confirm the board tiles, hand cards, log panel, and modals all show the new cream/terracotta/ochre palette with no leftover navy/wood-brown/parchment-yellow from the old theme.
+5. Trigger a Skirmish (let the bots play one, or draft into a contested tile as human) and confirm the dice-roll animation, resource gain pop-up, and round-banner animation still fire and are recolored (not broken/invisible).
+
+Expected: all of the above pass. If overflow still occurs at any width ≥900px, re-check that `minmax(0,1fr)` was applied to *both* `.game-layout` and `#board` (this is the actual fix — a missed `1fr`→`minmax(0,1fr)` on either one will reintroduce the bug).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add css/style.css
+git commit -m "Reskin to earth-tone Ops Dashboard theme and fix board layout overflow"
+```
+
+---
+
+### Task 2: Vector icon helper + resource bar icon chips
+
+**Files:**
+- Modify: `js/game.js:1256` (insert new `ICONS`/`icon()` before the Render section) and `js/game.js:1314-1336` (`renderHud`)
+
+**Interfaces:**
+- Consumes: nothing new — reads existing `state.players[i]` fields (`credits`, `ore`, `troops`, `hand`).
+- Produces: `icon(name)` — a function taking one of `'credits'|'ore'|'troops'|'cards'|'influence'` and returning an inline SVG string. Task 3 reuses this same `icon()` function for board-tile category badges, so the name and the five keys above must not change.
+
+- [ ] **Step 1: Add the icon helper**
+
+In `js/game.js`, immediately before the `/* -------------------------------- Render -------------------------------- */` comment (currently at line 1256), insert:
+
+```js
+const ICONS = {
+  credits: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><circle cx="8" cy="8" r="6" fill="none" stroke="#c98a2b" stroke-width="2"/><text x="8" y="11" text-anchor="middle" fill="#c98a2b" font-size="8" font-weight="bold">$</text></svg>',
+  ore: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><path d="M8 1 L14 5 L11.5 14 H4.5 L2 5 Z" fill="none" stroke="#6b7a4a" stroke-width="1.6"/></svg>',
+  troops: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><path d="M8 1 L13 3.5 V8 C13 11.5 8 15 8 15 C8 15 3 11.5 3 8 V3.5 Z" fill="#b5502e"/></svg>',
+  cards: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><rect x="3" y="2" width="10" height="12" rx="1.5" fill="none" stroke="#8a5aa8" stroke-width="1.6"/><line x1="6" y1="6" x2="10" y2="6" stroke="#8a5aa8" stroke-width="1.2"/><line x1="6" y1="9" x2="10" y2="9" stroke="#8a5aa8" stroke-width="1.2"/></svg>',
+  influence: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><path d="M8 1 L9.5 6 H15 L10.5 9.2 L12 14.5 L8 11 L4 14.5 L5.5 9.2 L1 6 H6.5 Z" fill="#5a7a3a"/></svg>',
+};
+function icon(name){ return ICONS[name] || ''; }
+```
+
+- [ ] **Step 2: Wire icons into the resource stat chips**
+
+In `renderHud()` (`js/game.js:1314-1336`), replace the `.stats` block:
+
+```js
+      <div class="stats">
+        <span>Credits: ${p.credits}</span>
+        <span>Ore: ${p.ore}</span>
+        <span>Troops: ${p.troops}</span>
+        <span>Cards: ${p.hand.length}</span>
+        ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
+        ${p.winStreak>=2?`<span class="pill momentum">Momentum +1</span>`:''}
+      </div>
+```
+
+with:
+
+```js
+      <div class="stats">
+        <span>${icon('credits')}Credits: ${p.credits}</span>
+        <span>${icon('ore')}Ore: ${p.ore}</span>
+        <span>${icon('troops')}Troops: ${p.troops}</span>
+        <span>${icon('cards')}Cards: ${p.hand.length}</span>
+        ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
+        ${p.winStreak>=2?`<span class="pill momentum">Momentum +1</span>`:''}
+      </div>
+```
+
+- [ ] **Step 3: Browser verification**
+
+Reload the preview (or refresh if HMR doesn't apply — this is a static file server, so a hard refresh is needed). Start a game and confirm:
+1. Each player's Credits/Ore/Troops/Cards stat now shows a small colored icon before the label.
+2. No console errors (check via `read_console_messages`).
+3. Icons render at a readable size, vertically aligned with the text (not floating above/below the baseline).
+
+Expected: icons visible, no console errors, no layout shift/overlap in the player-card stat row.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add js/game.js
+git commit -m "Add vector icon helper and use it for resource stat chips"
+```
+
+---
+
+### Task 3: Site category icon badges + inline-style cleanup on board tiles
+
+**Files:**
+- Modify: `js/game.js` — add `LOC_ICONS` lookup near the `ICONS` block from Task 2, and modify `renderBoard()` (`js/game.js:1338-1385`)
+
+**Interfaces:**
+- Consumes: `icon(name)` from Task 2 (must already exist — this task depends on Task 2 being complete).
+- Produces: `LOC_ICONS` — a lookup object keyed by the 8 `LOCATIONS` ids (`market, quarry, garrison, outpost, archive, foundry, bazaar, shrine`), each mapping to `{icon: <one of the icon() keys>, bg: <hex>}`. Nothing later depends on this beyond `renderBoard()` itself.
+
+Note: the existing `.tier-row` markup already shows a `taken-tag` with the owning player's name per tier (basic/advanced can be owned by different players on the same tile), which already covers "who owns this" clearly — this task does not add a second, redundant ownership indicator. It adds the category icon badge from the approved mockup and cleans up the one inline style block in this function per the design spec's "opportunistic cleanup" scope.
+
+- [ ] **Step 1: Add the site-icon lookup**
+
+In `js/game.js`, immediately after the `ICONS`/`icon()` block added in Task 2, insert:
+
+```js
+const LOC_ICONS = {
+  market:   {icon:'credits',   bg:'#f0ddc0'},
+  bazaar:   {icon:'credits',   bg:'#f0ddc0'},
+  quarry:   {icon:'ore',       bg:'#e4e6d4'},
+  foundry:  {icon:'ore',       bg:'#e4e6d4'},
+  garrison: {icon:'troops',    bg:'#f5d8c8'},
+  outpost:  {icon:'influence', bg:'#f5deA0'},
+  shrine:   {icon:'influence', bg:'#f5deA0'},
+  archive:  {icon:'cards',     bg:'#ece0f5'},
+};
+```
+
+- [ ] **Step 2: Render the icon badge and clean up the inline action-button style**
+
+In `renderBoard()` (`js/game.js:1338-1385`), replace:
+
+```js
+    let actions = '';
+    if(pickable){
+      actions = `
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic" style="flex:1">Take Basic</button>
+          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" style="flex:1" ${(advAffordable&&advUnlocked)?'':'disabled'}>${advUnlocked?`Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}`:'Advanced (unlocks Round 2)'}</button>
+        </div>`;
+    }
+
+    return `
+      <div class="loc ${pickable?'pickable':''}${taken?' loc-taken':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
+        <h3>${loc.name}</h3>
+        ${tierRows}
+        ${actions}
+      </div>`;
+```
+
+with:
+
+```js
+    let actions = '';
+    if(pickable){
+      actions = `
+        <div class="tier-actions">
+          <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic">Take Basic</button>
+          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" ${(advAffordable&&advUnlocked)?'':'disabled'}>${advUnlocked?`Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}`:'Advanced (unlocks Round 2)'}</button>
+        </div>`;
+    }
+
+    const locIcon = LOC_ICONS[loc.id];
+
+    return `
+      <div class="loc ${pickable?'pickable':''}${taken?' loc-taken':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
+        <div class="loc-icon" style="background:${locIcon.bg}">${icon(locIcon.icon)}</div>
+        <h3>${loc.name}</h3>
+        ${tierRows}
+        ${actions}
+      </div>`;
+```
+
+(The `.tier-actions` and `.loc-icon` CSS classes already exist from Task 1 — this step just starts using them and removes the two inline `style="..."` attributes.)
+
+- [ ] **Step 3: Browser verification**
+
+Reload the preview, start a game, and confirm:
+1. Every one of the 8 board tiles shows a small colored icon badge above its name, matching its category (Market/Bazaar = coin icon, Quarry/Foundry = ore icon, Garrison = shield icon, Outpost/Shrine = star icon, Archive = card icon).
+2. "Take Basic" / "Take Advanced" buttons still sit side-by-side and are still clickable — click one and confirm the pick still registers (log entry appears, tile becomes taken).
+3. No console errors.
+4. Re-run the resize check from Task 1 Step 3 (900px–1920px) to confirm the icon badge didn't reintroduce any overflow.
+
+Expected: icon badges visible and correctly categorized, board interaction unchanged, no overflow, no console errors.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add js/game.js
+git commit -m "Add site category icon badges to board tiles, clean up inline button styles"
+```
