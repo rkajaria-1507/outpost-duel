@@ -8,6 +8,8 @@ const CARD_DEFS = {
   overrun:   {name:"Overrun",          mod:3,    avg:3,    category:'Aggressive', desc:"+3 combat. Costs 1 Ore to play (else acts as +0)."},
   berserker: {name:"Berserker",        mod:5,    avg:5,    category:'Aggressive', desc:"+5 combat - the biggest swing in the deck. You lose 2 Troops regardless of the outcome."},
   blitz:     {name:"Blitz",            mod:2,    avg:2,    category:'Aggressive', desc:"+2 combat if you are the Aggressor this round, else +0."},
+  onslaught: {name:"Onslaught",        mod:4,    avg:4,    category:'Aggressive', desc:"+4 combat. Costs 2 Credits to play (else acts as +1)."},
+  ambuscade: {name:"Ambuscade",        mod:3,    avg:3,    category:'Aggressive', desc:"+3 combat. If you win, your opponent loses 1 extra Troop."},
   // Defensive - protect your position
   feint:     {name:"Feint",            mod:0,    avg:0,    category:'Defensive',  desc:"+0 combat. If you lose, your committed Troops are returned."},
   guard:     {name:"Guard",            mod:1,    avg:1,    category:'Defensive',  desc:"+1 combat. If you lose, reduce the winner's margin by 1."},
@@ -17,6 +19,7 @@ const CARD_DEFS = {
   scout:     {name:"Scout",            mod:1,    avg:1,    category:'Utility',    desc:"+1 combat. Draw 1 extra card after the Skirmish resolves."},
   undermine: {name:"Undermine",        mod:0,    avg:2,    category:'Utility',    desc:"+0 combat, but subtracts 2 from your opponent's total instead."},
   sabotage:  {name:"Sabotage",         mod:1,    avg:1,    category:'Utility',    desc:"+1 combat. After the Skirmish, your opponent discards one random card from their hand."},
+  insight:   {name:"Insight",          mod:2,    avg:2,    category:'Utility',    desc:"+2 combat. You draw 1 Tactic card after the Skirmish, win or lose."},
   // Chaos - high variance, high ceiling
   wild:      {name:"Wildcard",         mod:null, avg:3.5,  category:'Chaos',      desc:"Modifier equals a fresh d6 roll (1-6). High variance."},
   gambit:    {name:"Desperate Gambit", mod:null, avg:4.47, category:'Chaos',      desc:"Roll two d6, modifier equals the higher of the two."},
@@ -136,7 +139,7 @@ function toggleSound(){
 const RULES_HTML = `
   <p id="rules-objective"><b>Objective.</b> Play 6 rounds. Whoever has the most Influence at the end wins. Equal Influence is a draw.</p>
 
-  <p><b>Setup.</b> Each player starts with 2 Credits, 1 Ore, 1 Troop, 0 Influence, and a personal deck of 12 different Tactic cards (shuffled). Resource caps apply at all times: Credits max 8, Ore max 6, Troops max 6 - anything above the cap is lost at the end of a round.</p>
+  <p><b>Setup.</b> Each player starts with 2 Credits, 1 Ore, 1 Troop, 0 Influence, and a personal deck of 14 different Tactic cards (shuffled). Resource caps apply at all times: Credits max 8, Ore max 6, Troops max 6 - anything above the cap is lost at the end of a round.</p>
 
   <p><b>Each round has four steps, in order:</b></p>
   <ol>
@@ -158,13 +161,15 @@ const RULES_HTML = `
     <li><b>Shrine</b> - Basic: +1 Influence, free. Advanced: pay 2 Credits + 1 Ore for +3 Influence (if you can't afford it, +1 Influence instead).</li>
   </ul>
 
-  <p id="rules-cards"><b>Tactic Cards.</b> Your 12-card deck has one of each card below, grouped into four categories. They are only played face-down as a Skirmish modifier, never outside a Skirmish, and your hand always displays grouped by category with each card's combat number shown up front.</p>
+  <p id="rules-cards"><b>Tactic Cards.</b> Your 14-card deck has one of each card below, grouped into four categories. They are only played face-down as a Skirmish modifier, never outside a Skirmish, and your hand always displays grouped by category with each card's combat number shown up front.</p>
   <p><b>Aggressive</b> - raw combat power, usually at a cost:</p>
   <ul>
     <li><b>Ambush</b> - +2 combat. If you still lose the Skirmish, you lose 1 extra Troop.</li>
     <li><b>Overrun</b> - +3 combat. Costs 1 Ore to play; if you have none, it acts as +0 instead.</li>
     <li><b>Berserker</b> - +5 combat, the single biggest number in the deck. You lose 2 Troops regardless of whether you win or lose.</li>
     <li><b>Blitz</b> - +2 combat if you are the Aggressor this round, otherwise +0.</li>
+    <li><b>Onslaught</b> - +4 combat. Costs 2 Credits to play; if you're short, it acts as +1 instead.</li>
+    <li><b>Ambuscade</b> - +3 combat. If you win, your opponent loses 1 extra Troop on top of the Skirmish result.</li>
   </ul>
   <p><b>Defensive</b> - protect your position:</p>
   <ul>
@@ -178,6 +183,7 @@ const RULES_HTML = `
     <li><b>Scout</b> - +1 combat. Draw 1 extra Tactic card after the Skirmish resolves.</li>
     <li><b>Undermine</b> - +0 combat to you, but subtracts 2 from your opponent's total instead - the only card that reaches across the table.</li>
     <li><b>Sabotage</b> - +1 combat. After the Skirmish resolves, your opponent discards one random card from their hand.</li>
+    <li><b>Insight</b> - +2 combat. You draw 1 Tactic card after the Skirmish resolves, whether you win or lose.</li>
   </ul>
   <p><b>Chaos</b> - high variance, high ceiling:</p>
   <ul>
@@ -197,7 +203,9 @@ const RULES_HTML = `
 
   <p id="rules-extras"><b>Objectives.</b> Each player is randomly dealt one Objective at the start of the game - visible to both sides in the HUD, so you can see exactly what your opponent is racing for (and decide whether to deny it to them). Fulfilling your Objective by the end of Round 6 grants a bonus to Influence on top of everything else, so the board fight is only half the game.</p>
 
-  <p><b>Intrigue Cards.</b> A second, separate kind of card. Instead of a personal deck, both players draw from one shared pool - 1 card at the start of the game, then 1 more every round. Unlike Tactic cards (which are hidden and only played face-down in a Skirmish), an Intrigue card can be played face-up at any time on your own draft turn, as a free action that doesn't cost you a location pick, and it resolves immediately: Raid (steal up to 2 Credits), Requisition (+2 Ore, +1 Credit), Coup (+3 Influence), Sabotage Supply (opponent loses 1 Troop), Foresight (draw 2 Tactic cards), or Windfall (+3 Credits).</p>
+  <p><b>Intrigue Cards.</b> A second, separate kind of card. Instead of a personal deck, both players draw from one shared pool - 1 card every round starting Round 2. Unlike Tactic cards (which are hidden and only played face-down in a Skirmish), an Intrigue card can be played face-up at any time on your own draft turn, as a free action that doesn't cost you a location pick, and it resolves immediately: Raid (steal up to 2 Credits), Requisition (+2 Ore, +1 Credit), Coup (+3 Influence), Sabotage Supply (opponent loses 1 Troop), Foresight (draw 2 Tactic cards), Windfall (+3 Credits), Reinforce (+2 Troops), or Marketplace (trade 2 Ore for 4 Credits).</p>
+
+  <p><b>Getting more complex as you go.</b> Round 1 is deliberately simple: only the Basic tier is available on the board, and there are no Intrigue cards or Round Events yet - just draft, resources, and (maybe) a Skirmish. The Advanced tier and Intrigue cards unlock from Round 2 onward, and Round Events start from Round 3. By the back half of the game you're juggling all of it at once - the ramp is intentional.</p>
 
   <p><b>Momentum.</b> Win two Skirmishes in a row and you gain Momentum: a +1 bonus added to your total in your next Skirmish. Losing or tying a Skirmish resets your streak back to zero, so a hot streak is powerful but fragile - and worth watching on your opponent's HUD.</p>
 
@@ -252,6 +260,8 @@ const INTRIGUE_DEFS = {
   sabotage_supply: {name:'Sabotage Supply',  desc:"Your opponent loses 1 Troop."},
   foresight:       {name:'Foresight',        desc:'Draw 2 Tactic cards immediately.'},
   windfall:        {name:'Windfall',         desc:'Gain 3 Credits.'},
+  reinforce:       {name:'Reinforce',        desc:'Gain 2 Troops immediately.'},
+  marketplace:     {name:'Marketplace',      desc:'If you have 2+ Ore: trade it for 4 Credits. Otherwise, gain 1 Credit instead.'},
 };
 const INTRIGUE_DECK_TEMPLATE = [...Object.keys(INTRIGUE_DEFS), ...Object.keys(INTRIGUE_DEFS)]; // 2 copies each
 
@@ -297,6 +307,19 @@ function applyIntrigueEffect(playerIdx, cardId){
     case 'windfall':
       player.credits += 3;
       log(`${player.name} plays <b>Windfall</b> -> +3 Credits.`);
+      break;
+    case 'reinforce':
+      player.troops += 2;
+      log(`${player.name} plays <b>Reinforce</b> -> +2 Troops.`);
+      break;
+    case 'marketplace':
+      if(player.ore>=2){
+        player.ore-=2; player.credits+=4;
+        log(`${player.name} plays <b>Marketplace</b> -> trades 2 Ore for +4 Credits.`);
+      } else {
+        player.credits+=1;
+        log(`${player.name} plays <b>Marketplace</b> without enough Ore -> consolation +1 Credit.`);
+      }
       break;
   }
   applyCaps(player); applyCaps(opp);
@@ -614,14 +637,21 @@ function beginRound(){
   const s = state;
   s.board = {};
   LOCATIONS.forEach(l => s.board[l.id] = null);
-  s.players.forEach(p => { p.isAggressor=false; p.aggressorBonus=0; drawCard(p,2); drawIntrigue(p,1); });
+  s.players.forEach(p => {
+    p.isAggressor=false; p.aggressorBonus=0; drawCard(p,2);
+    if(intrigueUnlocked()) drawIntrigue(p,1);
+  });
 
-  s.currentEvent = EVENTS[Math.floor(Math.random()*EVENTS.length)].id;
-  const eventDef = getEvent();
-  if(s.currentEvent==='windfall_round') s.players.forEach(p=>{ p.credits+=2; applyCaps(p); });
-  if(s.currentEvent==='trade_winds') s.players.forEach(p=>{ p.ore+=1; applyCaps(p); });
-  if(s.currentEvent==='recruitment_drive') s.players.forEach(p=>{ p.troops+=1; applyCaps(p); });
-  if(s.currentEvent==='council_session') s.players.forEach(p=> drawCard(p,1));
+  if(eventsUnlocked()){
+    s.currentEvent = EVENTS[Math.floor(Math.random()*EVENTS.length)].id;
+    const eventDef = getEvent();
+    if(s.currentEvent==='windfall_round') s.players.forEach(p=>{ p.credits+=2; applyCaps(p); });
+    if(s.currentEvent==='trade_winds') s.players.forEach(p=>{ p.ore+=1; applyCaps(p); });
+    if(s.currentEvent==='recruitment_drive') s.players.forEach(p=>{ p.troops+=1; applyCaps(p); });
+    if(s.currentEvent==='council_session') s.players.forEach(p=> drawCard(p,1));
+  } else {
+    s.currentEvent = null;
+  }
 
   s.firstPlayerIdx = (s.round % 2 === 1) ? 0 : 1;
   const F = s.firstPlayerIdx, S = 1-F;
@@ -629,7 +659,9 @@ function beginRound(){
   s.phase = 'draft';
 
   log(`<b>— Round ${s.round} begins —</b> ${s.players[s.firstPlayerIdx].name} drafts first.`);
-  log(`Round Event: <b>${eventDef.name}</b> - ${eventDef.desc}`);
+  const eventDef = getEvent();
+  if(eventDef) log(`Round Event: <b>${eventDef.name}</b> - ${eventDef.desc}`);
+  else if(!advancedUnlocked()) log(`Basic tier only this round - Advanced tier unlocks Round 2.`);
   showRoundBanner(`Round ${s.round}`);
   stageBanner.lastRound = s.round;
   renderAll();
@@ -648,6 +680,14 @@ function canAffordExtra(loc, player){
   const cost = loc.advanced.cost || {};
   return (player.credits>=(cost.credits||0)) && (player.ore>=(cost.ore||0)) && (player.troops>=(cost.troops||0));
 }
+
+/* Progressive complexity: Round 1 is Basic-tier only (learn the board),
+   Intrigue cards start flowing Round 2, and Round Events kick in Round 3 -
+   the game gets more complex as it goes instead of dumping everything on
+   round one. */
+function advancedUnlocked(){ return state.round >= 2; }
+function intrigueUnlocked(){ return state.round >= 2; }
+function eventsUnlocked(){ return state.round >= 3; }
 
 function baseLocationValue(loc, player){
   switch(loc.id){
@@ -674,7 +714,7 @@ function botChoosePick(playerIdx){
   let best = null, bestScore = -Infinity;
   opts.forEach(loc=>{
     ['basic','advanced'].forEach(tier=>{
-      if(tier==='advanced' && !canAffordExtra(loc, player)) return;
+      if(tier==='advanced' && (!advancedUnlocked() || !canAffordExtra(loc, player))) return;
       const base = baseLocationValue(loc, player);
       const val = tier==='advanced' ? base*1.6 : base;
       const noise = (Math.random()*2-1) * jitter * val;
@@ -816,7 +856,7 @@ function humanPick(locId, tier){
   }
 
   const loc = LOCATIONS.find(l=>l.id===locId);
-  if(tier==='advanced' && !canAffordExtra(loc, state.players[idx])) return;
+  if(tier==='advanced' && (!advancedUnlocked() || !canAffordExtra(loc, state.players[idx]))) return;
 
   applyLocationEffect(idx, locId, tier);
   advanceDraftOrSkirmish();
@@ -971,6 +1011,9 @@ function resolveSkirmish(){
     if(commit.card==='overrun'){
       if(player.ore>=1){ player.ore-=1; } else { mod = 0; note = ' (no Ore, fizzled)'; }
     }
+    if(commit.card==='onslaught'){
+      if(player.credits>=2){ player.credits-=2; } else { mod = 1; note = ' (short on Credits, reduced)'; }
+    }
     return {mod, note, card:def.name};
   }
 
@@ -1009,6 +1052,7 @@ function resolveSkirmish(){
       const winner = aggWins ? aggressor : defender;
       const loser = aggWins ? defender : aggressor;
       const loserCommit = aggWins ? defCommit : aggCommit;
+      const winnerCommit = aggWins ? aggCommit : defCommit;
       winner.skirmishWins++; loser.skirmishLosses++;
       winner.winStreak++; loser.winStreak = 0;
       if(winner.winStreak===2) log(`${winner.name} has Momentum now - +1 to their next Skirmish total.`);
@@ -1034,6 +1078,11 @@ function resolveSkirmish(){
         log(`${loser.name}'s own Ambush backfires — 1 extra Troop lost.`);
       }
 
+      if(winnerCommit.card==='ambuscade'){
+        loser.troops = Math.max(0, loser.troops-1);
+        log(`${winner.name}'s Ambuscade costs ${loser.name} 1 extra Troop.`);
+      }
+
       log(`<b>${winner.name} wins the Skirmish</b> by ${Math.abs(aggTotal-defTotal)} (margin ${margin} after modifiers) -> +${gained} Influence.`);
     }
 
@@ -1057,6 +1106,10 @@ function resolveSkirmish(){
         const discarded = opp.hand.splice(idx,1)[0];
         opp.discard.push(discarded);
         log(`${self.name}'s Sabotage forces ${opp.name} to discard ${CARD_DEFS[discarded].name}.`);
+      }
+      if(commit.card==='insight'){
+        drawCard(self,1);
+        log(`${self.name}'s Insight draws them an extra card.`);
       }
     });
 
@@ -1298,27 +1351,28 @@ function renderBoard(){
     const pickable = humanCanPick && !taken;
     const advAffordable = actor ? canAffordExtra(loc, actor) : false;
 
-    let body;
-    if(taken){
-      body = `<div class="taken-by p${taken.owner+1}">${state.players[taken.owner].name} (${taken.tier==='advanced'?'Advanced':'Basic'})</div>`;
-    } else if(pickable){
-      body = `
-        <div class="tier-row"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span></div>
-        <div class="tier-row advanced"><span class="tier-tag advanced">ADVANCED</span><span>${loc.advanced.label}</span></div>
-        <div style="display:flex;gap:6px;margin-top:4px">
+    const advUnlocked = advancedUnlocked();
+    const takenBasic = taken && taken.tier==='basic';
+    const takenAdvanced = taken && taken.tier==='advanced';
+
+    let tierRows = `
+        <div class="tier-row ${takenBasic?'is-taken':''}"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span>${takenBasic?`<span class="taken-tag p${taken.owner+1}">${state.players[taken.owner].name}</span>`:''}</div>
+        <div class="tier-row advanced ${takenAdvanced?'is-taken':''}"><span class="tier-tag advanced">ADVANCED</span><span>${loc.advanced.label}</span>${takenAdvanced?`<span class="taken-tag p${taken.owner+1}">${state.players[taken.owner].name}</span>`:''}</div>`;
+
+    let actions = '';
+    if(pickable){
+      actions = `
+        <div style="display:flex;gap:6px;margin-top:8px">
           <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic" style="flex:1">Take Basic</button>
-          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" style="flex:1" ${advAffordable?'':'disabled'}>Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}</button>
+          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" style="flex:1" ${(advAffordable&&advUnlocked)?'':'disabled'}>${advUnlocked?`Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}`:'Advanced (unlocks Round 2)'}</button>
         </div>`;
-    } else {
-      body = `
-        <div class="tier-row"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span></div>
-        <div class="tier-row advanced"><span class="tier-tag advanced">ADVANCED</span><span>${loc.advanced.label}</span></div>`;
     }
 
     return `
-      <div class="loc ${pickable?'pickable':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
+      <div class="loc ${pickable?'pickable':''}${taken?' loc-taken':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
         <h3>${loc.name}</h3>
-        ${body}
+        ${tierRows}
+        ${actions}
       </div>`;
   }).join('');
   prevBoardSnapshot = newSnapshot;
