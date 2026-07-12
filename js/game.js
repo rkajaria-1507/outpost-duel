@@ -1262,6 +1262,17 @@ const ICONS = {
 };
 function icon(name){ return ICONS[name] || ''; }
 
+const LOC_ICONS = {
+  market:   {icon:'credits',   bg:'#f0ddc0'},
+  bazaar:   {icon:'credits',   bg:'#f0ddc0'},
+  quarry:   {icon:'ore',       bg:'#e4e6d4'},
+  foundry:  {icon:'ore',       bg:'#e4e6d4'},
+  garrison: {icon:'troops',    bg:'#f5d8c8'},
+  outpost:  {icon:'influence', bg:'#f5deA0'},
+  shrine:   {icon:'influence', bg:'#f5deA0'},
+  archive:  {icon:'cards',     bg:'#ece0f5'},
+};
+
 /* -------------------------------- Render -------------------------------- */
 
 function renderAll(){
@@ -1371,14 +1382,17 @@ function renderBoard(){
     let actions = '';
     if(pickable){
       actions = `
-        <div style="display:flex;gap:6px;margin-top:8px">
-          <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic" style="flex:1">Take Basic</button>
-          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" style="flex:1" ${(advAffordable&&advUnlocked)?'':'disabled'}>${advUnlocked?`Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}`:'Advanced (unlocks Round 2)'}</button>
+        <div class="tier-actions">
+          <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic">Take Basic</button>
+          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" ${(advAffordable&&advUnlocked)?'':'disabled'}>${advUnlocked?`Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}`:'Advanced (unlocks Round 2)'}</button>
         </div>`;
     }
 
+    const locIcon = LOC_ICONS[loc.id];
+
     return `
       <div class="loc ${pickable?'pickable':''}${taken?' loc-taken':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
+        <div class="loc-icon" style="background:${locIcon.bg}">${icon(locIcon.icon)}</div>
         <h3>${loc.name}</h3>
         ${tierRows}
         ${actions}
