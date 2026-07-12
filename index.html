@@ -479,6 +479,7 @@
         <h3 style="margin:0">Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
         <button type="button" class="secondary" id="rulesBtn">Rules</button>
       </div>
+      <div id="eventLine" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
       <div id="boardFrame" style="margin-top:10px">
         <div id="board"></div>
       </div>
@@ -715,6 +716,10 @@ const RULES_HTML = `
 
   <p><b>Momentum.</b> Win two Skirmishes in a row and you gain Momentum: a +1 bonus added to your total in your next Skirmish. Losing or tying a Skirmish resets your streak back to zero, so a hot streak is powerful but fragile - and worth watching on your opponent's HUD.</p>
 
+  <p><b>Leaders.</b> Each player is randomly dealt one persistent Leader ability at the start of the game, shown in the HUD: Merchant (+1 Credit from Market/Bazaar), Engineer (+1 Ore from Quarry/Foundry), Warmonger (+1 Troop from Garrison), Diplomat (+1 Influence from Shrine/Outpost), Scholar (+1 card from Archive), or Gambler (+1 to Wildcard and Desperate Gambit results). Knowing your opponent's Leader tells you which sites they'll be drawn to.</p>
+
+  <p><b>Round Events.</b> A shared event is drawn fresh at the start of every round and applies equally to both players - shown under the Board heading. Windfall Round, Trade Winds, and Recruitment Drive hand out an immediate resource bump; Council Session hands out an extra Tactic card; Skirmish Fever raises the Skirmish Influence cap from 4 to 6 for the round; and a Quiet Round cancels the Skirmish entirely, no matter who holds the Garrison.</p>
+
   <p><b>Ways to play.</b> Same screen: two people share one device and take turns. Online: one person hosts a room and gets a short code, the other joins with that code to play from a separate device. Demo: both seats are bots and the game plays itself automatically at your choice of speed, optionally looping into a new game when one ends.</p>
 `;
 
@@ -744,6 +749,7 @@ function makePlayer(name, type){
     // survive JSON.stringify over the online-play WebSocket relay, so it's
     // looked back up from the shared client-side OBJECTIVES array instead.
     objectiveId: OBJECTIVES[Math.floor(Math.random()*OBJECTIVES.length)].id,
+    leaderId: LEADERS[Math.floor(Math.random()*LEADERS.length)].id,
   };
 }
 function getObjective(player){
@@ -845,6 +851,37 @@ const OBJECTIVES = [
   {id:'prospector',    name:'Prospector',    desc:'End the game with 6 or more Ore.',                   bonus:4, check:p=> p.ore>=6},
   {id:'archivist',     name:'Archivist',     desc:'End the game with 5 or more cards in hand.',         bonus:4, check:p=> p.hand.length>=5},
 ];
+
+/* Leaders - a random persistent passive ability each player is dealt at game
+   start (asymmetric powers, Dune Imperium-style). Applied as small +1 checks
+   at the handful of existing effect points they touch, so no new resolution
+   pipeline is needed. */
+const LEADERS = [
+  {id:'merchant',  name:'Merchant',  desc:'Market and Bazaar give +1 extra Credit.'},
+  {id:'engineer',  name:'Engineer',  desc:'Quarry and Foundry give +1 extra Ore.'},
+  {id:'warmonger', name:'Warmonger', desc:'Garrison gives +1 extra Troop.'},
+  {id:'diplomat',  name:'Diplomat',  desc:'Shrine and Outpost give +1 extra Influence.'},
+  {id:'scholar',   name:'Scholar',   desc:'Archive gives +1 extra Tactic card.'},
+  {id:'gambler',   name:'Gambler',   desc:'Wildcard and Desperate Gambit get +1 to their result.'},
+];
+function getLeader(player){
+  return LEADERS.find(l=>l.id===player.leaderId);
+}
+
+/* Round Events - a shared random modifier drawn fresh each round, applying
+   to both players equally. Keeps the optimal strategy shifting round to
+   round instead of every round playing out the same way. */
+const EVENTS = [
+  {id:'windfall_round',      name:'Windfall Round',      desc:'Both players immediately gain +2 Credits.'},
+  {id:'trade_winds',         name:'Trade Winds',         desc:'Both players immediately gain +1 Ore.'},
+  {id:'recruitment_drive',   name:'Recruitment Drive',   desc:'Both players immediately gain +1 Troop.'},
+  {id:'council_session',     name:'Council Session',     desc:'Both players immediately draw 1 extra Tactic card.'},
+  {id:'skirmish_fever',      name:'Skirmish Fever',      desc:'This round, the Skirmish Influence cap is raised from 4 to 6.'},
+  {id:'quiet_round',         name:'Quiet Round',         desc:'This round, no Skirmish may occur, no matter who takes the Garrison.'},
+];
+function getEvent(){
+  return EVENTS.find(e=>e.id===state.currentEvent);
+}
 
 function log(msg){
   state.logEntries.push(msg);
@@ -1094,12 +1131,20 @@ function beginRound(){
   LOCATIONS.forEach(l => s.board[l.id] = null);
   s.players.forEach(p => { p.isAggressor=false; p.aggressorBonus=0; drawCard(p,2); drawIntrigue(p,1); });
 
+  s.currentEvent = EVENTS[Math.floor(Math.random()*EVENTS.length)].id;
+  const eventDef = getEvent();
+  if(s.currentEvent==='windfall_round') s.players.forEach(p=>{ p.credits+=2; applyCaps(p); });
+  if(s.currentEvent==='trade_winds') s.players.forEach(p=>{ p.ore+=1; applyCaps(p); });
+  if(s.currentEvent==='recruitment_drive') s.players.forEach(p=>{ p.troops+=1; applyCaps(p); });
+  if(s.currentEvent==='council_session') s.players.forEach(p=> drawCard(p,1));
+
   s.firstPlayerIdx = (s.round % 2 === 1) ? 0 : 1;
   const F = s.firstPlayerIdx, S = 1-F;
   s.pickQueue = [F,S,S,F,F,S]; // 3 picks each, snake order
   s.phase = 'draft';
 
   log(`<b>— Round ${s.round} begins —</b> ${s.players[s.firstPlayerIdx].name} drafts first.`);
+  log(`Round Event: <b>${eventDef.name}</b> - ${eventDef.desc}`);
   showRoundBanner(`Round ${s.round}`);
   stageBanner.lastRound = s.round;
   renderAll();
@@ -1160,92 +1205,101 @@ function applyLocationEffect(playerIdx, locId, tier){
   state.board[locId] = {owner:playerIdx, tier};
   state.pickQueue.shift();
   if(tier==='advanced') player.advancedPicks++;
+  const leader = getLeader(player);
 
   switch(locId){
     case 'market': {
-      const gain = tier==='advanced' ? 6 : 3;
+      const bonus = leader.id==='merchant' ? 1 : 0;
+      const gain = (tier==='advanced' ? 6 : 3) + bonus;
       if(tier==='advanced') player.ore = Math.max(0, player.ore-1);
       player.credits += gain;
-      log(`${player.name} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?' (paid 1 Ore)':''}.`);
+      log(`${player.name} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?' (paid 1 Ore)':''}${bonus?' (+1 Merchant)':''}.`);
       popupGain(playerIdx, `+${gain} Credits`, true);
       break;
     }
     case 'quarry': {
-      const oreGain = tier==='advanced'?4:2, troopGain = tier==='advanced'?2:1;
+      const bonus = leader.id==='engineer' ? 1 : 0;
+      const oreGain = (tier==='advanced'?4:2) + bonus, troopGain = tier==='advanced'?2:1;
       if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
       player.ore += oreGain; player.troops += troopGain;
-      log(`${player.name} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      log(`${player.name} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?' (paid 1 Credit)':''}${bonus?' (+1 Engineer)':''}.`);
       popupGain(playerIdx, `+${oreGain} Ore, +${troopGain} Troops`, true);
       break;
     }
     case 'garrison': {
-      const troopGain = tier==='advanced'?4:2;
+      const bonus = leader.id==='warmonger' ? 1 : 0;
+      const troopGain = (tier==='advanced'?4:2) + bonus;
       if(tier==='advanced'){ player.ore = Math.max(0, player.ore-1); player.aggressorBonus=1; } else { player.aggressorBonus=0; }
       player.troops += troopGain; player.isAggressor = true;
-      log(`${player.name} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
+      log(`${player.name} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops${bonus?' (+1 Warmonger)':''}. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
       popupGain(playerIdx, `+${troopGain} Troops - Aggressor!`, true);
       break;
     }
     case 'outpost': {
+      const bonus = leader.id==='diplomat' ? 1 : 0;
       const need = tier==='advanced' ? {credits:5,ore:3} : {credits:3,ore:2};
-      const reward = tier==='advanced' ? 7 : 4;
-      const consolation = tier==='advanced' ? 2 : 1;
+      const reward = (tier==='advanced' ? 7 : 4) + bonus;
+      const consolation = (tier==='advanced' ? 2 : 1) + bonus;
       if(player.credits>=need.credits && player.ore>=need.ore){
         player.credits-=need.credits; player.ore-=need.ore; player.influence+=reward;
-        log(`${player.name} invests in the <b>Outpost</b> (${tier}) -> pays ${need.credits} Credits + ${need.ore} Ore for +${reward} Influence.`);
+        log(`${player.name} invests in the <b>Outpost</b> (${tier}) -> pays ${need.credits} Credits + ${need.ore} Ore for +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
         popupGain(playerIdx, `+${reward} Influence`, true);
       } else {
         player.influence += consolation;
-        log(`${player.name} eyes the <b>Outpost</b> (${tier}) but can't afford it -> consolation +${consolation} Influence.`);
+        log(`${player.name} eyes the <b>Outpost</b> (${tier}) but can't afford it -> consolation +${consolation} Influence${bonus?' (+1 Diplomat)':''}.`);
         popupGain(playerIdx, `+${consolation} Influence`, true);
       }
       break;
     }
     case 'archive': {
-      const draws = tier==='advanced' ? 3 : 1;
+      const bonus = leader.id==='scholar' ? 1 : 0;
+      const draws = (tier==='advanced' ? 3 : 1) + bonus;
       if(tier==='advanced') player.credits = Math.max(0, player.credits-1);
       drawCard(player, draws);
-      log(`${player.name} studies the <b>Archive</b> (${tier}) -> draws ${draws} Tactic card${draws>1?'s':''}${tier==='advanced'?' (paid 1 Credit)':''}.`);
+      log(`${player.name} studies the <b>Archive</b> (${tier}) -> draws ${draws} Tactic card${draws>1?'s':''}${tier==='advanced'?' (paid 1 Credit)':''}${bonus?' (+1 Scholar)':''}.`);
       popupGain(playerIdx, `+${draws} Card${draws>1?'s':''}`, true);
       break;
     }
     case 'foundry': {
-      const crGain = tier==='advanced'?4:2, oreGain = tier==='advanced'?3:1;
+      const bonus = leader.id==='engineer' ? 1 : 0;
+      const crGain = tier==='advanced'?4:2, oreGain = (tier==='advanced'?3:1) + bonus;
       if(tier==='advanced') player.troops = Math.max(0, player.troops-1);
       player.credits += crGain; player.ore += oreGain;
-      log(`${player.name} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?' (paid 1 Troop)':''}.`);
+      log(`${player.name} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?' (paid 1 Troop)':''}${bonus?' (+1 Engineer)':''}.`);
       popupGain(playerIdx, `+${crGain} Credits, +${oreGain} Ore`, true);
       break;
     }
     case 'bazaar': {
-      const crGain = tier==='advanced'?6:3;
+      const bonus = leader.id==='merchant' ? 1 : 0;
+      const crGain = (tier==='advanced'?6:3) + bonus;
       if(player.ore>=2){
         player.ore-=2; player.credits+=crGain;
-        log(`${player.name} trades at the <b>Bazaar</b> (${tier}) -> trades 2 Ore for +${crGain} Credits.`);
+        log(`${player.name} trades at the <b>Bazaar</b> (${tier}) -> trades 2 Ore for +${crGain} Credits${bonus?' (+1 Merchant)':''}.`);
         popupGain(playerIdx, `+${crGain} Credits`, true);
       } else {
-        const consolation = tier==='advanced'?2:1;
+        const consolation = (tier==='advanced'?2:1) + bonus;
         player.credits += consolation;
-        log(`${player.name} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credits.`);
+        log(`${player.name} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credits${bonus?' (+1 Merchant)':''}.`);
         popupGain(playerIdx, `+${consolation} Credits`, true);
       }
       break;
     }
     case 'shrine': {
-      const reward = tier==='advanced' ? 3 : 1;
+      const bonus = leader.id==='diplomat' ? 1 : 0;
+      const reward = (tier==='advanced' ? 3 : 1) + bonus;
       if(tier==='advanced'){
         if(player.credits>=2 && player.ore>=1){
           player.credits-=2; player.ore-=1; player.influence+=reward;
-          log(`${player.name} prays at the <b>Shrine</b> (advanced) -> pays 2 Credits + 1 Ore for +${reward} Influence.`);
+          log(`${player.name} prays at the <b>Shrine</b> (advanced) -> pays 2 Credits + 1 Ore for +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
           popupGain(playerIdx, `+${reward} Influence`, true);
         } else {
-          player.influence += 1;
-          log(`${player.name} can't afford the deep Shrine rite -> +1 Influence instead.`);
-          popupGain(playerIdx, `+1 Influence`, true);
+          player.influence += 1 + bonus;
+          log(`${player.name} can't afford the deep Shrine rite -> +${1+bonus} Influence instead${bonus?' (+1 Diplomat)':''}.`);
+          popupGain(playerIdx, `+${1+bonus} Influence`, true);
         }
       } else {
         player.influence += reward;
-        log(`${player.name} prays at the <b>Shrine</b> (basic) -> +${reward} Influence.`);
+        log(`${player.name} prays at the <b>Shrine</b> (basic) -> +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
         popupGain(playerIdx, `+${reward} Influence`, true);
       }
       break;
@@ -1308,7 +1362,10 @@ function advanceDraftOrSkirmish(){
     return;
   }
   const aggressorIdx = state.players.findIndex(p=>p.isAggressor);
-  if(aggressorIdx===-1){
+  if(aggressorIdx===-1 || state.currentEvent==='quiet_round'){
+    if(aggressorIdx!==-1 && state.currentEvent==='quiet_round'){
+      log(`<b>Quiet Round</b> silences the Skirmish this round - no combat, no matter who holds the Garrison.`);
+    }
     endRound();
   } else {
     state.phase = 'skirmish-decide';
@@ -1424,6 +1481,7 @@ function resolveSkirmish(){
     let note = '';
     if(commit.card==='wild'){ mod = rollD6(); note = ` (Wildcard rolled ${mod})`; }
     if(commit.card==='gambit'){ const r1=rollD6(), r2=rollD6(); mod = Math.max(r1,r2); note = ` (Desperate Gambit rolled ${r1} and ${r2}, kept ${mod})`; }
+    if((commit.card==='wild'||commit.card==='gambit') && getLeader(player).id==='gambler'){ mod += 1; note += ` (+1 Gambler)`; }
     if(commit.card==='blitz'){ mod = isAggressorSide ? 2 : 0; }
     if(commit.card==='overrun'){
       if(player.ore>=1){ player.ore-=1; } else { mod = 0; note = ' (no Ore, fizzled)'; }
@@ -1473,7 +1531,7 @@ function resolveSkirmish(){
 
       if(loserCommit.card==='guard') margin = Math.max(0, margin-1);
 
-      const gained = Math.min(margin,4);
+      const gained = Math.min(margin, state.currentEvent==='skirmish_fever' ? 6 : 4);
       winner.influence += gained;
       popupGain(state.players.indexOf(winner), `+${gained} Influence`, true);
 
@@ -1666,6 +1724,8 @@ function renderAll(){
   document.getElementById('roundLabel').textContent = `${state.round} / ${TOTAL_ROUNDS}`;
   const phaseNames = {draw:'Drawing cards…', draft:'Drafting the board', 'skirmish-decide':'Skirmish decision', 'skirmish-commit':'Skirmish in progress', ended:'Game over'};
   document.getElementById('phaseLabel').textContent = phaseNames[state.phase] ? `— ${phaseNames[state.phase]}` : '';
+  const ev = getEvent();
+  document.getElementById('eventLine').innerHTML = ev ? `Round Event: <b style="color:var(--gold)">${ev.name}</b> - ${ev.desc}` : '';
   if(online.enabled && online.isHost) wsSend({type:'state', state});
 }
 
@@ -1715,6 +1775,7 @@ function renderHud(){
     const activeIdx = currentPicker();
     const isActive = state.phase==='draft' && activeIdx===i;
     const obj = getObjective(p);
+    const leader = getLeader(p);
     return `
     <div class="player-card p${i+1} ${isActive?'active':''}">
       <div class="name"><span>${p.name} ${p.type==='bot'?'(Bot)':''}</span><span class="influence-badge">${p.influence} Influence</span></div>
@@ -1726,6 +1787,7 @@ function renderHud(){
         ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
         ${p.winStreak>=2?`<span class="pill momentum">Momentum +1</span>`:''}
       </div>
+      ${leader?`<div class="objective-line">Leader: <b>${leader.name}</b> - ${leader.desc}</div>`:''}
       ${obj?`<div class="objective-line">Objective: <b>${obj.name}</b> - ${obj.desc} <span class="obj-status ${obj.check(p)?'met':''}">${obj.check(p)?'met':'not yet'}</span></div>`:''}
     </div>`;
   }).join('');
