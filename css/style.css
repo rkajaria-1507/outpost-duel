@@ -22,7 +22,7 @@
   }
   h1,h2,h3,.title-banner h1,.loc h3,.tcard b,.player-card .name,.dice-col .who{ font-family: var(--font-display); }
   h1,h2,h3{margin:0 0 8px;}
-  .wrap{max-width:1160px;margin:0 auto;}
+  .wrap{max-width:1440px;margin:0 auto;}
   .hidden{display:none !important;}
   .card-panel{
     background:linear-gradient(180deg,var(--panel),#f2e4c8);
@@ -335,7 +335,7 @@
   .loc.just-taken{ animation: locTaken .6s ease; }
 
   /* --- Game screen: left (resources+hand) / center (board) / right (log) --- */
-  .game-layout{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr) minmax(0,300px);gap:16px;align-items:start;}
+  .game-layout{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr) minmax(0,260px);gap:16px;align-items:start;}
   .game-col-left,.game-col-right{display:flex;flex-direction:column;gap:16px;min-width:0;}
   .game-col-center{display:flex;flex-direction:column;gap:16px;min-width:0;}
   #playerCardsPanel .stat-block{flex-direction:column;}
