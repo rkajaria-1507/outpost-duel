@@ -192,6 +192,19 @@
   .objective-line b{color:var(--gold);}
   .obj-status{font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);}
   .obj-status.met{color:var(--good);}
+  .pill.momentum{background:var(--adv);color:#1a0d2a;}
+
+  /* Intrigue cards - a distinct "conspiracy" look, separate from the
+     parchment Tactic cards, since they're a different kind of card entirely */
+  #intriguePanel{border-color:var(--adv);}
+  .intrigue-card{
+    border:2px solid var(--adv);border-radius:10px;padding:11px;width:180px;
+    background:linear-gradient(160deg,#2a1840,#180d28);color:var(--text);
+    box-shadow:0 3px 8px rgba(0,0,0,.45), inset 0 0 0 1px rgba(199,125,255,.2);
+  }
+  .intrigue-card b{color:var(--adv);font-family:var(--font-display);font-size:14px;}
+  .intrigue-desc{font-size:12px;color:var(--muted);margin:6px 0 9px;line-height:1.4;}
+  .intrigue-play-btn{width:100%;}
 
   /* --- Setup: mode cards --- */
   .mode-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:4px;}
@@ -456,6 +469,11 @@
       </div>
     </div>
 
+    <div class="card-panel hidden" id="intriguePanel">
+      <h3>Intrigue <span style="color:var(--muted);font-weight:400;font-size:13px">(free to play on your turn - doesn't cost a location pick)</span></h3>
+      <div id="intrigueHand" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+    </div>
+
     <div class="card-panel">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
@@ -693,6 +711,10 @@ const RULES_HTML = `
 
   <p><b>Objectives.</b> Each player is randomly dealt one Objective at the start of the game - visible to both sides in the HUD, so you can see exactly what your opponent is racing for (and decide whether to deny it to them). Fulfilling your Objective by the end of Round 6 grants a bonus to Influence on top of everything else, so the board fight is only half the game.</p>
 
+  <p><b>Intrigue Cards.</b> A second, separate kind of card. Instead of a personal deck, both players draw from one shared pool - 1 card at the start of the game, then 1 more every round. Unlike Tactic cards (which are hidden and only played face-down in a Skirmish), an Intrigue card can be played face-up at any time on your own draft turn, as a free action that doesn't cost you a location pick, and it resolves immediately: Raid (steal up to 2 Credits), Requisition (+2 Ore, +1 Credit), Coup (+3 Influence), Sabotage Supply (opponent loses 1 Troop), Foresight (draw 2 Tactic cards), or Windfall (+3 Credits).</p>
+
+  <p><b>Momentum.</b> Win two Skirmishes in a row and you gain Momentum: a +1 bonus added to your total in your next Skirmish. Losing or tying a Skirmish resets your streak back to zero, so a hot streak is powerful but fragile - and worth watching on your opponent's HUD.</p>
+
   <p><b>Ways to play.</b> Same screen: two people share one device and take turns. Online: one person hosts a room and gets a short code, the other joins with that code to play from a separate device. Demo: both seats are bots and the game plays itself automatically at your choice of speed, optionally looping into a new game when one ends.</p>
 `;
 
@@ -715,8 +737,9 @@ function makePlayer(name, type){
     name, type, // type: 'human' | 'bot'
     credits:2, ore:1, troops:1, influence:0,
     deck: makeDeck(), discard:[], hand:[],
+    intrigueHand:[],
     isAggressor:false, aggressorBonus:0,
-    skirmishWins:0, skirmishLosses:0, advancedPicks:0,
+    skirmishWins:0, skirmishLosses:0, advancedPicks:0, winStreak:0,
     // Store only the id - the full definition (with its check function) can't
     // survive JSON.stringify over the online-play WebSocket relay, so it's
     // looked back up from the shared client-side OBJECTIVES array instead.
@@ -725,6 +748,90 @@ function makePlayer(name, type){
 }
 function getObjective(player){
   return OBJECTIVES.find(o=>o.id===player.objectiveId);
+}
+
+/* Intrigue cards - a second, distinct card type (Dune Imperium-style):
+   drawn from one shared pool instead of a personal deck, played as a FREE
+   action on your own draft turn (doesn't cost a worker placement), and
+   resolve immediately rather than being held face-down for a Skirmish. */
+const INTRIGUE_DEFS = {
+  raid:            {name:'Raid',             desc:'Steal up to 2 Credits from your opponent.'},
+  requisition:     {name:'Requisition',      desc:'Gain 2 Ore and 1 Credit.'},
+  coup:            {name:'Coup',             desc:'Gain 3 Influence immediately.'},
+  sabotage_supply: {name:'Sabotage Supply',  desc:"Your opponent loses 1 Troop."},
+  foresight:       {name:'Foresight',        desc:'Draw 2 Tactic cards immediately.'},
+  windfall:        {name:'Windfall',         desc:'Gain 3 Credits.'},
+};
+const INTRIGUE_DECK_TEMPLATE = [...Object.keys(INTRIGUE_DEFS), ...Object.keys(INTRIGUE_DEFS)]; // 2 copies each
+
+function drawIntrigue(player, n=1){
+  for(let i=0;i<n;i++){
+    if(state.intrigueDeck.length===0){
+      if(state.intrigueDiscard.length===0) return;
+      state.intrigueDeck = shuffle(state.intrigueDiscard);
+      state.intrigueDiscard = [];
+    }
+    player.intrigueHand.push(state.intrigueDeck.pop());
+  }
+}
+
+function applyIntrigueEffect(playerIdx, cardId){
+  const player = state.players[playerIdx];
+  const opp = state.players[1-playerIdx];
+  switch(cardId){
+    case 'raid': {
+      const stolen = Math.min(2, opp.credits);
+      opp.credits -= stolen; player.credits += stolen;
+      log(`${player.name} plays <b>Raid</b> -> steals ${stolen} Credits from ${opp.name}.`);
+      break;
+    }
+    case 'requisition':
+      player.ore += 2; player.credits += 1;
+      log(`${player.name} plays <b>Requisition</b> -> +2 Ore, +1 Credit.`);
+      break;
+    case 'coup':
+      player.influence += 3;
+      log(`${player.name} plays <b>Coup</b> -> +3 Influence.`);
+      break;
+    case 'sabotage_supply': {
+      const lost = Math.min(1, opp.troops);
+      opp.troops -= lost;
+      log(`${player.name} plays <b>Sabotage Supply</b> -> ${opp.name} loses ${lost} Troop${lost!==1?'s':''}.`);
+      break;
+    }
+    case 'foresight':
+      drawCard(player, 2);
+      log(`${player.name} plays <b>Foresight</b> -> draws 2 Tactic cards.`);
+      break;
+    case 'windfall':
+      player.credits += 3;
+      log(`${player.name} plays <b>Windfall</b> -> +3 Credits.`);
+      break;
+  }
+  applyCaps(player); applyCaps(opp);
+  popupGain(playerIdx, `Intrigue: ${INTRIGUE_DEFS[cardId].name}`, true);
+}
+
+function playIntrigueCard(playerIdx, cardId){
+  const player = state.players[playerIdx];
+  const idx = player.intrigueHand.indexOf(cardId);
+  if(idx<0) return;
+  player.intrigueHand.splice(idx,1);
+  state.intrigueDiscard.push(cardId);
+  applyIntrigueEffect(playerIdx, cardId);
+  renderAll();
+}
+
+function humanPlayIntrigue(cardId){
+  const idx = currentPicker();
+  if(idx===null || state.phase!=='draft') return;
+  if(online.enabled){
+    if(online.isHost){ if(idx!==0) return; }
+    else { wsSend({type:'action', kind:'intrigue', cardId}); return; }
+  } else if(state.players[idx].type!=='human'){
+    return;
+  }
+  playIntrigueCard(idx, cardId);
 }
 
 /* Public race-condition objectives - both players can see both targets, which
@@ -830,6 +937,9 @@ function handleHostIncomingAction(msg){
     if(pendingGuestDecision){ const cb=pendingGuestDecision; pendingGuestDecision=null; cb(msg.attack); }
   } else if(msg.kind==='commit'){
     if(pendingGuestCommit){ const cb=pendingGuestCommit; pendingGuestCommit=null; cb(msg.troops, (msg.cardId===undefined?null:msg.cardId)); }
+  } else if(msg.kind==='intrigue'){
+    const idx = currentPicker();
+    if(idx===1 && state.phase==='draft'){ playIntrigueCard(1, msg.cardId); }
   }
 }
 
@@ -966,6 +1076,8 @@ function startGame(){
     logEntries: [],
     firstPlayerIdx: 0,
     phase: 'draw',
+    intrigueDeck: shuffle(INTRIGUE_DECK_TEMPLATE.slice()),
+    intrigueDiscard: [],
   };
 
   document.getElementById('setup').classList.add('hidden');
@@ -980,7 +1092,7 @@ function beginRound(){
   const s = state;
   s.board = {};
   LOCATIONS.forEach(l => s.board[l.id] = null);
-  s.players.forEach(p => { p.isAggressor=false; p.aggressorBonus=0; drawCard(p,2); });
+  s.players.forEach(p => { p.isAggressor=false; p.aggressorBonus=0; drawCard(p,2); drawIntrigue(p,1); });
 
   s.firstPlayerIdx = (s.round % 2 === 1) ? 0 : 1;
   const F = s.firstPlayerIdx, S = 1-F;
@@ -1177,6 +1289,11 @@ function maybeAutoPick(){
   if(idx===null) { advanceDraftOrSkirmish(); return; }
   if(state.players[idx].type==='bot'){
     setTimeout(()=>{
+      const player = state.players[idx];
+      if(player.intrigueHand.length>0 && Math.random()<0.8){
+        const cardId = player.intrigueHand[Math.floor(Math.random()*player.intrigueHand.length)];
+        playIntrigueCard(idx, cardId);
+      }
       const pick = botChoosePick(idx);
       applyLocationEffect(idx, pick.locId, pick.tier);
       advanceDraftOrSkirmish();
@@ -1319,8 +1436,10 @@ function resolveSkirmish(){
 
   const aggRoll = rollD6();
   const defRoll = rollD6();
-  let aggTotal = aggRoll + aggCommit.troops + aggMod.mod + (aggressor.aggressorBonus||0);
-  let defTotal = defRoll + defCommit.troops + defMod.mod;
+  const aggMomentum = aggressor.winStreak>=2 ? 1 : 0;
+  const defMomentum = defender.winStreak>=2 ? 1 : 0;
+  let aggTotal = aggRoll + aggCommit.troops + aggMod.mod + (aggressor.aggressorBonus||0) + aggMomentum;
+  let defTotal = defRoll + defCommit.troops + defMod.mod + defMomentum;
 
   // Undermine subtracts from the OPPONENT's total - applied before the
   // reveal so the totals shown in the dice-roll animation are already final.
@@ -1333,20 +1452,23 @@ function resolveSkirmish(){
   animateDiceRoll(aggressor.name, defender.name, aggRoll, defRoll, aggTotal, defTotal,
     aggCommit.card ? CARD_DEFS[aggCommit.card].name : null,
     defCommit.card ? CARD_DEFS[defCommit.card].name : null, ()=>{
-    log(`<b>Skirmish!</b> ${aggressor.name} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
-        `${defender.name} rolls ${defRoll} + ${defCommit.troops} troops${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.${undermineNote}`);
+    log(`<b>Skirmish!</b> ${aggressor.name} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${aggMomentum?` + 1 (Momentum)`:''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
+        `${defender.name} rolls ${defRoll} + ${defCommit.troops} troops${defMomentum?` + 1 (Momentum)`:''}${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.${undermineNote}`);
 
     if(aggCommit.card) aggressor.discard.push(aggCommit.card);
     if(defCommit.card) defender.discard.push(defCommit.card);
 
     if(aggTotal===defTotal){
       log(`It's a tie — both sides lose their committed Troops, no Influence changes.`);
+      aggressor.winStreak = 0; defender.winStreak = 0;
     } else {
       const aggWins = aggTotal > defTotal;
       const winner = aggWins ? aggressor : defender;
       const loser = aggWins ? defender : aggressor;
       const loserCommit = aggWins ? defCommit : aggCommit;
       winner.skirmishWins++; loser.skirmishLosses++;
+      winner.winStreak++; loser.winStreak = 0;
+      if(winner.winStreak===2) log(`${winner.name} has Momentum now - +1 to their next Skirmish total.`);
       let margin = Math.abs(aggTotal-defTotal);
 
       if(loserCommit.card==='guard') margin = Math.max(0, margin-1);
@@ -1537,6 +1659,7 @@ function renderAll(){
   renderHud();
   renderBoard();
   renderHand();
+  renderIntrigueHand();
   renderInfluenceTrack();
   renderRoundStepper();
   renderTurnBanner();
@@ -1601,6 +1724,7 @@ function renderHud(){
         <span>Troops: ${p.troops}</span>
         <span>Cards: ${p.hand.length}</span>
         ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
+        ${p.winStreak>=2?`<span class="pill momentum">Momentum +1</span>`:''}
       </div>
       ${obj?`<div class="objective-line">Objective: <b>${obj.name}</b> - ${obj.desc} <span class="obj-status ${obj.check(p)?'met':''}">${obj.check(p)?'met':'not yet'}</span></div>`:''}
     </div>`;
@@ -1653,6 +1777,31 @@ function renderBoard(){
       btn.onclick = (e)=>{ e.stopPropagation(); sfx.click(); humanPick(btn.dataset.loc, btn.dataset.tier); };
     });
   }
+}
+
+function renderIntrigueHand(){
+  const panel = document.getElementById('intriguePanel');
+  const el = document.getElementById('intrigueHand');
+  const activeIdx = currentPicker();
+  const canAct = online.enabled
+    ? (state.phase==='draft' && activeIdx===online.myIndex)
+    : (state.phase==='draft' && activeIdx!==null && state.players[activeIdx].type==='human');
+  if(!canAct){ panel.classList.add('hidden'); el.innerHTML=''; return; }
+  const idx = online.enabled ? online.myIndex : activeIdx;
+  const player = state.players[idx];
+  if(player.intrigueHand.length===0){ panel.classList.add('hidden'); el.innerHTML=''; return; }
+  panel.classList.remove('hidden');
+  el.innerHTML = player.intrigueHand.map(c=>{
+    const def = INTRIGUE_DEFS[c];
+    return `<div class="intrigue-card" data-card="${c}">
+      <b>${def.name}</b>
+      <div class="intrigue-desc">${def.desc}</div>
+      <button type="button" class="secondary intrigue-play-btn" data-card="${c}">Play</button>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.intrigue-play-btn').forEach(btn=>{
+    btn.onclick = ()=> humanPlayIntrigue(btn.dataset.card);
+  });
 }
 
 function renderHand(){
