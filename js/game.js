@@ -134,7 +134,7 @@ function toggleSound(){
 }
 
 const RULES_HTML = `
-  <p><b>Objective.</b> Play 6 rounds. Whoever has the most Influence at the end wins. Equal Influence is a draw.</p>
+  <p id="rules-objective"><b>Objective.</b> Play 6 rounds. Whoever has the most Influence at the end wins. Equal Influence is a draw.</p>
 
   <p><b>Setup.</b> Each player starts with 2 Credits, 1 Ore, 1 Troop, 0 Influence, and a personal deck of 12 different Tactic cards (shuffled). Resource caps apply at all times: Credits max 8, Ore max 6, Troops max 6 - anything above the cap is lost at the end of a round.</p>
 
@@ -146,7 +146,7 @@ const RULES_HTML = `
     <li><b>Upkeep.</b> Resources above the caps are discarded, and the next round begins.</li>
   </ol>
 
-  <p><b>Board Sites (Basic tier / Advanced tier):</b></p>
+  <p id="rules-board"><b>Board Sites (Basic tier / Advanced tier):</b></p>
   <ul>
     <li><b>Market</b> - Basic: +3 Credits. Advanced (pay 1 Ore): +6 Credits.</li>
     <li><b>Quarry</b> - Basic: +2 Ore and +1 Troop. Advanced (pay 1 Credit): +4 Ore and +2 Troops.</li>
@@ -158,7 +158,7 @@ const RULES_HTML = `
     <li><b>Shrine</b> - Basic: +1 Influence, free. Advanced: pay 2 Credits + 1 Ore for +3 Influence (if you can't afford it, +1 Influence instead).</li>
   </ul>
 
-  <p><b>Tactic Cards.</b> Your 12-card deck has one of each card below, grouped into four categories. They are only played face-down as a Skirmish modifier, never outside a Skirmish, and your hand always displays grouped by category with each card's combat number shown up front.</p>
+  <p id="rules-cards"><b>Tactic Cards.</b> Your 12-card deck has one of each card below, grouped into four categories. They are only played face-down as a Skirmish modifier, never outside a Skirmish, and your hand always displays grouped by category with each card's combat number shown up front.</p>
   <p><b>Aggressive</b> - raw combat power, usually at a cost:</p>
   <ul>
     <li><b>Ambush</b> - +2 combat. If you still lose the Skirmish, you lose 1 extra Troop.</li>
@@ -185,7 +185,7 @@ const RULES_HTML = `
     <li><b>Desperate Gambit</b> - roll two 6-sided dice, the modifier equals the higher of the two - a bigger, more reliable swing than the Wildcard.</li>
   </ul>
 
-  <p><b>Skirmish, step by step.</b></p>
+  <p id="rules-skirmish"><b>Skirmish, step by step.</b></p>
   <ol>
     <li>The Aggressor decides whether to attack the Defender. Declining ends the round with no Skirmish.</li>
     <li>If attacking, the Aggressor commits any number of their own Troops (from 0 up to everything they have) and may play one Tactic card face-down as a modifier.</li>
@@ -195,7 +195,7 @@ const RULES_HTML = `
     <li>Higher total wins. The winner gains Influence equal to the margin between the two totals, capped at 4 Influence. A tie means no Influence changes hands, but both sides still lose their committed Troops. Cards like Fortify, Berserker, Scout, and Sabotage apply their effect regardless of who wins.</li>
   </ol>
 
-  <p><b>Objectives.</b> Each player is randomly dealt one Objective at the start of the game - visible to both sides in the HUD, so you can see exactly what your opponent is racing for (and decide whether to deny it to them). Fulfilling your Objective by the end of Round 6 grants a bonus to Influence on top of everything else, so the board fight is only half the game.</p>
+  <p id="rules-extras"><b>Objectives.</b> Each player is randomly dealt one Objective at the start of the game - visible to both sides in the HUD, so you can see exactly what your opponent is racing for (and decide whether to deny it to them). Fulfilling your Objective by the end of Round 6 grants a bonus to Influence on top of everything else, so the board fight is only half the game.</p>
 
   <p><b>Intrigue Cards.</b> A second, separate kind of card. Instead of a personal deck, both players draw from one shared pool - 1 card at the start of the game, then 1 more every round. Unlike Tactic cards (which are hidden and only played face-down in a Skirmish), an Intrigue card can be played face-up at any time on your own draft turn, as a free action that doesn't cost you a location pick, and it resolves immediately: Raid (steal up to 2 Credits), Requisition (+2 Ore, +1 Credit), Coup (+3 Influence), Sabotage Supply (opponent loses 1 Troop), Foresight (draw 2 Tactic cards), or Windfall (+3 Credits).</p>
 
@@ -205,7 +205,7 @@ const RULES_HTML = `
 
   <p><b>Round Events.</b> A shared event is drawn fresh at the start of every round and applies equally to both players - shown under the Board heading. Windfall Round, Trade Winds, and Recruitment Drive hand out an immediate resource bump; Council Session hands out an extra Tactic card; Skirmish Fever raises the Skirmish Influence cap from 4 to 6 for the round; and a Quiet Round cancels the Skirmish entirely, no matter who holds the Garrison.</p>
 
-  <p><b>Ways to play.</b> Same screen: two people share one device and take turns. Online: one person hosts a room and gets a short code, the other joins with that code to play from a separate device. Demo: both seats are bots and the game plays itself automatically at your choice of speed, optionally looping into a new game when one ends.</p>
+  <p id="rules-modes"><b>Ways to play.</b> Same screen: two people share one device and take turns. Online: one person hosts a room and gets a short code, the other joins with that code to play from a separate device. Demo: both seats are bots and the game plays itself automatically at your choice of speed, optionally looping into a new game when one ends.</p>
 `;
 
 let state = null;
@@ -1168,19 +1168,23 @@ document.addEventListener('keydown', (e)=>{
    body (not inside a container that gets innerHTML-replaced) so its CSS
    animation can finish and remove it without being interrupted by a
    re-render, then it removes itself once the animation ends. */
+const activePopupCount = {}; // playerIdx -> concurrently visible popups, so they stack instead of overlapping illegibly
 function popupGain(playerIdx, text, good){
   if(good) sfx.gain();
   const cardEl = document.querySelector(`#playerCards .player-card.p${playerIdx+1}`);
   if(!cardEl) return;
   const rect = cardEl.getBoundingClientRect();
+  const stack = activePopupCount[playerIdx] || 0;
+  activePopupCount[playerIdx] = stack + 1;
   const el = document.createElement('div');
   el.className = `gain-popup ${good?'good':'bad'}`;
   el.textContent = text;
   el.style.left = `${rect.left + rect.width/2}px`;
-  el.style.top = `${rect.top}px`;
+  el.style.top = `${rect.top - stack*22}px`;
   document.body.appendChild(el);
-  el.addEventListener('animationend', ()=> el.remove());
-  setTimeout(()=>{ if(el.isConnected) el.remove(); }, 1500); // fallback if animationend never fires
+  const cleanup = ()=>{ activePopupCount[playerIdx] = Math.max(0, (activePopupCount[playerIdx]||1)-1); el.remove(); };
+  el.addEventListener('animationend', cleanup);
+  setTimeout(()=>{ if(el.isConnected) cleanup(); }, 1500); // fallback if animationend never fires
 }
 
 /* Big dramatic "Round N begins" banner - shown once per round, purely
@@ -1498,8 +1502,26 @@ document.getElementById('joinRoomBtn').addEventListener('click', ()=>{
   online.ws.onerror = ()=>{ document.getElementById('joinStatus').textContent = 'Connection error.'; };
 });
 
+const RULES_TABS = [
+  {id:'rules-objective', label:'Overview'},
+  {id:'rules-board',     label:'Board Sites'},
+  {id:'rules-cards',     label:'Tactic Cards'},
+  {id:'rules-skirmish',  label:'Skirmish'},
+  {id:'rules-extras',    label:'Objectives & More'},
+  {id:'rules-modes',     label:'Ways to Play'},
+];
 function openRulesModal(){
-  showModal('Full Rules', RULES_HTML, {dismissible:true});
+  const tabsHtml = `<div class="rules-tabs">${RULES_TABS.map(t=>
+    `<button type="button" class="rules-tab" data-target="${t.id}">${t.label}</button>`).join('')}</div>`;
+  showModal('Full Rules', tabsHtml + RULES_HTML, {dismissible:true});
+  document.querySelectorAll('.rules-tab').forEach(btn=>{
+    btn.onclick = ()=>{
+      document.querySelectorAll('.rules-tab').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const target = document.getElementById(btn.dataset.target);
+      if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+  });
 }
 document.getElementById('rulesBtn').addEventListener('click', openRulesModal);
 document.getElementById('rulesBtnSetup').addEventListener('click', openRulesModal);

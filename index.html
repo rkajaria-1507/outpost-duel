@@ -14,23 +14,32 @@
     <div class="title-banner"><h1>Outpost Duel</h1></div>
     <p class="subtitle">Two rival outposts, six rounds, one Influence track. Eight contested sites, each with a basic and an advanced tier — draft wisely, gamble on the Skirmish. Skill sets you up, the dice decide the margin.</p>
 
+    <span class="eyebrow">Deployment Briefing</span>
     <label>How will you play?</label>
     <div class="mode-cards" id="modeCards">
       <div class="mode-card selected" data-mode="local">
+        <span class="tag">Local</span>
         <h4>Same Screen</h4>
         <p>Two players, one device, pass and play.</p>
+        <div class="selected-flag">Selected</div>
       </div>
       <div class="mode-card" data-mode="host">
+        <span class="tag">Online</span>
         <h4>Host Online</h4>
         <p>Create a room and share the code with a friend on another device.</p>
+        <div class="selected-flag">Selected</div>
       </div>
       <div class="mode-card" data-mode="join">
+        <span class="tag">Online</span>
         <h4>Join Online</h4>
         <p>Enter a friend's room code to play from your own device.</p>
+        <div class="selected-flag">Selected</div>
       </div>
       <div class="mode-card" data-mode="demo">
+        <span class="tag">Auto</span>
         <h4>Demo</h4>
         <p>Sit back and watch two bots duel it out automatically.</p>
+        <div class="selected-flag">Selected</div>
       </div>
     </div>
     <select id="gameMode" class="hidden">
@@ -76,7 +85,8 @@
     </div>
 
     <div id="setupMain">
-      <div class="row" id="setupPlayersRow" style="margin-top:12px">
+      <span class="eyebrow" style="margin-top:14px">Squad Setup</span>
+      <div class="row" id="setupPlayersRow">
         <div class="player-setup p1">
           <h3 style="color:var(--p1)">Player 1</h3>
           <label>Name</label>
@@ -121,51 +131,54 @@
   <!-- GAME SCREEN -->
   <div id="game" class="hidden">
     <div id="demoBanner" class="hidden">DEMO MODE — two bots duel it out</div>
-    <div id="hud" class="card-panel">
-      <div class="stat-block" id="playerCards"></div>
-      <div style="text-align:right">
-        <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end">
-          <div class="sound-toggle on" id="soundToggleGame">Sound: On</div>
-          <div>
-            <div style="color:var(--muted);font-size:13px">Round</div>
-            <div style="font-size:26px;font-weight:800" id="roundLabel">1 / 6</div>
+
+    <div id="hud" class="card-panel" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+      <div class="sound-toggle on" id="soundToggleGame">Sound: On</div>
+      <div style="text-align:center">
+        <div style="color:var(--muted);font-size:13px">Round</div>
+        <div style="font-size:26px;font-weight:800" id="roundLabel">1 / 6</div>
+        <div class="round-stepper" id="roundStepper" style="justify-content:center;margin-top:6px"></div>
+      </div>
+      <div class="turn-banner" id="turnBanner" style="text-align:right;min-width:140px"></div>
+    </div>
+
+    <div class="game-layout">
+      <div class="game-col-left">
+        <div class="card-panel" id="playerCardsPanel">
+          <div class="stat-block" id="playerCards"></div>
+        </div>
+        <div class="card-panel hidden" id="intriguePanel">
+          <h3>Intrigue <span style="color:var(--muted);font-weight:400;font-size:13px">(free, doesn't cost a location pick)</span></h3>
+          <div id="intrigueHand" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+        </div>
+        <div class="card-panel">
+          <h3>Your Hand <span style="color:var(--muted);font-weight:400;font-size:13px">(used only in a Skirmish)</span></h3>
+          <div id="hand"></div>
+        </div>
+      </div>
+
+      <div class="game-col-center">
+        <div class="card-panel">
+          <div class="influence-track" id="influenceTrack"></div>
+        </div>
+        <div class="card-panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <h3 style="margin:0">Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
+            <button type="button" class="secondary" id="rulesBtn">Rules</button>
+          </div>
+          <div id="eventLine" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
+          <div id="boardFrame" style="margin-top:10px">
+            <div id="board"></div>
           </div>
         </div>
-        <div class="round-stepper" id="roundStepper" style="justify-content:flex-end;margin-top:6px"></div>
       </div>
-    </div>
 
-    <div class="card-panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
-        <div class="influence-track" id="influenceTrack" style="flex:1;min-width:220px"></div>
-        <div class="turn-banner" id="turnBanner"></div>
+      <div class="game-col-right">
+        <div class="card-panel" id="logPanel">
+          <h3>Log</h3>
+          <div id="log"></div>
+        </div>
       </div>
-    </div>
-
-    <div class="card-panel hidden" id="intriguePanel">
-      <h3>Intrigue <span style="color:var(--muted);font-weight:400;font-size:13px">(free to play on your turn - doesn't cost a location pick)</span></h3>
-      <div id="intrigueHand" style="display:flex;gap:10px;flex-wrap:wrap"></div>
-    </div>
-
-    <div class="card-panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0">Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
-        <button type="button" class="secondary" id="rulesBtn">Rules</button>
-      </div>
-      <div id="eventLine" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
-      <div id="boardFrame" style="margin-top:10px">
-        <div id="board"></div>
-      </div>
-    </div>
-
-    <div class="card-panel">
-      <h3>Your Hand <span style="color:var(--muted);font-weight:400;font-size:13px">(tactic cards are only used during a Skirmish)</span></h3>
-      <div id="hand"></div>
-    </div>
-
-    <div class="card-panel">
-      <h3>Log</h3>
-      <div id="log"></div>
     </div>
   </div>
 
