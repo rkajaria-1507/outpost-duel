@@ -1268,8 +1268,8 @@ const LOC_ICONS = {
   quarry:   {icon:'ore',       bg:'#e4e6d4'},
   foundry:  {icon:'ore',       bg:'#e4e6d4'},
   garrison: {icon:'troops',    bg:'#f5d8c8'},
-  outpost:  {icon:'influence', bg:'#f5deA0'},
-  shrine:   {icon:'influence', bg:'#f5deA0'},
+  outpost:  {icon:'influence', bg:'#f5dea0'},
+  shrine:   {icon:'influence', bg:'#f5dea0'},
   archive:  {icon:'cards',     bg:'#ece0f5'},
 };
 
