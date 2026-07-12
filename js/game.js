@@ -1253,6 +1253,15 @@ function showRoundBanner(text){
   setTimeout(()=>{ if(el.isConnected) el.remove(); }, 2200);
 }
 
+const ICONS = {
+  credits: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><circle cx="8" cy="8" r="6" fill="none" stroke="#c98a2b" stroke-width="2"/><text x="8" y="11" text-anchor="middle" fill="#c98a2b" font-size="8" font-weight="bold">$</text></svg>',
+  ore: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><path d="M8 1 L14 5 L11.5 14 H4.5 L2 5 Z" fill="none" stroke="#6b7a4a" stroke-width="1.6"/></svg>',
+  troops: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><path d="M8 1 L13 3.5 V8 C13 11.5 8 15 8 15 C8 15 3 11.5 3 8 V3.5 Z" fill="#b5502e"/></svg>',
+  cards: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><rect x="3" y="2" width="10" height="12" rx="1.5" fill="none" stroke="#8a5aa8" stroke-width="1.6"/><line x1="6" y1="6" x2="10" y2="6" stroke="#8a5aa8" stroke-width="1.2"/><line x1="6" y1="9" x2="10" y2="9" stroke="#8a5aa8" stroke-width="1.2"/></svg>',
+  influence: '<svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:4px"><path d="M8 1 L9.5 6 H15 L10.5 9.2 L12 14.5 L8 11 L4 14.5 L5.5 9.2 L1 6 H6.5 Z" fill="#5a7a3a"/></svg>',
+};
+function icon(name){ return ICONS[name] || ''; }
+
 /* -------------------------------- Render -------------------------------- */
 
 function renderAll(){
@@ -1322,10 +1331,10 @@ function renderHud(){
     <div class="player-card p${i+1} ${isActive?'active':''}">
       <div class="name"><span>${p.name} ${p.type==='bot'?'(Bot)':''}</span><span class="influence-badge">${p.influence} Influence</span></div>
       <div class="stats">
-        <span>Credits: ${p.credits}</span>
-        <span>Ore: ${p.ore}</span>
-        <span>Troops: ${p.troops}</span>
-        <span>Cards: ${p.hand.length}</span>
+        <span>${icon('credits')}Credits: ${p.credits}</span>
+        <span>${icon('ore')}Ore: ${p.ore}</span>
+        <span>${icon('troops')}Troops: ${p.troops}</span>
+        <span>${icon('cards')}Cards: ${p.hand.length}</span>
         ${p.isAggressor?`<span class="pill aggr">Aggressor${p.aggressorBonus?' +1':''}</span>`:''}
         ${p.winStreak>=2?`<span class="pill momentum">Momentum +1</span>`:''}
       </div>
