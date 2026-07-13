@@ -287,6 +287,16 @@
     100%{transform:scale(1) rotate(0);}
   }
   .skirmish-result{margin-top:14px;font-size:19px;font-weight:800;text-align:center;color:var(--gold);}
+  .skirmish-totals{font-size:13px;color:var(--muted);}
+  .skirmish-totals b{color:var(--text);font-size:15px;}
+  .skirmish-detail{margin-top:8px;font-size:14px;line-height:1.45;color:var(--ink);}
+  .skirmish-detail b{color:var(--gold);}
+  .skirmish-detail.skirmish-split{color:var(--muted);font-size:12px;}
+  .skirmish-bonus{
+    display:inline-block;margin-left:4px;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:700;
+    background:var(--good);color:#f7fff0;
+  }
+  #diceContinueBtn{font-size:15px;padding:11px 26px;margin:0 auto;}
 
   /* Floating resource/Influence gain popup */
   @keyframes popGain{

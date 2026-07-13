@@ -161,7 +161,7 @@ const RULES_HTML = `
     <li><b>Shrine</b> - Basic: +1 Influence, free. Advanced: pay 2 Credits + 1 Ore for +3 Influence (if you can't afford it, +1 Influence instead).</li>
   </ul>
 
-  <p id="rules-cards"><b>Tactic Cards.</b> Your 14-card deck has one of each card below, grouped into four categories. They are only played face-down as a Skirmish modifier, never outside a Skirmish, and your hand always displays grouped by category with each card's combat number shown up front.</p>
+  <p id="rules-cards"><b>Tactic Cards.</b> Your 14-card deck has one of each card below, grouped into four categories. They are only played face-down as a Skirmish modifier, never outside a Skirmish, and your hand always displays grouped by category with each card's combat number shown up front. You start with a hand of ${HAND_CAP} cards and can never hold more than ${HAND_CAP} - the only way to draw more Tactic cards is to place a worker on the Archive (or a Round Event that draws them), so card draw is a real board choice.</p>
   <p><b>Aggressive</b> - raw combat power, usually at a cost:</p>
   <ul>
     <li><b>Ambush</b> - +2 combat. If you still lose the Skirmish, you lose 1 extra Troop.</li>
@@ -203,7 +203,7 @@ const RULES_HTML = `
 
   <p id="rules-extras"><b>Objectives.</b> Each player is randomly dealt one Objective at the start of the game - visible to both sides in the HUD, so you can see exactly what your opponent is racing for (and decide whether to deny it to them). Fulfilling your Objective by the end of Round 6 grants a bonus to Influence on top of everything else, so the board fight is only half the game.</p>
 
-  <p><b>Intrigue Cards.</b> A second, separate kind of card. Instead of a personal deck, both players draw from one shared pool - 1 card every round starting Round 2. Unlike Tactic cards (which are hidden and only played face-down in a Skirmish), an Intrigue card can be played face-up at any time on your own draft turn, as a free action that doesn't cost you a location pick, and it resolves immediately: Raid (steal up to 2 Credits), Requisition (+2 Ore, +1 Credit), Coup (+3 Influence), Sabotage Supply (opponent loses 1 Troop), Foresight (draw 2 Tactic cards), Windfall (+3 Credits), Reinforce (+2 Troops), or Marketplace (trade 2 Ore for 4 Credits).</p>
+  <p><b>Intrigue Cards.</b> A second, separate kind of card. Instead of a personal deck, both players draw from one shared pool - 1 card every round starting Round 2. Unlike Tactic cards (which are hidden and only played face-down in a Skirmish), an Intrigue card can be played face-up at any time on your own draft turn, as a free action that doesn't cost you a location pick, and it resolves immediately. They're not free, though: <b>playing one costs ${INTRIGUE_PLAY_COST} Credits</b>, so you're always weighing the effect against the spend. Effects: Raid (steal up to 2 Credits), Requisition (+2 Ore, +1 Credit), Coup (+3 Influence), Sabotage Supply (opponent loses 1 Troop), Foresight (draw 2 Tactic cards), Windfall (+3 Credits), Reinforce (+2 Troops), or Marketplace (trade 2 Ore for 4 Credits).</p>
 
   <p><b>Getting more complex as you go.</b> Round 1 is deliberately simple: only the Basic tier is available on the board, and there are no Intrigue cards or Round Events yet - just draft, resources, and (maybe) a Skirmish. The Advanced tier and Intrigue cards unlock from Round 2 onward, and Round Events start from Round 3. By the back half of the game you're juggling all of it at once - the ramp is intentional.</p>
 
@@ -250,10 +250,20 @@ function getObjective(player){
 }
 
 /* Intrigue cards - a second, distinct card type (Dune Imperium-style):
-   drawn from one shared pool instead of a personal deck, played as a FREE
-   action on your own draft turn (doesn't cost a worker placement), and
-   resolve immediately rather than being held face-down for a Skirmish. */
-const INTRIGUE_DEFS = {
+   drawn from one shared pool instead of a personal deck, played on your own
+   draft turn (doesn't cost a worker placement), and resolving immediately
+   rather than being held face-down for a Skirmish. They're NOT free to play,
+   though - each one costs INTRIGUE_PLAY_COST Credits, so you're always
+   weighing the effect against the spend. That cost is what keeps them
+   valuable instead of pure upside. */
+const INTRIGUE_PLAY_COST = 2;
+
+/* Tactic (Skirmish) hand limit. You start each game with a full hand of
+   HAND_CAP cards and it can never hold more than that - the only way to draw
+   new Tactic cards is to place a worker on the Archive (or hit a Round Event
+   that draws them). That keeps the hand tight and makes card draw a real
+   board choice instead of an ever-growing pile. */
+const HAND_CAP = 5;const INTRIGUE_DEFS = {
   raid:            {name:'Raid',             desc:'Steal up to 2 Credits from your opponent.'},
   requisition:     {name:'Requisition',      desc:'Gain 2 Ore and 1 Credit.'},
   coup:            {name:'Coup',             desc:'Gain 3 Influence immediately.'},
@@ -323,13 +333,22 @@ function applyIntrigueEffect(playerIdx, cardId){
       break;
   }
   applyCaps(player); applyCaps(opp);
-  popupGain(playerIdx, `Intrigue: ${INTRIGUE_DEFS[cardId].name}`, true);
+  popupGain(playerIdx, `Intrigue: ${INTRIGUE_DEFS[cardId].name} (-${INTRIGUE_PLAY_COST})`, true);
+}
+
+function canPlayIntrigue(player){
+  return player.credits >= INTRIGUE_PLAY_COST;
 }
 
 function playIntrigueCard(playerIdx, cardId){
   const player = state.players[playerIdx];
   const idx = player.intrigueHand.indexOf(cardId);
   if(idx<0) return;
+  if(!canPlayIntrigue(player)){
+    log(`${player.name} can't afford to play <b>${INTRIGUE_DEFS[cardId].name}</b> (needs ${INTRIGUE_PLAY_COST} Credits).`);
+    return;
+  }
+  player.credits -= INTRIGUE_PLAY_COST;
   player.intrigueHand.splice(idx,1);
   state.intrigueDiscard.push(cardId);
   applyIntrigueEffect(playerIdx, cardId);
@@ -343,6 +362,10 @@ function humanPlayIntrigue(cardId){
     if(online.isHost){ if(idx!==0) return; }
     else { wsSend({type:'action', kind:'intrigue', cardId}); return; }
   } else if(state.players[idx].type!=='human'){
+    return;
+  }
+  if(!canPlayIntrigue(state.players[idx])){
+    log(`<b>${state.players[idx].name}</b> can't afford that Intrigue card - it costs ${INTRIGUE_PLAY_COST} Credits.`);
     return;
   }
   playIntrigueCard(idx, cardId);
@@ -398,6 +421,7 @@ function log(msg){
 
 function drawCard(player, n=1){
   for(let i=0;i<n;i++){
+    if(player.hand.length >= HAND_CAP) return;
     if(player.deck.length===0){
       if(player.discard.length===0) return;
       player.deck = shuffle(player.discard);
@@ -625,6 +649,8 @@ function startGame(){
     intrigueDiscard: [],
   };
 
+  state.players.forEach(p => drawCard(p, HAND_CAP));
+
   document.getElementById('setup').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
   document.getElementById('endScreen').classList.add('hidden');
@@ -638,7 +664,7 @@ function beginRound(){
   s.board = {};
   LOCATIONS.forEach(l => s.board[l.id] = null);
   s.players.forEach(p => {
-    p.isAggressor=false; p.aggressorBonus=0; drawCard(p,2);
+    p.isAggressor=false; p.aggressorBonus=0;
     if(intrigueUnlocked()) drawIntrigue(p,1);
   });
 
@@ -869,7 +895,7 @@ function maybeAutoPick(){
   if(state.players[idx].type==='bot'){
     setTimeout(()=>{
       const player = state.players[idx];
-      if(player.intrigueHand.length>0 && Math.random()<0.8){
+      if(player.intrigueHand.length>0 && canPlayIntrigue(player) && Math.random()<0.8){
         const cardId = player.intrigueHand[Math.floor(Math.random()*player.intrigueHand.length)];
         playIntrigueCard(idx, cardId);
       }
@@ -1033,11 +1059,31 @@ function resolveSkirmish(){
   if(aggCommit.card==='undermine'){ defTotal -= 2; undermineNote += ` ${aggressor.name}'s Undermine saps ${defender.name} for -2.`; }
   if(defCommit.card==='undermine'){ aggTotal -= 2; undermineNote += ` ${defender.name}'s Undermine saps ${aggressor.name} for -2.`; }
 
+  // Pre-compute the outcome so the result modal can spell it out clearly
+  // (who won, by how much, and the Influence split) instead of only a log line.
+  const isTie = aggTotal === defTotal;
+  const aggWins = aggTotal > defTotal;
+  const winnerName = isTie ? '' : (aggWins ? aggressor.name : defender.name);
+  const loserName  = isTie ? '' : (aggWins ? defender.name : aggressor.name);
+  let rawMargin = Math.abs(aggTotal - defTotal);
+  const loserCard  = isTie ? null : (aggWins ? defCommit.card : aggCommit.card);
+  if(loserCard === 'guard') rawMargin = Math.max(0, rawMargin - 1);
+  const inflCap = state.currentEvent === 'skirmish_fever' ? 6 : 4;
+  const influenceGained = isTie ? 0 : Math.min(rawMargin, inflCap);
+  const winnerCard = isTie ? null : (aggWins ? aggCommit.card : defCommit.card);
+  const rallyBonus = winnerCard === 'rally';
+  const skirmishResult = {
+    tie: isTie, winnerName, loserName, margin: rawMargin,
+    influence: influenceGained, rally: rallyBonus,
+    aggTotal, defTotal, aggName: aggressor.name, defName: defender.name
+  };
+
   // The numbers are already locked in - the dice-roll animation is a
   // suspense/legibility beat, not a source of new information.
   animateDiceRoll(aggressor.name, defender.name, aggRoll, defRoll, aggTotal, defTotal,
     aggCommit.card ? CARD_DEFS[aggCommit.card].name : null,
-    defCommit.card ? CARD_DEFS[defCommit.card].name : null, ()=>{
+    defCommit.card ? CARD_DEFS[defCommit.card].name : null,
+    skirmishResult, ()=>{
     log(`<b>Skirmish!</b> ${aggressor.name} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${aggMomentum?` + 1 (Momentum)`:''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
         `${defender.name} rolls ${defRoll} + ${defCommit.troops} troops${defMomentum?` + 1 (Momentum)`:''}${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.${undermineNote}`);
 
@@ -1119,9 +1165,11 @@ function resolveSkirmish(){
   });
 }
 
-function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal, aggCardName, defCardName, onDone){
+function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal, aggCardName, defCardName, result, onDone){
   const rollMs = clamp(BOT_TICK_MS*3, 150, 900);
   const holdMs = clamp(BOT_TICK_MS*4, 250, 1300);
+  let finished = false;
+  const finish = ()=>{ if(finished) return; finished = true; hideModal(); onDone(); };
 
   showModal('Skirmish - Rolling the Dice', `
     <div class="dice-row">
@@ -1131,10 +1179,16 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
         <div class="dice-card">${defCardName ? `Card: <b>${defCardName}</b>` : 'No card played'}</div></div>
     </div>
     <div id="diceResultArea" style="text-align:center;color:var(--muted);font-size:13px;margin-top:10px">Rolling...</div>
+    <div id="diceContinueWrap" class="hidden" style="text-align:center;margin-top:16px">
+      <button id="diceContinueBtn">Continue</button>
+    </div>
   `);
 
   const dieAgg = document.getElementById('dieAgg');
   const dieDef = document.getElementById('dieDef');
+  const continueBtn = document.getElementById('diceContinueBtn');
+  if(continueBtn) continueBtn.onclick = finish;
+
   const tickMs = Math.max(40, Math.round(rollMs/12));
   const interval = setInterval(()=>{
     dieAgg.textContent = String(1+Math.floor(Math.random()*6));
@@ -1152,16 +1206,36 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
     sfx.diceSettle();
     const resultEl = document.getElementById('diceResultArea');
     if(resultEl){
-      let verdict;
-      if(aggTotal===defTotal) verdict = "It's a tie!";
-      else if(aggTotal>defTotal) verdict = `${aggName} wins the Skirmish!`;
-      else verdict = `${defName} wins the Skirmish!`;
-      resultEl.innerHTML = `<div>Totals (dice + troops + cards): <b>${aggTotal}</b> vs <b>${defTotal}</b></div>` +
-        `<div class="skirmish-result ${aggTotal===defTotal?'':'win'}">${verdict}</div>`;
+      let verdict, detail;
+      if(result && !result.tie){
+        verdict = `${result.winnerName} wins the Skirmish!`;
+        detail =
+          `<div class="skirmish-totals">Totals (dice + troops + cards): <b>${result.aggTotal}</b> (${result.aggName}) vs <b>${result.defTotal}</b> (${result.defName})</div>` +
+          `<div class="skirmish-result win">${verdict}</div>` +
+          `<div class="skirmish-detail">Won by a margin of <b>${result.margin}</b> &rarr; <b>+${result.influence} Influence</b>${result.rally ? ` <span class="skirmish-bonus">Rally +1</span>` : ''}.</div>` +
+          `<div class="skirmish-detail skirmish-split">${result.winnerName} takes the contested Troops; ${result.loserName} loses theirs${result.influence ? ` &mdash; the Influence split is <b>${result.winnerName} +${result.influence}</b>` : ''}.</div>`;
+      } else if(result && result.tie){
+        verdict = "It's a tie!";
+        detail =
+          `<div class="skirmish-totals">Totals (dice + troops + cards): <b>${result.aggTotal}</b> vs <b>${result.defTotal}</b></div>` +
+          `<div class="skirmish-result">${verdict}</div>` +
+          `<div class="skirmish-detail">Both sides lose their committed Troops &mdash; no Influence changes hands.</div>`;
+      } else {
+        if(aggTotal===defTotal) verdict = "It's a tie!";
+        else if(aggTotal>defTotal) verdict = `${aggName} wins the Skirmish!`;
+        else verdict = `${defName} wins the Skirmish!`;
+        detail = `<div>Totals (dice + troops + cards): <b>${aggTotal}</b> vs <b>${defTotal}</b></div>` +
+          `<div class="skirmish-result ${aggTotal===defTotal?'':'win'}">${verdict}</div>`;
+      }
+      resultEl.innerHTML = detail;
+      const wrap = document.getElementById('diceContinueWrap');
+      if(wrap) wrap.classList.remove('hidden');
     }
   }, rollMs);
 
-  setTimeout(()=>{ hideModal(); onDone(); }, rollMs + holdMs);
+  // Fallback: if the player never clicks Continue, still advance so the
+  // round can't get stuck. Longer than holdMs so reading isn't cut short.
+  setTimeout(finish, rollMs + Math.max(holdMs, 2600));
 }
 
 /* ------------------------------ Round end ------------------------------ */
@@ -1421,13 +1495,15 @@ function renderIntrigueHand(){
   panel.classList.remove('hidden');
   el.innerHTML = player.intrigueHand.map(c=>{
     const def = INTRIGUE_DEFS[c];
+    const affordable = canPlayIntrigue(player);
     return `<div class="intrigue-card" data-card="${c}">
       <b>${def.name}</b>
       <div class="intrigue-desc">${def.desc}</div>
-      <button type="button" class="secondary intrigue-play-btn" data-card="${c}">Play</button>
+      <button type="button" class="secondary intrigue-play-btn" data-card="${c}"${affordable?'':' disabled'}>Play (${INTRIGUE_PLAY_COST} Credits)</button>
     </div>`;
   }).join('');
   el.querySelectorAll('.intrigue-play-btn').forEach(btn=>{
+    if(btn.hasAttribute('disabled')) return;
     btn.onclick = ()=> humanPlayIntrigue(btn.dataset.card);
   });
 }
