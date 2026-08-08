@@ -136,6 +136,9 @@ function toggleSound(){
   if(soundOn) sfx.click();
 }
 
+const INTRIGUE_PLAY_COST = 2;
+const HAND_CAP = 5;
+
 const RULES_HTML = `
   <p id="rules-objective"><b>Objective.</b> Play 6 rounds. Whoever has the most Influence at the end wins. Equal Influence is a draw.</p>
 
@@ -256,14 +259,13 @@ function getObjective(player){
    though - each one costs INTRIGUE_PLAY_COST Credits, so you're always
    weighing the effect against the spend. That cost is what keeps them
    valuable instead of pure upside. */
-const INTRIGUE_PLAY_COST = 2;
 
 /* Tactic (Skirmish) hand limit. You start each game with a full hand of
    HAND_CAP cards and it can never hold more than that - the only way to draw
    new Tactic cards is to place a worker on the Archive (or hit a Round Event
    that draws them). That keeps the hand tight and makes card draw a real
    board choice instead of an ever-growing pile. */
-const HAND_CAP = 5;const INTRIGUE_DEFS = {
+const INTRIGUE_DEFS = {
   raid:            {name:'Raid',             desc:'Steal up to 2 Credits from your opponent.'},
   requisition:     {name:'Requisition',      desc:'Gain 2 Ore and 1 Credit.'},
   coup:            {name:'Coup',             desc:'Gain 3 Influence immediately.'},
@@ -1449,18 +1451,24 @@ function renderBoard(){
     const takenBasic = taken && taken.tier==='basic';
     const takenAdvanced = taken && taken.tier==='advanced';
 
-    let tierRows = `
-        <div class="tier-row ${takenBasic?'is-taken':''}"><span class="tier-tag basic">BASIC</span><span>${loc.basic.label}</span>${takenBasic?`<span class="taken-tag p${taken.owner+1}">${state.players[taken.owner].name}</span>`:''}</div>
-        <div class="tier-row advanced ${takenAdvanced?'is-taken':''}"><span class="tier-tag advanced">ADVANCED</span><span>${loc.advanced.label}</span>${takenAdvanced?`<span class="taken-tag p${taken.owner+1}">${state.players[taken.owner].name}</span>`:''}</div>`;
+    const basicDisabled = !pickable;
+    const advDisabled = !pickable || !advUnlocked || !advAffordable;
 
-    let actions = '';
-    if(pickable){
-      actions = `
-        <div class="tier-actions">
-          <button type="button" class="tier-btn" data-loc="${loc.id}" data-tier="basic">Take Basic</button>
-          <button type="button" class="tier-btn advanced" data-loc="${loc.id}" data-tier="advanced" ${(advAffordable&&advUnlocked)?'':'disabled'}>${advUnlocked?`Take Advanced${loc.advanced.note?` (${loc.advanced.note})`:''}`:'Advanced (unlocks Round 2)'}</button>
-        </div>`;
+    function row(tier, label, note, isTaken, disabled, takenOwner){
+      const tag = tier==='advanced' ? 'ADV' : 'BASIC';
+      const cls = ['tier-row', tier, isTaken?'is-taken':'', (disabled && !isTaken)?'disabled':''].join(' ');
+      const data = (pickable && !isTaken && !disabled) ? `data-loc="${loc.id}" data-tier="${tier}"` : '';
+      const takenTag = isTaken ? `<span class="taken-tag p${(takenOwner+1)}">${state.players[takenOwner].name}</span>` : '';
+      const noteEl = (!isTaken && note) ? `<span class="tier-note">${note}</span>` : '';
+      return `<div class="${cls}" ${data}>`
+        + `<span class="tier-tag">${tag}</span>`
+        + `<span class="tier-label">${label}</span>`
+        + noteEl + takenTag
+        + `</div>`;
     }
+
+    const tierRows = row('basic', loc.basic.label, '', takenBasic, basicDisabled, taken ? taken.owner : null)
+      + row('advanced', loc.advanced.label, advUnlocked ? (advAffordable ? loc.advanced.note : 'cannot afford') : 'unlocks Round 2', takenAdvanced, advDisabled, taken ? taken.owner : null);
 
     const locIcon = LOC_ICONS[loc.id];
 
@@ -1469,14 +1477,13 @@ function renderBoard(){
         <div class="loc-icon" style="background:${locIcon.bg}">${icon(locIcon.icon)}</div>
         <h3>${loc.name}</h3>
         ${tierRows}
-        ${actions}
       </div>`;
   }).join('');
   prevBoardSnapshot = newSnapshot;
 
   if(humanCanPick){
-    el.querySelectorAll('.tier-btn').forEach(btn=>{
-      btn.onclick = (e)=>{ e.stopPropagation(); sfx.click(); humanPick(btn.dataset.loc, btn.dataset.tier); };
+    el.querySelectorAll('.tier-row[data-loc]').forEach(r=>{
+      r.onclick = (e)=>{ e.stopPropagation(); sfx.click(); humanPick(r.dataset.loc, r.dataset.tier); };
     });
   }
 }

@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Outpost Duel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -147,14 +150,6 @@
         <div class="card-panel" id="playerCardsPanel">
           <div class="stat-block" id="playerCards"></div>
         </div>
-        <div class="card-panel hidden" id="intriguePanel">
-          <h3>Intrigue <span style="color:var(--muted);font-weight:400;font-size:13px">(free, doesn't cost a location pick)</span></h3>
-          <div id="intrigueHand" style="display:flex;gap:10px;flex-wrap:wrap"></div>
-        </div>
-        <div class="card-panel">
-          <h3>Your Hand <span style="color:var(--muted);font-weight:400;font-size:13px">(used only in a Skirmish)</span></h3>
-          <div id="hand"></div>
-        </div>
       </div>
 
       <div class="game-col-center">
@@ -177,6 +172,14 @@
         <div class="card-panel" id="logPanel">
           <h3>Log</h3>
           <div id="log"></div>
+        </div>
+        <div class="card-panel hidden" id="intriguePanel">
+          <h3>Intrigue <span style="color:var(--muted);font-weight:400;font-size:13px">(free, doesn't cost a location pick)</span></h3>
+          <div id="intrigueHand" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+        </div>
+        <div class="card-panel">
+          <h3>Your Hand <span style="color:var(--muted);font-weight:400;font-size:13px">(used only in a Skirmish)</span></h3>
+          <div id="hand"></div>
         </div>
       </div>
     </div>
