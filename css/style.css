@@ -209,6 +209,19 @@
   --p1-wash:#f0d9cd; --p1-wash-ink:#7d2f16;
   --p2-wash:#d7e2ec; --p2-wash-ink:#22374d;
 
+  /* ---- scroll-region edges (section 18B) ---------------------------------
+     One ink for all five edge overlays, so `prefers-contrast: more` has a
+     single value to raise instead of eight literals. Kept deliberately WEAK at
+     rest: these only ever paint when the scroll timeline says there is content
+     in that direction, and 0.22 of --ink-soft is enough to read as "this
+     surface continues" without touching a glyph. */
+  --edge-fade:rgba(58,39,18,.22);
+  /* The 24-pitch ruling of the Influence ladder (section 6). Two alphas because
+     the empty pitches are drawn on the well and the rule that divides the
+     filled ones is drawn ON TOP of the fill. */
+  --pitch-empty:rgba(74,53,32,.11);
+  --pitch-rule:rgba(58,39,18,.42);
+
   /* ---- type --------------------------------------------------------------
      SYSTEM-ONLY. No @font-face, no webfont link: the game runs offline.
      Display  : Georgia-class serif, present on Win/macOS/iOS/Android.
@@ -917,6 +930,16 @@ label{
   display:flex; justify-content:space-between; align-items:baseline; gap:6px;
   margin-bottom:7px; font-weight:700; font-size:13px;
   min-width:0;
+  /* The name text and the Influence badge share one line, and the badge is
+     `flex-shrink:0` + `nowrap`, so a two-digit score plus a long name pushed
+     the row ~8px past a narrow card - which `overflow:hidden` on the card then
+     silently ate ("Player 1 - 16 Influenc"). The name itself must be the
+     flexible item; the badge keeps its size and the name ellipses instead. */
+  flex-wrap:wrap; row-gap:2px;
+  /* The badge is nowrap + shrink:0, so the NAME text is the item that has to
+     absorb a squeeze. Giving it min-width:0 + wrap lets it break/ellipsis
+     instead of forcing the row wider than the card. */
+  .player-card .name > :not(.influence-badge){ min-width:0; overflow-wrap:anywhere; }
   /* >>> D2. The existing `.name > span:first-child` rule assumes the name is
   >>> wrapped in a span. On the GAME screen it is (game.js:3532
   >>> `<div class="name"><span>${name}…</span><span class=influence-badge>`), but
@@ -934,10 +957,14 @@ label{
   overflow-wrap:anywhere;
 }
 .player-card .name > span:first-child{ min-width:0; overflow-wrap:anywhere; }
-/* The badge is the fixed half of the pair: it must never be the thing that
-   wraps, and it must never be squeezed. `flex-shrink:0` on it plus a breakable
-   sibling is the whole mechanism - drop either and the pair blows out again. */
-.player-card .name > .influence-badge{ flex:0 0 auto; max-width:50%; }
+/* The badge is the fixed half of the pair: it must not be *squeezed* below its
+   content, and the name beside it must be the item that breaks. `max-width:50%`
+   alone was not enough - with `white-space:nowrap` the badge still overflowed its
+   own 50% box by 20px on a narrow card (measured: 71px rendered, 91px of
+   content), and the card's `overflow:hidden` ate the tail ("16 Influenc").
+   So the cap is 50% AND the badge is allowed to break its own two words, which
+   keeps every character while letting the pair fit. */
+.player-card .name > .influence-badge{ flex:0 0 auto; max-width:50%; white-space:normal; overflow-wrap:break-word; }
 .player-card.p1 .name{ color:var(--p1-wash-ink); }
 .player-card.p2 .name{ color:var(--p2-wash-ink); }
 .influence-badge{
@@ -1225,85 +1252,240 @@ label{
   font-family:var(--font-num); font-weight:700; font-size:10px;
 }
 
-/* ---- INFLUENCE / STANDING TRACK -----------------------------------------
+/* ---- INFLUENCE / STANDING SCOREBOARD -------------------------------------
    The bars are kept (game.js renders .track-bar/.track-fill and the brief
    says a dropped class is a broken game) but they stop being the only
-   reading.
+   reading, and they stop being calibrated to a number the game never reaches.
 
-   AT 0/0 THIS USED TO COMMUNICATE NOTHING: two empty troughs, a "WIN" flag at
-   62% and a stray "0". It now reads as a scoreboard:
-     - each player is a COLUMN (label left, figure right, meter underneath)
-       instead of a cramped full-width row with the figure jammed at the end
-     - the figure is 26px on the numeric face with tabular figures, so 0 sits
-       in the same optical box as 12 and the two are directly comparable
-     - the meter has a visible groove and tick ladder even at zero, so an
-       empty bar reads as "a meter at zero", not "a missing element"
-     - a panel caption names what the number is (the caption is decorative
-       CSS text; the NAMES and the FIGURES it decorates are real DOM text, so
-       nothing is carried by a generated string)                          */
+   >>> THE AXIS IS THE REALITY, NOT A ROUND NUMBER.
+   >>> renderInfluenceTrack() computes
+   >>>     maxScale = Math.max(20, p1.influence, p2.influence, 1) + 4
+   >>> so the FLOOR of the axis is 24, while a real six-round game lands 14-22.
+   >>> The maths is not being changed here (it is the engine's, not this
+   >>> file's), so the styling is built for 14-22 and for the 0-8 of rounds
+   >>> 1-4. At 1920 the old layout gave each of the two tracks a 258-317px
+   >>> 1fr column inside an 816px panel, drew the "WIN" flag at a fixed 62% of
+   >>> it, and the measured result was this:
+   >>>     Influence 0-0    two 297px troughs, both fills 3px  (min-width)
+   >>>     Influence 4-3    fills 43px and 39px  - a 3px difference
+   >>>     Influence 16-14  fills 162px and 176px - the LEADER SHORTER
+   >>> The 16-14 line is the serious one. `.track-row` was
+   >>> `auto auto minmax(0,1fr)`, so the `.is-lead` row's LABEL grew by the
+   >>> width of the word "LEADING", its 1fr ladder column gave up exactly the
+   >>> same width, and 16 came out 14px behind 14. The two bars were not the
+   >>> same length, so the fill was no longer proportional to Influence and the
+   >>> one thing this scoreboard exists to say was wrong. Both ladders are now
+   >>> the same width BY CONSTRUCTION (a fixed name column and a fixed figure
+   >>> column either side of them), so 16 always draws further than 14.
+
+   FOUR CHANGES, so the panel reads at 0-0 AND at 22-16:
+
+   1 ONE PITCH = ONE INFLUENCE. The ladder is ruled at 24 pitches and 24 IS
+     the floor of maxScale, so for every round in which neither player has
+     passed 20 - which is rounds 1 through 5, and round 6 for anyone still
+     under it - a lit pitch is exactly one Influence. Four reads as four lit
+     cells and twenty reads as twenty: the difference is SHAPE. The old
+     continuous trough had no unit at all, which is why 4 and 20 looked the
+     same amount of "some". At zero the 24 empty pitches are still ruled, so a
+     meter at zero is a legible object and not a missing element.
+   2 THE TWO FIGURES ARE ADJACENT. Wide viewports lay the two seats out as a
+     VERSUS - name | ladder | 22 | 16 | ladder | name - so the figures share
+     one optical block with a hairline between them and "22 vs 16" is a single
+     shape, 12px between the last digit of one and the first of the other.
+     It is no longer two figures 362px apart on opposite sides of an 816px
+     panel. Below 1181px the same DOM becomes two stacked rows with the
+     figures right-aligned in one column, which is the other way a scoreboard
+     is read: one above the other, 40px apart, same size, same edge.
+   3 THE LADDER DOES NOT NEED 830px. 238px per side is enough for 24 legible
+     pitches, and the axis now stops answering a question nobody asked
+     (how much of the ruler is used) and starts answering the one that is
+     asked every round (how far ahead is he).
+   4 THE LEAD IS A WORD AND THE TIE IS A READING. `.is-lead` prints
+     "▲ LEADING" in that seat's own slot. renderInfluenceTrack() sets
+     lead = -1 at a tie and adds `.is-lead` to NEITHER row, so with no
+     `.is-lead` anywhere both slots print "LEVEL": a 0-0 start announces
+     itself as level rather than looking like two meters that failed.
+     >>> THE GAP'S MAGNITUDE IS NOT PRINTED, and it cannot be: the only
+     >>> numbers in this panel are real DOM text in `.track-value` and CSS
+     >>> cannot read text content, so a "LEADING 6" would have to be computed
+     >>> in JS, which this file does not do. The gap is therefore carried by
+     >>> the adjacency of the figures (12px apart, same size, same edge) and
+     >>> by the lit-pitch difference, and the WORD carries who is in front.
+     >>> If you want the number, it belongs in renderInfluenceTrack().       */
 .influence-track{
-  display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:8px 26px; margin-top:0;
+  /* 24 == maxScale's floor, so one pitch is one Influence. A custom property
+     rather than a repeated literal so the ruler and the ruling are the same
+     number in both gradients below and cannot drift apart. */
+  --inf-pitch:calc(100% / 24);
+  --inf-name:118px;
+  --inf-fig:42px;
+  display:grid; margin-top:0;
+  column-gap:11px; row-gap:3px;
+  align-items:center;
+  /* Stacked rows: the safe default, and the layout below 1181px. */
+  grid-template-columns:var(--inf-name) minmax(0,1fr) 58px;
+  grid-template-areas:
+    'head head head'
+    'n1   b1   v1'
+    'w1   b1   v1'
+    'n2   b2   v2'
+    'w2   b2   v2';
 }
 .influence-track::before{
   content:'Influence \2014 most wins';
-  grid-column:1 / -1;
+  grid-area:head;
   font-family:var(--font-ui); font-size:9px; font-weight:800;
   letter-spacing:1.2px; text-transform:uppercase; color:var(--muted-text);
   padding-bottom:5px; border-bottom:1px solid var(--parchment-line);
 }
-.track-row{
-  display:grid; min-width:0;
-  grid-template-columns:auto auto minmax(0,1fr);
-  grid-template-areas:'label value bar';
-  align-items:center; gap:0 10px;
-}
-.track-row > :nth-child(1){ grid-area:label; }
-.track-row > :nth-child(2){ grid-area:bar; }
-.track-row > :nth-child(3){ grid-area:value; }
+/* >>> `display:contents` IS THE WHOLE TRICK. renderInfluenceTrack() emits
+   >>> `<div class="track-row"><div class="track-label">…</div><div
+   >>> class="track-bar">…</div><div class="track-value">N</div></div>`, so
+   >>> with the row kept as a grid item the six halves of a scoreboard could
+   >>> never share a column - the two `.track-value` boxes live in two
+   >>> different rows and 16px of CSS cannot bring them together. Collapsing
+   >>> the row promotes its three children (and its ::after) to grid items of
+   >>> `.influence-track`, which is what lets the two FIGURES sit side by side
+   >>> in one 84px block instead of 362px apart. Both `.track-row`s still
+   >>> exist in the DOM and keep their `.is-lead` class, so every descendant
+   >>> selector on the row keeps working. */
+.track-row{ display:contents; }
+.track-row:nth-of-type(1) > .track-label{ grid-area:n1; }
+.track-row:nth-of-type(1) > .track-bar{ grid-area:b1; }
+.track-row:nth-of-type(1) > .track-value{ grid-area:v1; }
+.track-row:nth-of-type(2) > .track-label{ grid-area:n2; }
+.track-row:nth-of-type(2) > .track-bar{ grid-area:b2; }
+.track-row:nth-of-type(2) > .track-value{ grid-area:v2; }
 .track-label{
-  grid-area:label;
   font-size:12px; font-weight:700; color:var(--ink-soft);
-  /* Wraps rather than ellipsises: the LEADING marker below is a WORD in this
-     same box, and a label that clipped it would drop the fact the marker
-     exists to state. `anywhere` keeps a long player name from forcing the
-     meter to zero width. */
-  min-width:0; line-height:1.25;
-  overflow-wrap:anywhere;
+  /* Wraps rather than ellipsises, and `anywhere`, so a long player name
+     cannot push the ladder out of the row: the column is a fixed 118px and
+     the name is what gives. */
+  min-width:0; line-height:1.25; overflow-wrap:anywhere;
+  align-self:end;
 }
+/* The state word. One slot per seat, so the word is always next to the number
+   it describes, and it is the WORD (not a colour, not a fill length) that
+   states who is in front. `is-lead` therefore carries the state through three
+   independent channels: this word, the caret glyph, and the figure's own
+   treatment below. */
+.track-row::after{
+  content:'LEVEL';
+  align-self:start; justify-self:start;
+  font-family:var(--font-ui); font-size:9px; font-weight:800;
+  letter-spacing:.9px; text-transform:uppercase;
+  color:var(--muted-text); white-space:nowrap;
+}
+.track-row:nth-of-type(1)::after{ grid-area:w1; }
+.track-row:nth-of-type(2)::after{ grid-area:w2; }
+.track-row.is-lead::after{ content:'\25B2\00A0LEADING'; color:var(--accent-gold-ink); }
+/* >>> THE `WIN` FLAG IS GONE, and it is not coming back. It was a dashed
+   >>> marker at a FIXED 62% of both bars - a threshold the game does not
+   >>> have. Six rounds, most Influence, equal Influence is a draw: there is
+   >>> no line to cross, so the flag pointed at a number that does not exist
+   >>> and, at 0-0, promised a win from the middle of two empty troughs.
+   >>> `.is-lead` marks the seat that is actually in front; at a tie there is
+   >>> no marker at all, and both seats say LEVEL instead. */
 .track-bar{
   grid-area:bar;
-  position:relative; height:14px; margin-top:0;
-  background:
-    repeating-linear-gradient(90deg, rgba(74,53,32,.16) 0 1px, transparent 1px 10px),
-    rgba(74,53,32,.10);
-  border:1px solid var(--line); border-radius:var(--r-pill);
-  box-shadow:inset 0 1px 2px rgba(58,39,18,.22);
+  position:relative; height:24px; margin-top:0;
+  align-self:center;
+  background-color:rgba(74,53,32,.04);
+  /* The 24 empty pitches. Drawn as background rather than as a mask so the
+     1px border and the inset well shadow survive: a mask would cut the frame
+     at every gap and the ladder would lose its own edge. The pitch fill is
+     kept LOW (--pitch-empty) on purpose: at Influence 0 the well must read as
+     a void with a ruler in it, and an earlier .15 wash made twenty-four empty
+     pitches look like a filled bar in a neutral colour. */
+  background-image:repeating-linear-gradient(90deg,
+    var(--pitch-empty) 0 calc(var(--inf-pitch) - 2px),
+    rgba(74,53,32,0)    calc(var(--inf-pitch) - 2px) var(--inf-pitch));
+  border:1px solid var(--line); border-radius:var(--r-sm);
+  box-shadow:inset 0 1px 3px rgba(58,39,18,.20);
   overflow:hidden;
 }
+.track-bar::after{
+  content:''; position:absolute; inset:0; z-index:2; pointer-events:none;
+  /* The same ruling, but ON TOP, so it divides the filled part into cells as
+     well. A semi-transparent hairline rather than an opaque gap: the well
+     behind it is a translucent wash over a gradient panel, and an opaque gap
+     colour would show as a patch that does not match its own surroundings. */
+  background-image:repeating-linear-gradient(90deg,
+    var(--pitch-rule) 0 1px,
+    rgba(58,39,18,0) 1px var(--inf-pitch));
+}
 .track-fill{
-  height:100%; border-radius:var(--r-pill); min-width:3px;
+  height:100%; min-width:0;
+  /* The width transition is the integrator's existing one and is the reason
+     a Collapse's -2 reads as movement rather than a jump. `min-width` is 0,
+     not the old 3px: at Influence 0 a 3px coloured stub drew a meter that was
+     not at zero. The easing is --ease-out, which decelerates into BOTH a
+     gain and a loss, so a leader being caught (Collapse removes 2) arrives
+     rather than snaps. */
   transition:width var(--dur-5) var(--ease-out);
 }
-.track-fill.p1{ background:linear-gradient(90deg,var(--p1),#d98a63); }
-.track-fill.p2{ background:linear-gradient(90deg,var(--p2),#7fa3c0); }
-/* >>> THE `WIN` FLAG IS GONE. It was a dashed marker at a FIXED 62% of both
-   >>> bars - a threshold the game does not have. Six rounds, most Influence
-   >>> wins, equal Influence is a draw: there is no line to cross, so the flag
-   >>> pointed at a number that does not exist and, at 0-0, promised a win from
-   >>> the middle of two empty troughs. renderInfluenceTrack() now marks the
-   >>> seat that is actually in front with `.is-lead`, the label grows a word,
-   >>> and at a tie there is no marker at all. */
-.track-bar::after{ content:none; }
-.track-row.is-lead .track-label::after{
-  content:'\00A0\25B2\00A0LEADING';
-  color:var(--accent-gold-ink); font-size:9px; font-weight:800; letter-spacing:.6px;
-}
+/* Lit from above, to match the warm-source language the page uses everywhere
+   else - a horizontal gradient faded the far end of a 24px-tall bar toward
+   white, which washed the last few pitches out of the count. */
+.track-fill.p1{ background:linear-gradient(180deg,#d98a63,var(--p1)); }
+.track-fill.p2{ background:linear-gradient(180deg,#7fa3c0,var(--p2)); }
 .track-value{
-  grid-area:value;
-  font-family:var(--font-num); font-size:22px; font-weight:800;
+  font-family:var(--font-num); font-size:26px; font-weight:800;
   line-height:1; font-variant-numeric:tabular-nums;
+  color:var(--ink);
+  align-self:center; position:relative; z-index:1;
+}
+/* >>> THE FIGURES ARE ONE BLOCK. Both values sit in a 58px column, so they
+   >>> share an edge and a size whatever the digits are: "4" over "3" and "22"
+   >>> over "16" are the same optical shape, because tabular figures on the
+   >>> mono face put a 1 in the same box as a 2. */
+.track-row:nth-of-type(1) > .track-value{ justify-self:end; padding-right:9px; }
+.track-row:nth-of-type(2) > .track-value{ justify-self:start; padding-left:9px; }
+/* The leading seat's figure gets weight and a keyline, not only a hue - the
+   leader is also the row carrying the ▲ and the word LEADING. */
+.track-row.is-lead > .track-value{
   color:var(--accent-gold-ink);
+  text-shadow:0 1px 0 rgba(255,255,255,.55), 0 0 14px rgba(201,138,43,.30);
+}
+/* NOTE: no fill-direction rule at this level on purpose. In the STACKED layout
+   both ladders share one left origin, and that shared origin is exactly what
+   makes their filled lengths directly comparable - so P2 must fill left to
+   right there, the same as P1. The reversed fill below is scoped to the versus
+   layout, where the two figures sit between the ladders and each seat's ladder
+   has to grow TOWARD them for the gap to read at a glance. */
+
+/* ---- THE VERSUS LAYOUT, >= 1181px -----------------------------------------
+   One row, six columns: name | ladder | figure | figure | ladder | name. The
+   two ladders are `minmax(0,1fr)` on either side of an 84px figure block, so
+   they are the same width as each other by construction at every viewport,
+   which is the property the old `auto` name column destroyed. */
+@media (min-width:1181px){
+  .influence-track{
+    --inf-fig:42px;
+    column-gap:10px;
+    grid-template-columns:
+      var(--inf-name) minmax(0,1fr) var(--inf-fig) var(--inf-fig) minmax(0,1fr) var(--inf-name);
+    grid-template-areas:
+      'head head head head head head'
+      'n1   b1   v1   v2   b2   n2'
+      'w1   b1   v1   v2   b2   w2';
+  }
+  .track-label{ text-align:right; }
+  .track-row:nth-of-type(1) > .track-label{ text-align:left; }
+  .track-row:nth-of-type(1) > .track-value{
+    justify-self:end; padding-right:8px;
+    /* the hairline that turns two numbers into one divided block */
+    border-right:1px solid var(--parchment-line);
+  }
+  .track-row:nth-of-type(2) > .track-value{ justify-self:start; padding-left:8px; }
+  .track-row:nth-of-type(2)::after{ justify-self:end; }
+  .track-value{ font-size:34px; }
+  /* The wide row is 34px tall (the figure sets it), so the ladder gets 30. */
+  .track-bar{ height:30px; }
+  /* Both ladders grow inward, so the two lit ends approach each other across
+     the gap and the difference between them IS the gap. `.track-fill` is a
+     grandchild, so this needs the full chain. */
+  .track-row:nth-of-type(2) > .track-bar > .track-fill{ margin-left:auto; }
 }
 /* LEAD readout. Integrator adds one of these to .influence-track. */
 .gap-chip{
@@ -2545,10 +2727,15 @@ body.is-meltdown .tier-row.advanced .tier-note{
   overflow-wrap:anywhere; word-break:break-word;
 }
 /* An empty log is a "not yet" state, not a hole: renderLog() writes nothing
-   before the first entry, and a bare recessed well read as a broken panel. */
+   before the first entry, and a bare recessed well read as a broken panel.
+   >>> It keeps ::before, and section 18B's top edge is scoped to
+   >>> `#log:not(:empty)` precisely so the two cannot collide - but the base
+   >>> overlay rule (sticky, opacity 0) still matches, so this restores the
+   >>> message to an ordinary static box at full opacity. */
 #log:empty::before{
   content:'Nothing recorded yet.';
   display:block; padding:2px 2px 4px;
+  position:static; opacity:1; z-index:auto;
   font-style:italic; color:var(--muted-text);
 }
 #logPanel{
@@ -2605,13 +2792,14 @@ body.is-meltdown .tier-row.advanced .tier-note{
   0%,72%,100%{ transform:scale(1); opacity:1; }
   82%{ transform:scale(1.35); opacity:.55; }
 }
-/* The fade at the bottom of the well. Sits on the panel, not on the scroller,
-   so it costs nothing per scroll frame and never masks a focus ring. */
-#logPanel::after{
-  content:''; position:absolute; left:14px; right:14px; bottom:14px; height:26px;
-  pointer-events:none; border-radius:0 0 var(--r-sm) var(--r-sm);
-  background:linear-gradient(180deg,rgba(74,53,32,0),rgba(74,53,32,.13));
-}
+/* >>> THE ALWAYS-ON FADE IS GONE. This painted a 26px gradient over the foot
+   >>> of the well unconditionally, which is how a scroll region with nothing
+   >>> to scroll still had a line of its own text under a smear. Section 18B
+   >>> replaces it with a pair of sticky, scroll-timeline-driven overlays that
+   >>> exist only while there is content in that direction - and it puts them
+   >>> INSIDE #log rather than on this panel, so they can stick to the
+   >>> scrollport's own edges instead of guessing at its bottom padding. */
+#logPanel::after{ content:none; }
 
 #log .entry{
   margin-bottom:3px; padding:4px 8px; border-radius:6px; border-left:3px solid transparent;
@@ -4106,7 +4294,18 @@ body.is-meltdown .tier-row.advanced .tier-note{
   font-family:var(--font-num); font-size:11px; font-weight:800;
   letter-spacing:.6px; white-space:nowrap;
 }
-.odds-bar > span:nth-child(2){ box-shadow:inset 0 0 0 1px rgba(255,255,255,.55); border-radius:4px; }
+  .odds-bar > span:nth-child(2){ box-shadow:inset 0 0 0 1px rgba(255,255,255,.55); border-radius:4px; }
+  /* A 0% outcome still needs its segment - the bar must always read as three
+     outcomes and the fill is a channel in its own right - but a ~1% flex
+     segment cannot hold a "LOSE 0%" label. `min-width:34px` above keeps it
+     present, and the label then spilled out of its own box and collided with
+     the neighbour's ("IE 0%OSE 0"). JS marks a segment that is too small to
+     carry text with `.is-tiny`, which drops the label but keeps the segment
+     and its border, so the outcome is still identified by position and colour
+     and the exact figure is stated in the line beneath the bar. */
+  .odds-bar > span.is-tiny{
+    font-size:0; letter-spacing:0; padding:2px 0; min-width:10px;
+  }
 .odds-bar > span:nth-child(3){
   background-image:repeating-linear-gradient(45deg, rgba(0,0,0,.22) 0 4px, transparent 4px 8px) !important;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.35);
@@ -4607,7 +4806,13 @@ body.is-meltdown .tier-row.advanced .tier-note{
 @media (max-width:1180px){
   .game-layout{ grid-template-columns:minmax(0,200px) minmax(0,1fr) minmax(0,320px); gap:12px; }
   .wrap{ padding:0 4px; }
-  #board{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+  /* A 3-up board needs ~230px per tile to keep a tier label on one line. With
+     both rails still present the centre column cannot supply that below ~1240px,
+     and the tile text shreds vertically ("Mark/et", "+2/Tr/oo/ps"). So the board
+     drops to 2-up across this whole band - not at 820px as before, which left a
+     ~360px-wide dead zone between 820 and 1180 where the board was unreadable.
+     Two tiles per row is also what a real board looks like at this width. */
+  #board{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
   .tcard{ width:142px; }
 }
 @media (min-width:1001px){
@@ -4653,9 +4858,14 @@ body.is-meltdown .tier-row.advanced .tier-note{
   #playerCardsPanel .stat-block{ flex-direction:row; flex-wrap:wrap; }
   body{ padding:12px; }
 
-  /* Hand: horizontal scroll instead of a tall wrapped stack. A 1px gold
-     rail at the bottom replaces the scrollbar as the affordance, so the
-     gesture is still discoverable on a device with no visible scrollbar.
+  /* Hand: horizontal scroll instead of a tall wrapped stack.
+     >>> CORRECTION: this comment used to claim "a 1px gold rail at the bottom
+     >>> replaces the scrollbar as the affordance". There is no gold rail on
+     >>> #hand anywhere in this file - it was described and never built, which
+     >>> left the one region a phone player must swipe with no affordance at
+     >>> all. Section 18B now builds the real thing: an edge fade on each side,
+     >>> present only while there is more hand in that direction. The rail
+     >>> claim stays out of the comment because there is still no rail.
      `.hand-group` / `.hand-group-cards` are `display:contents` (section 8), so
      the category chips and the cards are already direct children of the
      scroller here - no per-group override is needed or possible. */
@@ -4681,7 +4891,26 @@ body.is-meltdown .tier-row.advanced .tier-note{
   /* No room for a rule in a horizontal scroller - the chip carries it alone. */
   #hand .hand-group-label::after{ display:none; }
   #hand .tcard{ width:136px; scroll-snap-align:start; }
-  #intrigueHand{ flex-wrap:nowrap; overflow-x:auto; padding-bottom:8px; -webkit-overflow-scrolling:touch; }
+  /* >>> `!important` ON `flex-wrap` IS THE POINT, NOT SLOP.
+     >>> index.html:185 ships this div as
+     >>>   <div id="intrigueHand" style="display:flex;gap:10px;flex-wrap:wrap">
+     >>> An inline declaration beats every selector in this file, so the
+     >>> `flex-wrap:nowrap` that was already written here has never once
+     >>> applied and #intrigueHand has never been the horizontal scroller it
+     >>> claims to be. Measured at 390x844 with nine intrigue cards:
+     >>>   before  scrollHeight 1492 / clientHeight 1492  - scrollableX FALSE
+     >>>   i.e. a 1492px-tall wrapped stack in a 390px column, which on its own
+     >>>   was three screens of page before the board.
+     >>> With the rule live it is a 157px scroller with the same edge treatment
+     >>> as #hand (section 18B). The alternative - a `[style*=...]` attribute
+     >>> selector - is exactly what this file's own notes rule out, because it
+     >>> is string-coupled to markup this file does not own. `!important` on one
+     >>> declared property is the smaller of the two couplings.
+     >>> TODO(JS): drop `flex-wrap:wrap` from index.html:185 and this
+     >>> `!important` can go with it. It is the only `!important` added here. */
+  #intrigueHand{ flex-wrap:nowrap !important; overflow-x:auto; padding-bottom:8px;
+                 -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain;
+                 scrollbar-width:thin; }
   .intrigue-card{ width:164px; flex:0 0 auto; }
 
   /* HUD -> one row of chips */
@@ -4734,12 +4963,17 @@ body.is-meltdown .tier-row.advanced .tier-note{
   .end-gap-bar{ height:22px; }
   .end-gap-value .is-margin{ font-size:22px; }
 
-  /* Scoreboard: the two players stack into one column so the bars get the
-     full phone width, and the figure drops back to a readable-but-not-huge
-     size so the bar underneath is not pushed off. */
-  .influence-track{ grid-template-columns:minmax(0,1fr); gap:8px; }
+  /* Scoreboard: already the stacked-row layout (it is the default and the
+     >=1181px block is the exception), so this only tightens it. The name
+     column shrinks to 84px to give the ladder more of the phone's width,
+     the figure holds at 24px - two digits of tabular mono at 24px is 29px,
+     which fits the 50px figure column without clipping - and the ladder
+     drops to 22px so both seats plus the eyebrow stay inside one panel. */
+  .influence-track{ --inf-name:84px; column-gap:9px; row-gap:2px;
+                    grid-template-columns:var(--inf-name) minmax(0,1fr) 50px; }
   .track-label{ font-size:11px; }
-  .track-value{ font-size:20px; }
+  .track-value{ font-size:24px; }
+  .track-bar{ min-height:22px; }
 
   /* Feature UI (s.13-15): the stance and token grids drop to ONE column so a
      150px minimum never overflows a 390px modal body, and the commit-step
@@ -4878,6 +5112,199 @@ body.is-meltdown .tier-row.advanced .tier-note{
 
 
 /* =============================================================================
+   18B. SCROLL REGIONS: EDGES AND SCROLLBARS
+   -----------------------------------------------------------------------------
+   Five regions in this app amputate their content with no signal:
+     #log              the rail's recessed well, capped at min(34vh,300px)
+     #skirmishBody     the commit / skirmish / dice / RULES modal body
+     #hand             the player's cards - a deliberate horizontal scroller
+     #intrigueHand     the intrigue cards - ditto
+     .rules-tabs       the rules modal's tab strip - horizontal
+   Measured before this pass, at 1440x900:
+     #log          scrollHeight 1267 / clientHeight 298   -> amputating
+     #skirmishBody scrollHeight 1164 / clientHeight 751   -> amputating
+     #log at rest  scrollHeight  107 / clientHeight 107   -> NOT scrollable,
+                  and #logPanel::after painted a 26px fade over it anyway,
+                  so the one state where the log fits was the one state where
+                  the fade covered a whole line of text.
+   None of the five had a scrollbar rule except #log (scrollbar-width:thin);
+   #skirmishBody, #hand and .rules-tabs were on the browser default.
+
+   THE TECHNIQUE, in one sentence: a pseudo-element that is a CHILD OF THE
+   SCROLLER, pinned with `position:sticky` to one edge of the scrollport, with
+   its opacity driven by a scroll-driven animation
+   (`animation-timeline: scroll(nearest ...)`) whose keyframes are 0 at the two
+   ends of the scroll range and 1 between them.
+
+   Why not the other two CSS-only techniques:
+     - `mask-image` fades the CONTENT, so it dims the first and last line
+       whether or not there is anything to scroll to. The brief's test - "does
+       not cover content at rest" - fails that by construction.
+     - `background-attachment: local` scroll-shadows need an OPAQUE layer in
+       the `local` half to punch the hole that makes the shadow directional.
+       #log's well is a translucent wash over a gradient panel and
+       #skirmishBody has no background at all, so that cover would be a patch
+       of flat colour that does not match its own surroundings.
+     - a sticky pseudo on its own is unconditional: it pins for the whole
+       scroll range, so it cannot know which end has more behind it.
+   The scroll timeline supplies exactly that knowledge, and supplies it
+   truthfully: a scroll timeline only exists on an element that really scrolls,
+   and its 0% and 100% ARE the ends of the scroll range. `opacity` is the only
+   animated property, every overlay is `pointer-events:none`, and every one is
+   killed under prefers-reduced-motion (see section 19) - where the themed
+   scrollbar, which is visible, is what carries the affordance instead.       */
+/* The four ramps, one per edge, and the asymmetry between them is the whole
+   point. `0%` is the START of the scroll range and `100%` is the END, so:
+     top    fade  0% only - at the top of the range there is nothing above, and
+                  at the BOTTOM of the range there is the most above
+     bottom fade 100% only - at the bottom of the range there is nothing below
+     start  fade  0% only
+     end    fade 100% only
+   The first cut of this had `100%{opacity:0}` on the top fade as well, which
+   is symmetric and wrong: measured on #log at scrollTop = max it read `0`
+   exactly when the log had 969px of unread entry above it. An edge affordance
+   has to know WHICH end it is guarding. */
+@keyframes od-fade-top{ 0%{opacity:0} 3%{opacity:1} 100%{opacity:1} }
+@keyframes od-fade-bottom{ 0%{opacity:1} 97%{opacity:1} 100%{opacity:0} }
+@keyframes od-fade-inline-start{ 0%{opacity:0} 2%{opacity:1} 100%{opacity:1} }
+@keyframes od-fade-inline-end{ 0%{opacity:1} 98%{opacity:1} 100%{opacity:0} }
+
+/* The overlays are built here and switched on in the @supports block below.
+   Base state is opacity 0 with no animation, so a browser without scroll
+   timelines, and a reader who has asked for reduced motion, get NO fade at all
+   rather than a permanent one over their text.
+
+   `flex:0 0 auto` is load-bearing on the two horizontal scrollers' children:
+   #hand, #intrigueHand and .rules-tabs are flex containers whose content is
+   WIDER than the box, so a generated `width:22px` item is a flex item with the
+   default `flex-shrink:1` and gets squeezed to 0px - measured, not assumed.
+   The width they need is set on each edge below. */
+#log::before, #log::after,
+#skirmishBody::before, #skirmishBody:not(:has(> .footer-actions))::after,
+.rules-tabs::before, .rules-tabs::after,
+#hand::before, #hand::after,
+#intrigueHand::before, #intrigueHand::after{
+  content:''; opacity:0; pointer-events:none; z-index:3;
+  position:sticky; flex:0 0 auto;
+}
+@supports (animation-timeline: scroll()){
+  /* ---- #log: two vertical edges -------------------------------------------
+     The overlays are sticky and OVERSIZE the scrollport's own 8px padding by
+     the same amount, so their net contribution to scrollHeight is zero: a
+     short log therefore still reports scrollHeight == clientHeight and the
+     timeline stays inactive, which is what makes the "at rest" case honest. */
+  #log:not(:empty)::before{
+    top:-8px; height:26px; margin-bottom:-26px;
+    background:linear-gradient(180deg, var(--edge-fade), rgba(58,39,18,0));
+    animation:od-fade-top both;
+    animation-timeline:scroll(nearest block);
+  }
+  #log:not(:empty)::after{
+    bottom:-8px; height:26px; margin-top:-26px;
+    background:linear-gradient(0deg, var(--edge-fade), rgba(58,39,18,0));
+    animation:od-fade-bottom both;
+    animation-timeline:scroll(nearest block);
+  }
+  /* ---- #skirmishBody: top edge always, bottom edge only where there is no
+     sticky action bar to do it. The commit modal pins `.footer-actions` to the
+     foot of the scrollport; a ::after would be AFTER that bar in flow and would
+     stick over its bottom edge, so in that modal the bottom treatment is the
+     band above the footer instead (two rules down). */
+  #skirmishBody::before{
+    top:-20px; height:34px; margin-bottom:-34px;
+    background:linear-gradient(180deg, var(--edge-fade), rgba(58,39,18,0));
+    animation:od-fade-top both;
+    animation-timeline:scroll(nearest block);
+  }
+  #skirmishBody:not(:has(> .footer-actions))::after{
+    bottom:-20px; height:34px; margin-top:-34px;
+    background:linear-gradient(0deg, var(--edge-fade), rgba(58,39,18,0));
+    animation:od-fade-bottom both;
+    animation-timeline:scroll(nearest block);
+  }
+  /* The band above the pinned action bar. It is the same gradient as the
+     ::after it replaces, positioned against the bar rather than the scrollport,
+     so it cannot collide with it, and it fades whatever is passing underneath
+     - which is the whole point. `.footer-actions` already owns
+     `position:sticky`, so ::before needs no positioning of its own beyond
+     `absolute` against it. */
+  #skirmishBody > .footer-actions::before{
+    content:''; position:absolute; left:0; right:0; top:-26px; height:26px;
+    opacity:0; pointer-events:none; z-index:1;
+    background:linear-gradient(180deg, rgba(242,228,200,0), rgba(242,228,200,.96));
+    animation:od-fade-bottom both;
+    animation-timeline:scroll(nearest block);
+  }
+  /* ---- .rules-tabs: horizontal edges ------------------------------------- */
+  .rules-tabs::before{
+    left:0; flex:0 0 22px; width:22px; margin-right:-22px;
+    background:linear-gradient(90deg, #f7ecd6 12%, rgba(247,236,214,0));
+    animation:od-fade-inline-start both;
+    animation-timeline:scroll(nearest inline);
+  }
+  .rules-tabs::after{
+    right:0; flex:0 0 22px; width:22px; margin-left:-22px;
+    background:linear-gradient(270deg, #f7ecd6 12%, rgba(247,236,214,0));
+    animation:od-fade-inline-end both;
+    animation-timeline:scroll(nearest inline);
+  }
+}
+@media (max-width:900px){
+  /* #hand and #intrigueHand only BECOME scrollers inside this block - above it
+     they wrap, and a generated 22px flex item in a wrapped row would be
+     invisible (opacity 0) but would still take a slot in the row and shift the
+     cards. So their edges are declared here, where the overflow exists. */
+  @supports (animation-timeline: scroll()){
+    #hand::before{
+      left:0; flex:0 0 22px; width:22px; margin-right:-22px;
+      background:linear-gradient(90deg, #fffaf0 12%, rgba(255,250,240,0));
+      animation:od-fade-inline-start both;
+      animation-timeline:scroll(nearest inline);
+    }
+    #hand::after{
+      right:0; flex:0 0 22px; width:22px; margin-left:-22px;
+      background:linear-gradient(270deg, #fffaf0 12%, rgba(255,250,240,0));
+      animation:od-fade-inline-end both;
+      animation-timeline:scroll(nearest inline);
+    }
+    #intrigueHand::before{
+      left:0; flex:0 0 20px; width:20px; margin-right:-20px;
+      background:linear-gradient(90deg, #fffaf0 12%, rgba(255,250,240,0));
+      animation:od-fade-inline-start both;
+      animation-timeline:scroll(nearest inline);
+    }
+    #intrigueHand::after{
+      right:0; flex:0 0 20px; width:20px; margin-left:-20px;
+      background:linear-gradient(270deg, #fffaf0 12%, rgba(255,250,240,0));
+      animation:od-fade-inline-end both;
+      animation-timeline:scroll(nearest inline);
+    }
+  }
+}
+
+/* ---- SCROLLBARS ------------------------------------------------------------
+   Chrome's default scrollbar is a 15px grey slab drawn over a themed cream
+   well, and three of the five regions above were on it. Two standard
+   properties cover Chrome (>=121) and Firefox together, which is why there are
+   no `::-webkit-scrollbar` rules here: where `scrollbar-width` is not `auto`
+   Chrome ignores the legacy pseudo-elements outright, so writing them would be
+   dead code that a later reader mistakes for the live mechanism.
+
+   `thin` rather than `none`. Hiding them would remove the one affordance that
+   survives prefers-reduced-motion (see the section note above) and would make
+   the 0px scrollbar-invisible scrollers ambiguous. It also costs ~4px of width
+   against the default, which is the right trade: a themed 9-11px bar on a
+   parchment page beats a 15px grey one. */
+html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
+  scrollbar-width:thin;
+  scrollbar-color:rgba(74,53,18,.48) rgba(74,53,18,.10);
+}
+/* The rail's well is recessed, so its track wants to be recessed too; the same
+   two colours everywhere keeps one scrollbar language across the app. */
+#log, #hand, #intrigueHand{ scrollbar-color:rgba(74,53,18,.42) rgba(74,53,18,.08); }
+
+
+/* =============================================================================
    19. ACCESSIBILITY MEDIA QUERIES
    ========================================================================== */
 
@@ -4957,6 +5384,23 @@ body.is-meltdown .tier-row.advanced .tier-note{
   #skirmishModal.modal-cinematic .box{    /* the title-card scale-in         */
     animation:none !important;
   }
+  /* --- the same duty, discharged for section 18B (scroll-region edges) ----
+     The four edge animations are named here rather than left to the blanket,
+     for the reason above: each is `both`-filled on a 0-to-1 opacity ramp, so a
+     1ms one-shot would leave every overlay at opacity 1 - i.e. a permanent
+     gradient over the first and last line of five scroll regions, which is the
+     exact defect this section was added to remove. `none` restores the base
+     `opacity:0`, so a reduced-motion reader gets no fade at any scroll
+     position; the themed scrollbar (section 18B, scrollbar-width:thin) is what
+     tells them the region scrolls. */
+  #log::before, #log::after,
+  #skirmishBody::before, #skirmishBody::after,
+  #skirmishBody > .footer-actions::before,
+  .rules-tabs::before, .rules-tabs::after,
+  #hand::before, #hand::after,
+  #intrigueHand::before, #intrigueHand::after{
+    animation:none !important;
+  }
 }
 
 /* ---- prefers-contrast: more ---------------------------------------------
@@ -4970,6 +5414,15 @@ body.is-meltdown .tier-row.advanced .tier-note{
     --parchment-line:#6b5b40;
     --gold-dim:#a8791f;
     --grain-opacity:0;
+    /* The two translucent inks added by section 18B and section 6. Both carry
+       a signal that is only a HINT at their default alpha - "this surface
+       continues" and "this is one of twenty-four" - so they are pushed toward
+       full ink here. The scoreboard's other channels are untouched: the figure
+       is still tabular mono, the leading seat still carries ▲ plus the word
+       LEADING, and a tie still says LEVEL. */
+    --edge-fade:rgba(38,26,10,.40);
+    --pitch-empty:rgba(61,51,37,.34);
+    --pitch-rule:rgba(38,26,10,.72);
   }
   .card-panel, .loc, .tcard, .player-card, #skirmishModal .box{
     border-width:2px; border-color:var(--ink);
@@ -5138,4 +5591,21 @@ body.is-meltdown .tier-row.advanced .tier-note{
   #log .entry{ border-left-color:CanvasText; }
   #log .entry:first-child{ border-left-width:4px; }
   select{ border:1px solid CanvasText; background-image:none; }
+  /* --- section 18B (scroll-region edges) ------------------------------------
+     HCM strips every background gradient, so the five edge overlays would
+     survive as invisible sticky boxes: still occupying scrollport, still
+     animating an opacity that produces nothing, and - because they are sticky -
+     still sitting where a sighted reader expects a shadow. They are removed,
+     and the scroll region states itself with a 1px CanvasText rule on each
+     edge that HCM will honour, which is a real, non-colour-only signal. */
+  #log::before, #log::after,
+  #skirmishBody::before, #skirmishBody::after,
+  #skirmishBody > .footer-actions::before,
+  .rules-tabs::before, .rules-tabs::after,
+  #hand::before, #hand::after,
+  #intrigueHand::before, #intrigueHand::after{ display:none; }
+  #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs{
+    border-top:1px solid CanvasText; border-bottom:1px solid CanvasText;
+    scrollbar-color:CanvasText Canvas;
+  }
 }

@@ -29,6 +29,11 @@ const CARD_DEFS = {
   gambit:    {name:"Desperate Gambit", mod:null, avg:4.47, category:'Chaos',      desc:"Roll two d6, modifier equals the higher of the two."},
 };
 const DECK_TEMPLATE = Object.keys(CARD_DEFS);
+/* The rules copy quotes the deck size, and it quoted "14" while this table held
+   16 - in two separate places. A player who counts the cards in the Tactic
+   Cards tab and then reads "14-card deck" has no reason to believe any other
+   number on the page either. Derived, so the count cannot drift again. */
+const DECK_SIZE = DECK_TEMPLATE.length;
 const CATEGORY_ORDER = ['Aggressive','Defensive','Utility','Chaos'];
 
 /* Cards are grouped by category for display (hand and the Skirmish commit
@@ -241,13 +246,13 @@ const RULES_HTML = `
     <section class="rules-panel active" id="rules-objective" role="tabpanel" aria-labelledby="rules-tab-objective">
       <div class="rules-lead">
         <p class="rules-win"><strong>Win condition.</strong> Play ${TOTAL_ROUNDS} rounds. Most Influence wins. Equal Influence is a draw.</p>
-        <p>Each player starts with <b>2 Credits</b>, <b>1 Ore</b>, <b>1 Troop</b>, <b>0 Influence</b>, and a personal deck of 14 Tactic cards. Caps are <b>Credits ${CAPS.credits} · Ore ${CAPS.ore} · Troops ${CAPS.troops}</b>, and they are <b>hard ceilings that clamp the moment you gain</b> — not an end-of-round trim. Anything over the cap is discarded immediately and never reaches your pool.</p>
+        <p>Each player starts with <b>2 Credits</b>, <b>1 Ore</b>, <b>1 Troop</b>, <b>0 Influence</b>, and a personal deck of ${DECK_SIZE} Tactic cards. Caps are <b>Credits ${CAPS.credits} · Ore ${CAPS.ore} · Troops ${CAPS.troops}</b>, and they are <b>hard ceilings that clamp the moment you gain</b> — not an end-of-round trim. Anything over the cap is discarded immediately and never reaches your pool.</p>
       </div>
       <h3 class="rules-h">Each round (5 steps)</h3>
       <ol class="rules-steps">
         <li><span class="rules-step-title">Event</span> From Round 3, both players draw one shared Round Event that applies to you equally.</li>
         <li><span class="rules-step-title">Intrigue</span> From Round 2, both players draw 1 Intrigue card from the shared pool.</li>
-        <li><span class="rules-step-title">Draft</span> 8 sites, 3 picks each (6 total) in snake order. Two sites go unused. First-picker alternates each round. Taking a site resolves Basic (free) or Advanced (costs more, pays more) immediately. You may also play one Intrigue card on your turn — free, it does not cost a pick.</li>
+        <li><span class="rules-step-title">Draft</span> 8 sites, 3 picks each (6 total) in snake order. Two sites go unused — or one, the round the Rift is open (see <b>Meltdown</b>). First-picker alternates each round. Taking a site resolves Basic (free) or Advanced (costs more, pays more) immediately. You may also play one Intrigue card on your turn — free, it does not cost a pick.</li>
         <li><span class="rules-step-title">Skirmish</span> If someone took Garrison, they may attack. Otherwise skip this step.</li>
         <li><span class="rules-step-title">Upkeep</span> Anything over a cap is trimmed (it was already trimmed on the way in), then the next round begins.</li>
       </ol>
@@ -257,7 +262,7 @@ const RULES_HTML = `
     </section>
 
     <section class="rules-panel" id="rules-board" role="tabpanel" aria-labelledby="rules-tab-board" hidden>
-      <p class="rules-intro">Eight sites. Each has a free <b>Basic</b> tier and a pricier <b>Advanced</b> tier. Two sites sit unused every round.</p>
+      <p class="rules-intro">Eight sites. Each has a free <b>Basic</b> tier and a pricier <b>Advanced</b> tier. Two sites sit unused every round — unless the Rift is open, which makes it <b>nine sites and six picks</b>. The Rift is announced at the start of every round from Round 3; its mutations are on the <b>Meltdown</b> tab.</p>
       <div class="rules-sites">
         <article class="rules-site">
           <h4>Market</h4>
@@ -303,7 +308,7 @@ const RULES_HTML = `
     </section>
 
     <section class="rules-panel" id="rules-cards" role="tabpanel" aria-labelledby="rules-tab-cards" hidden>
-      <p class="rules-intro">14-card personal deck (one of each). Played <b>face-down only in a Skirmish</b>. Your hand starts <b>full</b> at ${HAND_CAP} and can never hold more than ${HAND_CAP}.</p>
+      <p class="rules-intro">${DECK_SIZE}-card personal deck (one of each). Played <b>face-down only in a Skirmish</b>. Your hand starts <b>full</b> at ${HAND_CAP} and can never hold more than ${HAND_CAP}.</p>
       <div class="rules-callout">
         <strong>Your hand starts full.</strong> Archive, Foresight, Scout and Insight all draw Tactic cards — and all of them draw <b>zero</b> while your hand is at ${HAND_CAP}. Cards only ever leave your hand when you play one in a Skirmish, so drawing is a <b>rewards-for-spending</b> bonus, not a build-up. If the log says a card “drew 0”, you were at the cap.
       </div>
@@ -1135,11 +1140,27 @@ function runOdds(mineSpec, theirsSpec, fever){
 
 function pct(n){ return `${Math.round(n*10)/10}%`; }
 
+/* A 0% outcome still gets a segment - the bar must always read as three
+   outcomes, and its fill is a channel in its own right - but a ~1% flex
+   segment has no room for "LOSE 0%". The label then spilled out of its own box
+   and collided with the neighbour's ("IE 0%OSE 0"). Below ~7% the segment is
+   marked `.is-tiny`, which the stylesheet renders as a bare colour chip: the
+   outcome is still identified by position and fill, and the exact figures are
+   already stated in the projection line beneath the bar. */
+function oddsSeg(label, value, bg, extraClass){
+  const tiny = value < 0.07 ? ' is-tiny' : '';
+  return `<span class="odds-seg${tiny}${extraClass ? ' ' + extraClass : ''}"`
+    + ` style="flex:${Math.max(value,0.01)};background:${bg};color:#fff;border-radius:3px;padding:2px 4px;text-align:center"`
+    + ` aria-label="${label} ${pct(value)}"${tiny ? ' title="' + label + ' ' + pct(value) + '"' : ''}>`
+    + (tiny ? '' : `${label} ${pct(value)}`)
+    + `</span>`;
+}
+
 function oddsBar(p){
   return `<div class="odds-bar" style="display:flex;gap:6px;margin:6px 0;font-size:12px">`
-    + `<span style="flex:${Math.max(p.winPct,0.01)};background:var(--accent-cool,#3d6b7a);color:#fff;border-radius:3px;padding:2px 4px;text-align:center">WIN ${pct(p.winPct)}</span>`
-    + `<span style="flex:${Math.max(p.tiePct,0.01)};background:var(--accent-mute,#7a7568);color:#fff;border-radius:3px;padding:2px 4px;text-align:center">TIE ${pct(p.tiePct)}</span>`
-    + `<span style="flex:${Math.max(p.losePct,0.01)};background:var(--accent-blood,#8c1d18);color:#fff;border-radius:3px;padding:2px 4px;text-align:center">LOSE ${pct(p.losePct)}</span>`
+    + oddsSeg('WIN', p.winPct, 'var(--accent-cool,#3d6b7a)')
+    + oddsSeg('TIE', p.tiePct, 'var(--accent-mute,#7a7568)')
+    + oddsSeg('LOSE', p.losePct, 'var(--accent-blood,#8c1d18)')
     + `</div>`;
 }
 
@@ -1199,7 +1220,7 @@ function aggressorOddsHtml(aggIdx, troops, cardId, fever){
     + `</div>`
     + `<div style="margin-top:6px"><b style="font-size:12px">vs a passive defender (they hold all ${state.players[defIdx].troops} Troops back)</b></div>`
     + oddsBar(a) + thresholdLine(a)
-    + `<div style="margin-top:8px"><b style="font-size:12px">if ${esc(state.players[defIdx].name)} mirrors you (${troops} Troops, no card)</b></div>`
+    + `<div style="margin-top:8px"><b style="font-size:12px">if ${esc(state.players[defIdx].name)} mirrors you (${troops} Troop${troops === 1 ? '' : 's'}, no card)</b></div>`
     + oddsBar(b) + thresholdLine(b)
     + projectionLine('Your projection', a.mine, furyNote(a.mine.winStreak, a.myCap))
     + `<div style="font-size:12px;color:var(--muted);margin-top:4px">Influence cap this Skirmish: <b>${a.cap}</b>. Expected Influence vs a passive defender: <b>${Math.round(a.ev*10)/10}</b>.</div>`;
@@ -1368,6 +1389,10 @@ function skirmishStakesHtml(){
    know, so every surviving `c` and every `def` below it is engine-authored. */
 function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
   let selectedCardId = null;
+  /* A fresh modal starts from no pledge: without this the previous Skirmish's
+     declaration would be the baseline the delta is measured against and the
+     first chip click would announce nothing at all. */
+  srWagerSeen.wager = 'normal'; srWagerSeen.plus = false; srWagerSeen.reroll = false;
   maxTroops = Math.max(0, numOr(maxTroops, 0));
   const groups = groupHand(hand);
   const cardOptsHtml = groups.map(g=>`
@@ -1388,6 +1413,21 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
     </div>
   `).join('') || '<span style="color:var(--muted)">No cards in hand.</span>';
 
+  /* >>> ODDS ABOVE THE CARDS. The panel used to sit BELOW #cardSelect - i.e.
+     >>> under a 434px card grid inside a 751px dialog - so the one piece of
+     >>> decision support this screen exists to give was under the fold on every
+     >>> viewport the game ships for. It was also the WRONG ORDER even when it
+     >>> happened to be visible: choosing the card is what moves the numbers, so
+     >>> a player has to have the numbers in view while they read the cards.
+     >>> Document order is now slider -> odds -> cards -> sticky footer, which is
+     >>> the order the player needs to act in. `.odds-panel` already carries its
+     >>> own margin, so the slot needs no wrapper and no stylesheet change
+     >>> (css/style.css is not this file's to edit). A CSS engineer could later
+     >>> promote it out of the scrolling region into a fixed band above
+     >>> #skirmishBody's sticky `.footer-actions`; DOM order alone already puts
+     >>> it above the fold. The rationale lives here rather than in an HTML
+     >>> comment because a backtick inside the template literal ends it - which
+     >>> is exactly the bug this file had for ten minutes. */
   showModal(`${playerName} — Commit Troops`, `
     <p>You have ${maxTroops} Troops available.</p>
     <div class="troop-picker">
@@ -1396,9 +1436,9 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
       <span>${maxTroops}</span>
     </div>
     <p>Committing: <b id="troopVal">${Math.min(1,maxTroops)}</b> <span id="troopWord">Troops</span></p>
+    <div id="oddsSlot"></div>
     <p style="margin-top:10px">Optionally play one hidden Tactic card as a modifier:</p>
     <div class="card-select" id="cardSelect">${cardOptsHtml}</div>
-    <div id="oddsSlot"></div>
     <div class="footer-actions">
       <button id="commitBtn">Commit</button>
     </div>
@@ -1417,12 +1457,34 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
      a fizzle warning that only appeared if the card happened to be selected
      before the panel rendered would be worse than none. `playerIdx` is -1 for
      a caller with no seat (never in the live game, but the guard keeps
-     commitOddsHtml total). */
+     commitOddsHtml total).
+
+     >>> WHY THIS FUNCTION LOOKED BROKEN AND WAS NOT. The slot is written here,
+     >>> and an empty #oddsSlot with a missing #oddsPanel is EXACTLY what this
+     >>> guard produces when `playerIdx` is -1 - a caller that left the fifth
+     >>> argument off. Measured in a real browser, a probe doing
+     >>> `showCommitModal(name, max, hand, cb)` with no seat produced
+     >>> `oddsSlot.innerHTML.length === 0` and `oddsPanel === null` while every
+     >>> real path (aggressor, defender, and the online guest over a live
+     >>> WebSocket) rendered a full panel with a connected, in-body slot. The
+     >>> slot is never stale: showModal writes the body once, mountCommit only
+     >>> appends, and the footer move re-parents the footer. So the failure was
+     >>> "no seat", not "detached node", and hunting a re-render for it wastes a
+     >>> day. Warned once per session so the next reader is told outright. */
   function refreshOdds(){
     const slot = document.getElementById('oddsSlot');
     if(!slot) return;
-    const html = (playerIdx>=0) ? commitOddsHtml(playerIdx, Number(slider.value), selectedCardId) : '';
-    slot.innerHTML = html;
+    if(!(playerIdx >= 0)){
+      if(!showCommitModal._warnedSeat){
+        showCommitModal._warnedSeat = true;
+        if(typeof console !== 'undefined' && console.warn){
+          console.warn('[odds] showCommitModal() was called without a seat (playerIdx < 0), so the odds panel is empty by design. Pass the seat index as the 5th argument.');
+        }
+      }
+      slot.innerHTML = '';
+      return;
+    }
+    slot.innerHTML = commitOddsHtml(playerIdx, Number(slider.value), selectedCardId);
   }
 
   /* The selected-card state is owned in ONE place so the DOM class, the
@@ -1486,12 +1548,32 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
       },
       /* >>> Ask the feature to call back when the declaration changes, so the
          >>> "At stake" line tracks a stance declared inside this modal instead
-         >>> of freezing at open time. The feature currently calls
-         >>> `wireCommit(host, null)` and drops this, so until that one line is
-         >>> changed the panel is truthful at open and static after; it can
-         >>> never be WRONG, which is the half that mattered. */
-      onChange: ()=> refreshOdds(),
+         >>> of freezing at open time. The panel is truthful at open and static
+         >>> after; it can never be WRONG, which is the half that mattered.
+         >>> The same callback announces the new stance to #srLive: a stance
+         >>> pins the slider (All In to the top, Ghost to zero), so a player who
+         >>> cannot see the chip flip has to be told their commitment moved. */
+      onChange: (decl)=>{ refreshOdds(); srWagerSentence(decl); },
     });
+    srWrite([srWagerLockSentence()]);
+    /* Scoped delegated listener on the chips the feature just appended. It
+       runs in the bubble phase on the BODY, i.e. AFTER the feature's own
+       onclick has already repainted `.selected`, which is what makes reading
+       the chip here correct. Scoped to the wager chips so a card click or a
+       Commit click does not go through it at all, and every message it can
+       produce is deduplicated, so a click that changes nothing writes nothing. */
+    const mountHost = document.getElementById('skirmishBody');
+    if(mountHost && !mountHost.__odSrWager){
+      mountHost.__odSrWager = true;
+      mountHost.addEventListener('click', (ev)=>{
+        const chip = (ev.target && ev.target.closest)
+          ? ev.target.closest('#wagersStance .wagers-stance, #wagersTokens .wagers-token')
+          : null;
+        if(!chip) return;
+        srWrite([srWagerLockSentence()]);
+        srWagerSentence(null);
+      });
+    }
   }
 
   /* >>> THE COMMIT BUTTON WAS OFF SCREEN. showModal() wrote `.footer-actions`
@@ -2982,13 +3064,58 @@ function modalFocusables(){
     el => !el.disabled && el.offsetParent !== null
   );
 }
+/* ---- MODAL TITLES ARE PLAIN TEXT -------------------------------------------
+   CONTRACT: the `title` argument to showModal() is PLAIN TEXT. It is assigned
+   with .textContent, so `<`, `&`, `>` and friends are inert and can never
+   become markup - the title has never been a sink.
+
+   That safety is exactly why an HTML entity in a title is displayed literally:
+   a caller who wrote showModal('Contested &mdash; Buy the site?') rendered the
+   characters "&mdash;" in the title bar, because textContent does not decode
+   entities (it is innerHTML that decodes them, and innerHTML is not used here).
+   The caller is not always this file - js/feature-wagers.js passes titles of
+   its own - so showModal decodes the entities it understands on the way in,
+   and leaves everything else untouched.
+
+   New callers should pass the CHARACTER (an em dash, not "&mdash;"), not an
+   entity. Decoding here is a compatibility shim for existing call sites, not
+   an invitation.
+
+   The whitelist is deliberately small and named-only: `&amp; &lt; &gt;` are
+   included because they are the ones that make a literal-looking string
+   actually correct ("Bob &amp; Co" is "Bob & Co"), and numeric references are
+   accepted because they decode to a single character, which .textContent then
+   renders as that character rather than as markup. Anything unrecognised is
+   passed through unchanged, so an unknown entity can never be silently eaten. */
+const TITLE_ENTITY_CHARS = Object.freeze({
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0',
+  mdash: '\u2014', ndash: '\u2013', hellip: '\u2026', minus: '\u2212',
+  lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201c', rdquo: '\u201d',
+  laquo: '\u00ab', raquo: '\u00bb', bull: '\u2022', middot: '\u00b7',
+  times: '\u00d7', deg: '\u00b0', copy: '\u00a9', reg: '\u00ae',
+  trade: '\u2122', rarr: '\u2192', larr: '\u2190', ne: '\u2260',
+});
+function decodeTitleEntities(title){
+  if(typeof title !== 'string' || title.indexOf('&') === -1) return (typeof title === 'string') ? title : '';
+  return title.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, name)=>{
+    if(name.charAt(0) === '#'){
+      const hex = (name.charAt(1) === 'x' || name.charAt(1) === 'X');
+      const code = hex ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+      if(!isFinite(code) || code <= 0 || code > 0x10FFFF) return match;
+      try{ return String.fromCodePoint(code); }
+      catch(_){ return match; }
+    }
+    const key = name.toLowerCase();
+    return Object.prototype.hasOwnProperty.call(TITLE_ENTITY_CHARS, key) ? TITLE_ENTITY_CHARS[key] : match;
+  });
+}
 function showModal(title, bodyHtml, opts={}){
   const dismissible = !!opts.dismissible;
   const modal = document.getElementById('skirmishModal');
   const box = modal.querySelector('.box');
   const wasHidden = modal.classList.contains('hidden');
   if(wasHidden) modalReturnFocus = document.activeElement;
-  document.getElementById('skirmishTitle').textContent = title;
+  document.getElementById('skirmishTitle').textContent = decodeTitleEntities(title);
   document.getElementById('skirmishBody').innerHTML = bodyHtml;
   document.getElementById('modalCloseBtn').classList.toggle('hidden', !dismissible);
   modal.dataset.dismissible = dismissible ? '1' : '0';
@@ -3447,6 +3574,205 @@ function renderBoardHeader(){
   el.innerHTML = parts.join('');
 }
 
+/* ============================ #srLive (SCREEN READER) =====================
+   index.html declares `#srLive` - an aria-live=polite, aria-atomic=true,
+   visually-hidden region - and styled it as the mirror of the colour-coded
+   board state. Nothing ever wrote to it. On a board whose whole visual rule
+   is "no state is signalled by colour alone", that was the single largest gap
+   between what a sighted player is told and what a screen-reader player is
+   told: the heat ramp, the Rift reveal, the contested tile, the Advanced lock
+   and the objective flip were all drawn and none of it was announced.
+
+   THREE RULES, AND THEY ARE NOT NEGOTIABLE:
+
+   1. WRITE, NEVER APPEND. aria-atomic="true" means every write re-announces
+      the WHOLE region, so this is `textContent = msg` and never `+=` or
+      insertAdjacentText. An append here would re-read every previous message
+      on every change.
+
+   2. STATE, NOT NARRATION. Each entry below is a fact with a value, phrased so
+      a change is obvious when it is heard. Nothing here describes an
+      animation, a transition or a player's action.
+
+   3. WRITE ON CHANGE ONLY. renderAll() runs on every single action in the
+      game - a pick, a card, a log line - so an unconditional write would
+      re-announce the whole board state on every keystroke. Each fact is
+      diffed against the value it held at the last render and only CHANGED
+      facts are composed into the message; a render where nothing moved writes
+      nothing at all.
+
+   Every entry is guarded: a missing #srLive, a missing feature, a missing
+   state key or a broken objective check degrades to "say nothing", never to a
+   throw inside renderAll(). */
+const SR_MAX = 120;
+let srLast = '';
+function srWrite(parts){
+  const msg = (parts || []).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  if(!msg || msg === srLast) return;
+  const el = document.getElementById('srLive');
+  if(!el) return;
+  srLast = msg;
+  el.textContent = (msg.length > SR_MAX) ? msg.slice(0, SR_MAX - 1).trim() + '\u2026' : msg;
+}
+/* One delta per fact, compared against the value that fact held last time.
+   `value` may be anything JSON-comparable as a string; the map is keyed by
+   fact name so two facts cannot collide. */
+const srSeen = Object.create(null);
+function srFact(key, value, msg){
+  const v = String(value);
+  if(srSeen[key] === v) return null;
+  srSeen[key] = v;
+  return msg || null;
+}
+/* The Rift's mutation, read as a NAME out of the feature's frozen table rather
+   than restated here, so the announcement cannot name a mutation differently
+   from the board tile does. Only the name, not the clause: the tile beside it
+   prints the full effect, and a whole composed message has to stay inside
+   120 characters or the facts at the end of it are never heard at all. */
+function srRiftSentence(){
+  const rift = riftLocIfLive();
+  if(!rift || !state.riftMut) return '';
+  const muts = (typeof OD !== 'undefined' && OD.Chaos && Array.isArray(OD.Chaos.MUTATIONS)) ? OD.Chaos.MUTATIONS : null;
+  const mut = muts ? muts.find(m=>m && m.id===state.riftMut) : null;
+  const siteName = ((state.riftTarget && LOCATIONS.find(l=>l.id===state.riftTarget)) || {}).name || 'a site';
+  const name = (mut && mut.name) ? mut.name : state.riftMut;
+  return `Rift open on ${siteName}, wearing ${name}${state.riftContested ? ', and it is Contested' : ''}.`;
+}
+/* Caps are read through the same numbers the clamp uses, so the announcement
+   can never say a player is capped when the engine would have let them past
+   it. Names the resources that are ACTUALLY full, not the whole table. */
+function srCapsSentence(){
+  if(!state || !state.players) return '';
+  const p = state.players[0];
+  if(!p) return '';
+  const full = [];
+  if(p.credits >= CAPS.credits) full.push(`Credits ${CAPS.credits}`);
+  if(p.ore >= CAPS.ore) full.push(`Ore ${CAPS.ore}`);
+  if(p.troops >= CAPS.troops) full.push(`Troops ${CAPS.troops}`);
+  return full.length ? `Seat 1 at cap: ${full.join(', ')}. Gains are discarded.` : '';
+}
+/* Objective MET / NOT YET, one fact per seat. check() is the engine's own
+   predicate - the same one that pays the bonus at endRound - so the
+   announcement cannot disagree with the payout. */
+function srObjectiveSentence(i){
+  const p = (state && state.players && state.players[i]) || null;
+  if(!p) return '';
+  const obj = getObjective(p);
+  if(!obj || typeof obj.check !== 'function') return '';
+  let met = false;
+  try{ met = !!obj.check(p); }
+  catch(_){ return ''; }
+  let prog = '';
+  if(typeof obj.progress === 'function'){
+    try{
+      const pr = obj.progress(p) || {};
+      if(pr && pr.need > 1) prog = `, ${pr.have} of ${pr.need} ${pr.unit||''}`;
+    }catch(_){ /* a broken progress fn must not silence the fact it qualifies */ }
+  }
+  return met
+    ? `Seat ${i+1} objective met: ${obj.name}, +${obj.bonus} Influence.`
+    : `Seat ${i+1} objective not yet: ${obj.name}${prog}.`;
+}
+/* >>> WHY THIS READS THE DOM AS WELL AS THE CALLBACK. `mountCommit` builds its
+     >>> controller with `wireCommit(host, null)` - the `onChange` we hand it is
+     >>> NOT registered - so a declared stance never reaches this file through
+     >>> the API it was offered. Observed directly: the chips moved, `srLive`
+     >>> stayed empty. So the declaration is read off the MOUNTED CHIPS as
+     >>> well: those are in the body this function built, they are already
+     >>> focusable, already carry `.selected` for the visible state, and reading
+     >>> them cannot drift from what the player is looking at. When the feature
+     >>> does honour `onChange`, the callback argument wins and this is inert. */
+function srWagerDeclaration(){
+  const body = document.getElementById('skirmishBody');
+  if(!body) return null;
+  const stance = body.querySelector('#wagersStance .wagers-stance.selected');
+  const plus   = body.querySelector('#wagersTokens .wagers-token[data-token="plus"].selected');
+  const reroll = body.querySelector('#wagersTokens .wagers-token[data-token="reroll"].selected');
+  if(!stance && !plus && !reroll) return null;
+  return {
+    wager: (stance && stance.dataset.wager) || 'normal',
+    betrayal: { plus: !!plus, reroll: !!reroll },
+  };
+}
+/* Every wager stance, and every token declared alongside it. State, not
+   narration: what is committed, not what the player did. NORMAL is the absence
+   of a pledge and says nothing; ALL IN and GHOST each pin the slider, so a
+   screen-reader player has to be told their own commitment was moved for
+   them.
+
+   Announced as a DELTA, on the same rule as every board fact: a stance that
+   has not moved is not restated. Otherwise clicking a token three declarations
+   deep re-announces the stance and both tokens too, and the message walks past
+   the 120-character ceiling carrying the old news. */
+const srWagerSeen = { wager: 'normal', plus: false, reroll: false };
+function srWagerSentence(decl){
+  const d = (decl && (decl.wager || (decl.betrayal && (decl.betrayal.plus || decl.betrayal.reroll))))
+    ? decl : srWagerDeclaration();
+  if(!d) return;
+  const w = d.wager || 'normal';
+  const bet = d.betrayal || {};
+  const bits = [];
+  if(w !== srWagerSeen.wager){
+    srWagerSeen.wager = w;
+    if(w === 'allin') bits.push('Wager declared: ALL IN. Every Troop is on the line.');
+    else if(w === 'ghost') bits.push('Wager declared: GHOST. No Troop is on the line.');
+    else bits.push('Wager cleared: NORMAL, no pledge.');
+  }
+  if(!!bet.plus !== srWagerSeen.plus){
+    srWagerSeen.plus = !!bet.plus;
+    bits.push(srWagerSeen.plus ? 'Plus one total declared.' : 'Plus one total withdrawn.');
+  }
+  if(!!bet.reroll !== srWagerSeen.reroll){
+    srWagerSeen.reroll = !!bet.reroll;
+    bits.push(srWagerSeen.reroll ? 'Re-roll declared. Your die is cast twice, the second cast stands.' : 'Re-roll withdrawn.');
+  }
+  srWrite(bits);
+}
+/* The stance block's LOCKED state. The chips are painted `disabled` before
+   Round 2, and a disabled chip is not focusable and is skipped by the tab
+   order - so without this, "All In and Ghost are not available" is a fact a
+   screen-reader player never hears at all. */
+function srWagerLockSentence(){
+  const locked = !!document.querySelector('#wagersStance .wagers-stance[data-wager="allin"].disabled');
+  return srFact('wagerLock', String(locked), locked ? 'Wager locked: All In and Ghost unlock in Round 2.' : null);
+}
+/* Everything the board currently says, as a list of DELTAS. Called once per
+   renderAll(); the order is the order a player would want them read, and it
+   is also the order truncation preserves. */
+function srDeltas(){
+  if(!state) return [];
+  const r = clamp(state.round|0, 1, TOTAL_ROUNDS);
+  const out = [];
+  const heat = HEAT_LABEL[r] || '';
+  const phase = (PHASE_LABEL_TEXT[phaseKey()] || '').replace(/&[a-z]+;/gi, '');
+  const md = !!state.meltdown;
+  out.push(srFact('meltdown', md, md
+    ? 'Meltdown: Advanced is free everywhere and holding the Garrison is compulsory.'
+    : (srSeen.meltdown === 'true' ? 'Meltdown has passed.' : null)));
+  out.push(srFact('round', `${r}|${heat}|${phaseKey()}`, `Round ${r} of ${TOTAL_ROUNDS}. ${heat}. ${phase}.`));
+  out.push(srFact('rift', `${state.riftTarget}|${state.riftMut}|${state.riftContested}`, srRiftSentence()));
+  out.push(srFact('lock', String(r), (r < 2) ? 'Advanced tiers are locked this round - they unlock in Round 2.' : null));
+  /* CONTESTED: the Rift's permanent one, and the Siege feature's paid-for one,
+     which the feature writes straight onto state via api.set(). */
+  const siegeId = state.contestedLocId || '';
+  const siegeName = siegeId ? ((LOCATIONS.find(l=>l.id===siegeId) || {}).name || siegeId) : '';
+  out.push(srFact('siege', siegeId, siegeName ? `${siegeName} is Contested - it can be bought this round.` : null));
+  const caps = srCapsSentence();
+  out.push(srFact('caps', caps, caps));
+  for(let i=0;i<2;i++){
+    const line = srObjectiveSentence(i);
+    out.push(srFact(`objective${i}`, line, line));
+  }
+  const [p1,p2] = state.players;
+  if(p1 && p2){
+    const gap = (p1.influence|0) - (p2.influence|0);
+    out.push(srFact('influence', String(gap),
+      gap === 0 ? `Influence level at ${p1.influence|0}.`
+                : `Seat ${gap > 0 ? 1 : 2} leads Influence ${Math.max(p1.influence|0, p2.influence|0)} to ${Math.min(p1.influence|0, p2.influence|0)}.`));
+  }
+  return out.filter(Boolean);
+}
+
 function renderAll(){
   renderHud();
   renderExtPanels();
@@ -3468,6 +3794,9 @@ function renderAll(){
   document.getElementById('phaseLabel').textContent = phaseNames[state.phase] ? `— ${phaseNames[state.phase]}` : '';
   const ev = getEvent();
   document.getElementById('eventLine').innerHTML = ev ? `Round Event: <b style="color:var(--gold)">${ev.name}</b> - ${ev.desc}` : '';
+  /* The board's colour-coded state, in words, only where it actually moved.
+     Last in renderAll so every fact it reads has just been re-rendered. */
+  srWrite(srDeltas());
   if(online.enabled && online.isHost) wsSend({type:'state', state});
 }
 
