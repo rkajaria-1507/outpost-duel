@@ -4,12 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Outpost Duel</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@400;600;700;800&display=swap" rel="stylesheet">
+<!-- OFFLINE-FIRST: no webfont links. Every font stack in css/style.css is
+     system-only (Georgia / Segoe UI / Cascadia Mono et al). The game must
+     run with the network cable unplugged. -->
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+<!-- Fixed backdrop. Lives here (position:fixed; inset:0; z-index:-1) instead
+     of body{background-attachment:fixed} so scrolling never repaints the
+     viewport. Decorative: aria-hidden, no pointer events. -->
+<div id="od-backdrop" aria-hidden="true"></div>
+
+<!-- aria-live mirror for the integrator: text equivalents of every
+     colour-coded state (gain/loss, caps, lock, lead, heat). Kept visually
+     hidden but focusable-by-nothing. See .sr-only in css/style.css. -->
+<div id="srLive" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
 <div class="wrap">
 
   <!-- SETUP SCREEN -->
@@ -121,13 +131,10 @@
           </select>
         </div>
       </div>
-      <div class="footer-actions">
+      <div class="footer-actions" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <button type="button" class="secondary rules-entry" id="rulesBtnSetup">How to Play</button>
         <button id="startBtn">Start Game</button>
       </div>
-    </div>
-
-    <div class="footer-actions" style="justify-content:flex-start;margin-top:10px">
-      <button type="button" class="secondary" id="rulesBtnSetup">Full Rules</button>
     </div>
   </div>
 
@@ -157,9 +164,9 @@
           <div class="influence-track" id="influenceTrack"></div>
         </div>
         <div class="card-panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <h3 style="margin:0">Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
-            <button type="button" class="secondary" id="rulesBtn">Rules</button>
+          <div id="boardRulesRow">
+            <h3>Board <span id="phaseLabel" style="color:var(--muted);font-weight:400;font-size:14px"></span></h3>
+            <button type="button" class="secondary rules-entry" id="rulesBtn" title="How to Play">Rules</button>
           </div>
           <div id="eventLine" style="color:var(--muted);font-size:12px;margin-top:4px"></div>
           <div id="boardFrame" style="margin-top:10px">
@@ -190,9 +197,14 @@
 
 </div>
 
-<!-- SHARED MODAL (Skirmish decisions, Commit, Dice roll, Rules) -->
-<div id="skirmishModal" class="hidden">
-  <div class="box">
+<!-- SHARED MODAL (Skirmish decisions, Commit, Dice roll, Rules)
+     role/aria-modal/label are set here; showModal() in game.js must own the
+     FOCUS TRAP and the FOCUS RESTORE (it cannot be done in CSS). See the
+     integrator note in the handover: on open, remember document.activeElement,
+     move focus into .box, cycle Tab within it; on close, restore. -->
+<div id="skirmishModal" class="hidden" role="dialog" aria-modal="true"
+     aria-labelledby="skirmishTitle" aria-describedby="skirmishBody">
+  <div class="box" tabindex="-1">
     <div class="modal-header">
       <h2 id="skirmishTitle">Skirmish</h2>
       <button type="button" class="modal-close hidden" id="modalCloseBtn" aria-label="Close">&times;</button>
@@ -201,6 +213,43 @@
   </div>
 </div>
 
+<!-- ===== ONBOARDING COACH =====
+     Markup + styles only. The integrator wires the JS API documented in
+     css/style.css under "COACH LAYER — integrator API". Nothing here runs
+     until JS removes the .hidden class.
+     - #coach            show()/hide the whole layer
+     - #coachN           "1" | "2" | "3"  (step counter)
+     - #coachTitle       headline text
+     - #coachBody        body copy
+     - #coachSkip        ends the tutorial for good
+     - #coachNext        advances; on the last step it should call finish() -->
+<div id="coach" class="hidden">
+  <div class="coach-scrim"></div>
+  <div class="coach-card" role="dialog" aria-modal="true" aria-labelledby="coachTitle" aria-describedby="coachBody">
+    <div class="coach-step">STEP <span id="coachN">1</span> OF 3</div>
+    <h2 id="coachTitle"></h2><p id="coachBody"></p>
+    <div class="coach-actions">
+      <button type="button" class="secondary" id="coachSkip">Skip tutorial</button>
+      <button type="button" id="coachNext">Got it</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CORE: load order is significant ===== -->
+<script src="js/ext.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/rules.js"></script>
+
+<!-- ===== FEATURES:rules-a (own this region only) ===== -->
+<script src="js/feature-wagers.js"></script>
+<!-- /FEATURES:rules-a -->
+
+<!-- ===== FEATURES:rules-b (own this region only) ===== -->
+<script src="js/feature-chaos.js"></script>
+<!-- /FEATURES:rules-b -->
+
+<!-- ===== GAME ENGINE: must load last ===== -->
 <script src="js/game.js"></script>
 </body>
 </html>
