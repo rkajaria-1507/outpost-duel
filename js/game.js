@@ -36,12 +36,25 @@ const CATEGORY_ORDER = ['Aggressive','Defensive','Utility','Chaos'];
    has exactly one of each card id, cards can always be identified and
    removed by id - display order never has to match array index, so grouping
    is purely cosmetic and never risks selecting or discarding the wrong
-   card. */
+   card.
+
+   >>> A GROUP WITH NO CARDS IS NEVER EMITTED (G3). The final `.filter` is the
+   >>> whole reason the hand rail cannot show a dangling "CHAOS" label over
+   >>> nothing: a player holding no Chaos cards gets no Chaos group at all,
+   >>> rather than a header and an empty well that reads as a missing card
+   >>> rather than as an empty category. renderHand() additionally skips a
+   >>> group whose card list is empty, so the invariant survives a future
+   >>> caller that builds groups some other way.
+
+   >>> The filter callback also skips card ids that are not in CARD_DEFS. It
+   >>> used to dereference CARD_DEFS[c].category unguarded, so one unknown id
+   >>> (a card from a deck that no longer exists, say) threw and took the whole
+   >>> hand panel with it - the player sees no hand and no explanation. */
 function groupHand(hand){
   return CATEGORY_ORDER
     .map(category=>({
       category,
-      cards: hand.filter(c=>CARD_DEFS[c].category===category)
+      cards: hand.filter(c=> CARD_DEFS[c] && CARD_DEFS[c].category===category)
         .sort((a,b)=> CARD_DEFS[b].avg-CARD_DEFS[a].avg || CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name)),
     }))
     .filter(g=>g.cards.length>0);
@@ -171,6 +184,14 @@ const OBJECTIVE_BONUS = 4;
    enough to actually read the final tally, and now visible + cancellable. */
 const DEMO_LOOP_SECONDS = 8;
 let demoLoopTimer = null;
+/* The pending bot tick's timer handle (D4). Declared HERE, beside demoLoopTimer
+   and above startGame() - a `let` is in its temporal dead zone until its
+   declaration is evaluated, so declaring this down beside maybeAutoPick() would
+   make the startGame() clear a ReferenceError on the very first Play Again.
+   MODULE-LEVEL and deliberately NOT on `state`: state is JSON.stringify'd to
+   the online guest on every render, and a timer handle is neither serialisable
+   nor meaningful to the receiver. */
+let botTickTimer = null;
 let BOT_TICK_MS = 500;
 
 /* ------------------------------ Sound ------------------------------
@@ -484,44 +505,44 @@ function applyIntrigueEffect(playerIdx, cardId){
     case 'raid': {
       const stolen = Math.min(2, opp.credits);
       opp.credits -= stolen; player.credits += stolen;
-      log(`${player.name} plays <b>Raid</b> -> steals ${stolen} Credits from ${opp.name}.`);
+      log(`${esc(player.name)} plays <b>Raid</b> -> steals ${stolen} Credits from ${esc(opp.name)}.`);
       break;
     }
     case 'requisition':
       player.ore += 2; player.credits += 1;
-      log(`${player.name} plays <b>Requisition</b> -> +2 Ore, +1 Credit.`);
+      log(`${esc(player.name)} plays <b>Requisition</b> -> +2 Ore, +1 Credit.`);
       break;
     case 'coup':
       player.influence += 3;
-      log(`${player.name} plays <b>Coup</b> -> +3 Influence.`);
+      log(`${esc(player.name)} plays <b>Coup</b> -> +3 Influence.`);
       break;
     case 'sabotage_supply': {
       const lost = Math.min(1, opp.troops);
       opp.troops -= lost;
-      log(`${player.name} plays <b>Sabotage Supply</b> -> ${opp.name} loses ${lost} Troop${lost!==1?'s':''}.`);
+      log(`${esc(player.name)} plays <b>Sabotage Supply</b> -> ${esc(opp.name)} loses ${lost} Troop${lost!==1?'s':''}.`);
       break;
     }
     case 'foresight':
       {
         const drew = drawCard(player, 2);
-        log(`${player.name} plays <b>Foresight</b> -> ${drawLog(player, 2, drew, 'hand already at the limit')}`);
+        log(`${esc(player.name)} plays <b>Foresight</b> -> ${drawLog(player, 2, drew, 'hand already at the limit')}`);
       }
       break;
     case 'windfall':
       player.credits += 3;
-      log(`${player.name} plays <b>Windfall</b> -> +3 Credits.`);
+      log(`${esc(player.name)} plays <b>Windfall</b> -> +3 Credits.`);
       break;
     case 'reinforce':
       player.troops += 2;
-      log(`${player.name} plays <b>Reinforce</b> -> +2 Troops.`);
+      log(`${esc(player.name)} plays <b>Reinforce</b> -> +2 Troops.`);
       break;
     case 'marketplace':
       if(player.ore>=2){
         player.ore-=2; player.credits+=4;
-        log(`${player.name} plays <b>Marketplace</b> -> trades 2 Ore for +4 Credits.`);
+        log(`${esc(player.name)} plays <b>Marketplace</b> -> trades 2 Ore for +4 Credits.`);
       } else {
         player.credits+=1;
-        log(`${player.name} plays <b>Marketplace</b> without enough Ore -> consolation +1 Credit.`);
+        log(`${esc(player.name)} plays <b>Marketplace</b> without enough Ore -> consolation +1 Credit.`);
       }
       break;
   }
@@ -543,7 +564,7 @@ function playIntrigueCard(playerIdx, cardId){
   const idx = player.intrigueHand.indexOf(cardId);
   if(idx<0) return;
   if(!canPlayIntrigue(player)){
-    log(`${player.name} can't afford to play <b>${INTRIGUE_DEFS[cardId].name}</b> (needs ${INTRIGUE_PLAY_COST} Credits).`);
+    log(`${esc(player.name)} can't afford to play <b>${INTRIGUE_DEFS[cardId].name}</b> (needs ${INTRIGUE_PLAY_COST} Credits).`);
     return;
   }
   player.credits -= INTRIGUE_PLAY_COST;
@@ -563,7 +584,7 @@ function humanPlayIntrigue(cardId){
     return;
   }
   if(!canPlayIntrigue(state.players[idx])){
-    log(`<b>${state.players[idx].name}</b> can't afford that Intrigue card - it costs ${INTRIGUE_PLAY_COST} Credits.`);
+    log(`<b>${esc(state.players[idx].name)}</b> can't afford that Intrigue card - it costs ${INTRIGUE_PLAY_COST} Credits.`);
     return;
   }
   playIntrigueCard(idx, cardId);
@@ -623,8 +644,145 @@ function getEvent(){
   return EVENTS.find(e=>e.id===state.currentEvent);
 }
 
+/* =============================================================================
+   LOG TYPING (G2)
+   -----------------------------------------------------------------------------
+   renderLog() used to emit `<div class="entry">${e}</div>` for all ~45 distinct
+   kinds of line, so a resource GAIN, a LOSS, a system note, an unlock
+   announcement, a cap discard and a Chaos beat were pixel-identical and only
+   readable by scrolling. css/style.css already authors eleven `.entry.is-*`
+   variants (is-gain, is-loss, is-system, is-unlock, is-danger, is-round, plus
+   is-fury / is-betrayal / is-siege / is-rift / is-pressure / is-bounty /
+   is-meltdown / is-surge) and not one of them was ever bound.
+
+   WHY CLASSIFY AT RENDER TIME AND NOT AT LOG TIME. `state` is JSON-serialised
+   wholesale to the online guest, so an entry cannot become a {html,type} pair
+   without changing the wire format every feature and every snapshot already
+   shares - and js/feature-wagers.js and js/ext.js push strings into
+   `state.logEntries` directly, bypassing log() entirely. Classifying on the way
+   out means one classifier covers the engine, both features and the guest's
+   re-render of a host snapshot, with zero change to the stored shape.
+
+   The classifier is deliberately conservative: it is an ordered first-match
+   list, so a line that matches nothing lands on `is-system` (the neutral
+   default) rather than on a wrong claim. Every variant carries a glyph and a
+   weight change in the stylesheet as well as a colour, so the type survives
+   greyscale and deuteranopia. */
+const LOG_MAX_ENTRIES = 300;
+
+/* Ordered, first match wins. The order is the whole design; each entry below
+   says which real log line it is protecting against the next one. */
+const LOG_TYPE_RULES = [
+  /* The round opener is the only line that names a round boundary, and it is
+     the anchor a player scrolls back to find "what was I doing in round 3". */
+  ['is-round',     /—\s*Round\s+\d+\s+begins\s*—/i],
+
+  /* A Round Event is a shared modifier BOTH players received equally, so it is
+     a system announcement - and this has to sit ABOVE the gain test, because
+     three of the six event descriptions contain the word "gain". */
+  ['is-system',    /^Round Event:/],
+
+  /* The feature beats announce themselves in caps. They are checked as a block
+     before the generic rules because each of them also contains a number and
+     would otherwise be swallowed by is-gain ("THE SURGE ... straight to
+     Influence", "PRESSURE 4/4", "claims the Bounty -> +2 Influence"). */
+  ['is-meltdown',  /\bMELTDOWN\b/],
+  ['is-surge',     /\bTHE SURGE\b/i],
+  ['is-bounty',    /\bBOUNTY PUBLISHED\b|\bclaims the Bounty\b|\bNobody claims the Bounty\b/i],
+  ['is-pressure',  /\bPRESSURE\s*\d|\bTHE SKY (OPENS|CLOSES)\b|\bCollapse\s+\d/i],
+  ['is-rift',      /\bTHE RIFT\b|\bRift (mutates|opens|is live)\b|\bNine sites on the board\b/i],
+  ['is-siege',     /\bSIEGE\b|\bCONTESTED SITE\b|\bCONTESTED:|\bthe offer lapses\b|\bPrice for the .* rises\b|\bkeeps the .* at its <b>basic<\/b>/i],
+  ['is-betrayal',  /\bBETRAYS THE ROUND\b|\bBetrayal token/i],
+  ['is-fury',      /\bFURY\s*\d|\breaches <b>Fury\b/i],
+
+  /* A mechanic becoming LEGAL. Every remaining "something opened" line in the
+     game that has no feature beat of its own is here: the Advanced tier, the
+     wagers, the Rift's arrival. */
+  ['is-unlock',    /\bunlock(?:s|ed|ing)?\b|\bbecomes? legal\b|\bgo(?:es)? live\b|\bare available\b/i],
+
+  /* A consolation payout - "but can't afford it -> consolation +1 Influence".
+     This DOES pay out, so it is a gain, and it must be matched before the
+     danger rule below sees the words "can't afford it". */
+  ['is-gain',      /\bconsolation\b/i],
+
+  /* A LOSS printed as a number: "-> -3 Influence". Ahead of is-danger so an
+     All-In loss reads as the loss it is rather than as a generic hazard. */
+  ['is-loss',      /(^|[^-\w])-\d+\s*(Influence|Troops?|Credits?|Ore)/i],
+
+  /* DANGER - something was lost, seized, capped away or taken. The resource-cap
+     discard ("gained and immediately discarded, never banked") is the one that
+     matters most: the number on the line was never really the player's. */
+  ['is-danger',    /discarded, not banked|\blost to cap\b|\bloses the Skirmish\b|\bbackfires\b|\bcosts (them|him|her)\b|\bforces .* to discard\b|\bTHE SKY OPENS\b|\bsteals\b|\bloses \d+ Troop|\bcan'?t afford\b|\bcannot afford\b|\bnothing left to lose\b|\bthe offer lapses\b|\bgets nothing\b/i],
+
+  /* Anything else that handed a player a number. */
+  ['is-gain',      /\+\d+\s*(Influence|Credits?|Ore|Troops?|Tactic card)|\bcompletes their objective\b|\bgains?\b/i],
+];
+const LOG_TYPE_DEFAULT = 'is-system';
+
+function logEntryType(html){
+  const s = String(html == null ? '' : html);
+  for(let i=0;i<LOG_TYPE_RULES.length;i++){
+    if(LOG_TYPE_RULES[i][1].test(s)) return LOG_TYPE_RULES[i][0];
+  }
+  return LOG_TYPE_DEFAULT;
+}
+
+/* The log is the one panel that grows without bound - ~30 lines a round, six
+   rounds, plus every feature beat - and it is rendered by full innerHTML
+   replacement on every single line. Oldest lines are dropped from the FRONT
+   so the newest stays at the top (newest is pinned first), and the drop
+   happens on the way out AND on the way in so feature writes that bypass
+   log() are trimmed too. 300 entries is roughly four full rounds of play: far
+   more than anyone scrolls back through, small enough to re-render cheaply. */
+function trimLog(){
+  const arr = state && state.logEntries;
+  if(!Array.isArray(arr) || arr.length <= LOG_MAX_ENTRIES) return;
+  arr.splice(0, arr.length - LOG_MAX_ENTRIES);
+}
+
+/* The engine's HTML escaper, for interpolation of an untrusted value into a
+   markup string.
+
+   >>> WHY THE LOG IS NOT ESCAPED AS A WHOLE. `log()` takes AUTHORED markup
+   >>> (every one of its ~45 call sites writes `<b>`, `<em>`, `&mdash;` by
+   >>> hand) and renderLog paints it with innerHTML. Escaping the entry would
+   >>> flatten every log line in the game. So the rule is: the NAME is escaped
+   >>> where it is interpolated, and the surrounding sentence is not. Every
+   >>> `${...name}` in this file is wrapped in esc() for exactly that reason;
+   >>> a name is the only player-controllable string that reaches innerHTML,
+   >>> and it reached it at ~114 sites.
+
+   js/feature-wagers.js declares a character-identical esc() inside its own
+   closure. That is deliberate and not duplication for its own sake: the two
+   files share one global scope, and a second top-level `function esc` in
+   game.js would overwrite the feature's copy wholesale on the next page load,
+   handing feature-wagers the engine's implementation with no test to notice. */
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/* A number for interpolation into markup or into an attribute value, from a
+   value that may have arrived over the wire. Anything that is not a finite
+   number becomes `fallback`, so a payload of `<img src=x onerror=...>` in a
+   field the UI prints as a count cannot become an element. Distinct from esc():
+   this COERCES and rejects, where esc() would faithfully print the junk. */
+function numOr(v, fallback){
+  const n = Number(v);
+  return isFinite(n) ? Math.round(n) : fallback;
+}
+
+/* Signature UNCHANGED and deliberately so: `log(msg)` is called from ~45 places
+   in this file plus js/feature-wagers.js and js/ext.js through the
+   OD.WagersBridge / OD.Ext seams. The type is derived at render time, so no
+   call site had to be touched to get a typed log. */
 function log(msg){
   state.logEntries.push(msg);
+  trimLog();
   renderLog();
 }
 
@@ -698,9 +856,9 @@ function drawCard(player, n=1){
 function drawLog(player, asked, drew, reason){
   if(drew > 0){
     const extra = (drew < asked) ? ` (${reason})` : '';
-    return `${player.name} draws ${drew} Tactic card${drew!==1?'s':''}${extra}.`;
+    return `${esc(player.name)} draws ${drew} Tactic card${drew!==1?'s':''}${extra}.`;
   }
-  return `${player.name} draws nothing - ${reason}.`;
+  return `${esc(player.name)} draws nothing - ${reason}.`;
 }
 
 /* ------------------------------ Online play ------------------------------
@@ -768,31 +926,97 @@ function handleHostSocketMessage(msg){
   }
 }
 
+/* ======================================================================
+   THE AUTHORITATIVE BOUNDARY.
+
+   Everything below runs on whatever arrived over the WebSocket, and server.js
+   is a dumb relay that forwards a guest's message VERBATIM. So the payload
+   is untrusted input, and this function is the only place it is allowed to
+   become game state. Each branch is held to the SAME standard humanPick()
+   holds a local click to - not a looser one.
+
+   >>> THE BUG THIS BLOCK IS A FIX FOR (D2). The pick branch validated the
+   >>> PHASE and that the site was EMPTY, and nothing else. It never checked
+   >>> advancedUnlocked() or canAffordExtra() - the two guards humanPick
+   >>> applies - so a guest sitting on 0 Credits, 0 Ore and 0 Troops could take
+   >>> every Advanced tier over the wire, INCLUDING in Round 1 where Advanced
+   >>> does not exist yet. Measured 20/20 unaffordable Advanced picks accepted
+   >>> that the local UI rejects outright. It also passed msg.tier straight
+   >>> into applyLocationEffect(), so any unvalidated string ('SUPREME',
+   >>> '<img src=x>') persisted into state.board unfiltered - and state is
+   >>> broadcast to the guest and painted with innerHTML.
+   >>>
+   >>> The guard below is deliberately the humanPick sequence, in the same
+   >>> order, resolving the site through the same LOCATIONS.find() /
+   >>> OD.Chaos.riftLoc() pair: an unknown locId is rejected here for exactly
+   >>> the reason it is rejected locally (it is not on the board).
+   ====================================================================== */
 function handleHostIncomingAction(msg){
   if(msg.kind==='pick'){
     const idx = currentPicker();
-    if(idx===1 && state.phase==='draft' && state.board[msg.locId]===null){
-      // >>> WAGERS (feature: Siege) - the guest's draft pick goes through the
-      // >>> SAME contested-site interceptor as humanPick(), so an online game
-      // >>> can never desync on a contested site.
-      if(window.OD && OD.Wagers && OD.Wagers.beforePick && OD.Wagers.beforePick(1, msg.locId, msg.tier)) return;
-      applyLocationEffect(1, msg.locId, msg.tier);
-      advanceDraftOrSkirmish();
-    }
+    if(idx!==1 || state.phase!=='draft') return;
+    /* Tier whitelist BEFORE anything else touches the payload. Without it an
+       arbitrary string reached state.board and, via the site log line, the
+       log panel's innerHTML. */
+    if(msg.tier!=='basic' && msg.tier!=='advanced') return;
+    if(!state.board || state.board[msg.locId]!==null) return;
+    /* Same resolution humanPick uses, so the Rift (which is not in LOCATIONS)
+       works online and an unknown id does not. */
+    const loc = LOCATIONS.find(l=>l.id===msg.locId)
+      || (typeof OD !== 'undefined' && OD.Chaos && OD.Chaos.riftLoc ? OD.Chaos.riftLoc(state) : null);
+    if(!loc || loc.id!==msg.locId) return;
+    /* The two guards that were missing. Identical to humanPick's. */
+    if(msg.tier==='advanced' && (!advancedUnlocked() || !canAffordExtra(loc, state.players[1]))) return;
+    // >>> WAGERS (feature: Siege) - the guest's draft pick goes through the
+    // >>> SAME contested-site interceptor as humanPick(), so an online game
+    // >>> can never desync on a contested site.
+    if(window.OD && OD.Wagers && OD.Wagers.beforePick && OD.Wagers.beforePick(1, msg.locId, msg.tier)) return;
+    applyLocationEffect(1, msg.locId, msg.tier);
+    advanceDraftOrSkirmish();
   } else if(msg.kind==='skirmishDecision'){
-    if(pendingGuestDecision){ const cb=pendingGuestDecision; pendingGuestDecision=null; cb(msg.attack, msg.force===true); }
-    // >>> WAGERS (feature: Betrayal tokens) - `force` is the guest's answer to
+    /* AUDITED, no hole. Both fields are coerced to strict booleans here
+       (msg.force===true), and msg.attack is only ever read as a truthiness
+       test by decisionHandler, which can do exactly two things the guest was
+       already offered the choice between - attack, or hold back.
+       OD.Wagers.onForceDecision re-checks forceAvailable() before honouring
+       it. Nothing derived from this message reaches innerHTML. */
+    if(pendingGuestDecision){ const cb=pendingGuestDecision; pendingGuestDecision=null; cb(msg.attack===true, msg.force===true); }
+    // >>> WAGERS (feature: Betrayal tokens) - force is the guest's answer to
     // >>> the Quiet-Round offer, which has no pendingGuestDecision slot.
     else if(window.OD && OD.Wagers && OD.Wagers.onForceDecision) OD.Wagers.onForceDecision(msg.force===true);
   } else if(msg.kind==='commit'){
-    // >>> WAGERS (feature: Wagers + Betrayal tokens) - the public stance and
-    // >>> the tokens paid ride the EXISTING commit payload.
-    if(pendingGuestCommit){ const cb=pendingGuestCommit; pendingGuestCommit=null; cb(msg.troops, (msg.cardId===undefined?null:msg.cardId), {wager:msg.wager||null, betrayal:msg.betrayal||null}); }
+    /* AUDITED, ONE REAL GAP - now closed. applyCommit() DID re-derive rather
+       than trust: cardId is looked up in the live hand with indexOf() and
+       dropped if absent, and troops runs through applyCommitDeclaration() ->
+       pinTroops(), which clamps to [0, troopsMax] and forces All In / Ghost
+       regardless of the claim. The gaps were at the boundary: msg.cardId,
+       msg.wager and msg.betrayal were handed over RAW, and troops was the one
+       field whose safety depended on js/feature-wagers.js being present -
+       delete that file and pinTroops() does not exist, so the raw number was
+       applied straight to player.troops. All four are now normalised here to
+       the exact shapes the local UI sends, so the host never depends on a
+       downstream check to save it. The wire format is unchanged: the same
+       fields with the same names, only validated. */
+    if(pendingGuestCommit){
+      const cb=pendingGuestCommit; pendingGuestCommit=null;
+      const wager = (msg.wager==='allin' || msg.wager==='ghost') ? msg.wager : null;
+      const b = (msg.betrayal && typeof msg.betrayal==='object') ? msg.betrayal : null;
+      const betrayal = b ? {plus:b.plus===true, reroll:b.reroll===true} : null;
+      cb(numOr(msg.troops, 0), (typeof msg.cardId==='string' ? msg.cardId : null),
+         {wager, betrayal});
+    }
   } else if(msg.kind==='intrigue'){
+    /* AUDITED, no hole. playIntrigueCard() looks the id up in the live
+       intrigueHand with indexOf() and returns on a miss, and re-checks
+       canPlayIntrigue() before charging - so a forged or unaffordable card is
+       rejected by the same code the local click goes through. */
     const idx = currentPicker();
-    if(idx===1 && state.phase==='draft'){ playIntrigueCard(1, msg.cardId); }
+    if(idx===1 && state.phase==='draft' && typeof msg.cardId==='string'){ playIntrigueCard(1, msg.cardId); }
   // >>> WAGERS (feature: Siege) - the only NEW message kind in this feature.
   } else if(msg.kind==='buySite'){
+    /* AUDITED, no hole. accept===true is a strict boolean test, and
+       finishSiege() re-derives buyer/seller/price from the host's own
+       st.siege and re-checks (buyer.credits|0) >= sg.price before paying. */
     if(window.OD && OD.Wagers && OD.Wagers.onBuySite) OD.Wagers.onBuySite(msg.accept===true);
   }
 }
@@ -951,7 +1175,7 @@ function defenderOddsHtml(defIdx, troops, cardId, fever){
   if(!p) return '';
   return oddsBar(p)
     + projectionLine('Your projection', p.mine, furyNote(p.mine.winStreak, p.myCap))
-    + projectionLine(`${state.players[aggIdx].name} (committed ${ctx.aggCommit.troops})`, p.theirs,
+    + projectionLine(`${esc(state.players[aggIdx].name)} (committed ${ctx.aggCommit.troops})`, p.theirs,
         ` &mdash; their card is <b>hidden</b>, so this is their Troops alone`)
     + thresholdLine(p)
     + catchingUpLine(p)
@@ -975,7 +1199,7 @@ function aggressorOddsHtml(aggIdx, troops, cardId, fever){
     + `</div>`
     + `<div style="margin-top:6px"><b style="font-size:12px">vs a passive defender (they hold all ${state.players[defIdx].troops} Troops back)</b></div>`
     + oddsBar(a) + thresholdLine(a)
-    + `<div style="margin-top:8px"><b style="font-size:12px">if ${state.players[defIdx].name} mirrors you (${troops} Troops, no card)</b></div>`
+    + `<div style="margin-top:8px"><b style="font-size:12px">if ${esc(state.players[defIdx].name)} mirrors you (${troops} Troops, no card)</b></div>`
     + oddsBar(b) + thresholdLine(b)
     + projectionLine('Your projection', a.mine, furyNote(a.mine.winStreak, a.myCap))
     + `<div style="font-size:12px;color:var(--muted);margin-top:4px">Influence cap this Skirmish: <b>${a.cap}</b>. Expected Influence vs a passive defender: <b>${Math.round(a.ev*10)/10}</b>.</div>`;
@@ -1056,10 +1280,18 @@ function commitOddsHtml(playerIdx, troops, cardId){
     + `</div>`;
 }
 
+/* `aggressorName` / `defenderName` / the two counts arrive over the WebSocket
+   on the guest (handleGuestSocketMessage reads them straight off
+   `requestSkirmishDecision`), so this modal body IS a trust boundary and both
+   names are escaped here. The counts are coerced to finite integers rather
+   than escaped: they are numbers, and escaping a number that is not one yet
+   would print the attacker's string instead of rejecting it. */
 function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, defenderHandCount, onDecision, forceHtml){
+  const troops = numOr(defenderTroops, 0);
+  const handCount = numOr(defenderHandCount, 0);
   showModal("Skirmish Decision", `
-    <p>${aggressorName}, you hold the Garrison. Attack ${defenderName}?</p>
-    <p style="color:var(--muted);font-size:13px">Defender has ${defenderTroops} Troops, ${defenderHandCount} cards in hand.</p>
+    <p>${esc(aggressorName)}, you hold the Garrison. Attack ${esc(defenderName)}?</p>
+    <p style="color:var(--muted);font-size:13px">Defender has ${troops} Troops, ${handCount} cards in hand.</p>
     ${skirmishStakesHtml()}
     ${forceHtml || ''}
     <div class="footer-actions">
@@ -1112,7 +1344,7 @@ function skirmishStakesHtml(){
   const [a, b] = state.players;
   const rows = [a, b].map(p=>{
     const f = furyRung(p.winStreak);
-    return `<div style="font-size:12px">${p.name}: <b>Fury ${f.streak}</b> `
+    return `<div style="font-size:12px">${esc(p.name)}: <b>Fury ${f.streak}</b> `
       + `<span style="color:var(--muted)">(+${f.bonus} to their total, Influence cap ${furyRungCap(f.winStreak, fever)})</span></div>`;
   }).join('');
   const dread = (state.dread|0);
@@ -1127,8 +1359,16 @@ function skirmishStakesHtml(){
     + `</div>`;
 }
 
+/* `playerName` is safe to interpolate into the TITLE because showModal assigns
+   it with textContent, never innerHTML - the modal title was never a sink.
+   `maxTroops` is NOT: it is interpolated into an attribute (`max=`) and into the
+   body text, and on the guest it arrives straight off the socket in
+   `requestCommit`, so it is coerced to a non-negative integer here. `hand`
+   arrives over the wire too, but groupHand() drops any id CARD_DEFS does not
+   know, so every surviving `c` and every `def` below it is engine-authored. */
 function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
   let selectedCardId = null;
+  maxTroops = Math.max(0, numOr(maxTroops, 0));
   const groups = groupHand(hand);
   const cardOptsHtml = groups.map(g=>`
     <div class="hand-group-label">${g.category}</div>
@@ -1290,12 +1530,18 @@ function startGame(){
   /* Any countdown left over from the previous game's end screen would fire
      into this one and restart it out from under the player. */
   if(demoLoopTimer){ clearInterval(demoLoopTimer); demoLoopTimer = null; }
+  /* D4: the pending BOT tick belongs to the game that armed it. startGame()
+     cleared only demoLoopTimer, so a tick from the outgoing game survived into
+     the new one. Cleared HERE, next to the other timer, and re-validated on
+     fire as well - clearTimeout alone still races a callback already queued. */
+  if(botTickTimer){ clearTimeout(botTickTimer); botTickTimer = null; }
   online.enabled = (mode==='host');
   online.isHost = (mode==='host');
   online.myIndex = 0;
   delete handRenderCache[0]; delete handRenderCache[1];
   prevBoardSnapshot = null;
   stageBanner.lastRound = 0;
+  endConfettiFired = false;
 
   BOT_TICK_MS = {normal:500, fast:150, instant:20}[document.getElementById('botSpeed').value] ?? 500;
   const demoLoop = mode==='demo' && document.getElementById('demoLoop').checked;
@@ -1394,7 +1640,7 @@ function beginRound(){
     if(s.currentEvent==='windfall_round') s.players.forEach(p=>{ p.credits+=2; reportCaps(p, applyCaps(p)); });
     if(s.currentEvent==='trade_winds') s.players.forEach(p=>{ p.ore+=1; reportCaps(p, applyCaps(p)); });
     if(s.currentEvent==='recruitment_drive') s.players.forEach(p=>{ p.troops+=1; reportCaps(p, applyCaps(p)); });
-    if(s.currentEvent==='council_session') s.players.forEach(p=> log(`${p.name} studies Council Session -> ${drawLog(p, 1, drawCard(p,1), 'hand already at the limit')}`));
+    if(s.currentEvent==='council_session') s.players.forEach(p=> log(`${esc(p.name)} studies Council Session -> ${drawLog(p, 1, drawCard(p,1), 'hand already at the limit')}`));
     if(canRunExtensions()){
       OD.Ext.hooks.run('roundEventApplied', extCtx('draft', -1, {eventId: s.currentEvent}));
       OD.Ext.effects.run('roundEventApplied', extCtx('draft', -1, {eventId: s.currentEvent}));
@@ -1415,7 +1661,7 @@ function beginRound(){
      --heat pinned at its .12 default for the whole game. */
   setHeat(s.round);
 
-  log(`<b>— Round ${s.round} begins —</b> ${s.players[s.firstPlayerIdx].name} drafts first.`);
+  log(`<b>— Round ${s.round} begins —</b> ${esc(s.players[s.firstPlayerIdx].name)} drafts first.`);
   const eventDef = getEvent();
   if(eventDef) log(`Round Event: <b>${eventDef.name}</b> - ${eventDef.desc}`);
   else if(!advancedUnlocked()) log(`Basic tier only this round - Advanced tier unlocks Round 2.`);
@@ -1435,7 +1681,7 @@ function beginRound(){
 function reportCaps(player, lost){
   const trimmed = capLossNote(lost);
   if(trimmed){
-    log(`${player.name} is at the resource cap${trimmed} - discarded, not banked.`);
+    log(`${esc(player.name)} is at the resource cap${trimmed} - discarded, not banked.`);
     OD.Sound.play('cap.hit');
     if(state && state.roundRec) state.roundRec.capped.credits += lost.credits + lost.ore + lost.troops;
   }
@@ -1571,7 +1817,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       const gain = (tier==='advanced' ? 6 : 3) + bonus;
       if(tier==='advanced') charged = takeCost(player, tierCost('market','advanced'));
       player.credits += gain;
-      log(`${player.name} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Merchant)':''}.`);
+      log(`${esc(player.name)} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Merchant)':''}.`);
       popupText = {text: `+${gain} Credits`, good: true};
       break;
     }
@@ -1580,7 +1826,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       const oreGain = (tier==='advanced'?4:2) + bonus, troopGain = tier==='advanced'?2:1;
       if(tier==='advanced') charged = takeCost(player, tierCost('quarry','advanced'));
       player.ore += oreGain; player.troops += troopGain;
-      log(`${player.name} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}.`);
+      log(`${esc(player.name)} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}.`);
       popupText = {text: `+${oreGain} Ore, +${troopGain} Troops`, good: true};
       break;
     }
@@ -1589,7 +1835,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       const troopGain = (tier==='advanced'?4:2) + bonus;
       if(tier==='advanced'){ charged = takeCost(player, tierCost('garrison','advanced')); player.aggressorBonus=1; } else { player.aggressorBonus=0; }
       player.troops += troopGain; player.isAggressor = true;
-      log(`${player.name} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops${bonus?' (+1 Warmonger)':''}. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
+      log(`${esc(player.name)} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops${bonus?' (+1 Warmonger)':''}. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
       popupText = {text: `+${troopGain} Troops - Aggressor!`, good: true};
       break;
     }
@@ -1602,11 +1848,11 @@ function applyLocationEffect(playerIdx, locId, tier){
       const consolation = (tier==='advanced' ? 2 : 1) + bonus;
       if(canPayCost(player, need)){
         charged = takeCost(player, need); player.influence+=reward;
-        log(`${player.name} invests in the <b>Outpost</b> (${tier}) -> pays ${need.credits} Credits + ${need.ore} Ore for +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
+        log(`${esc(player.name)} invests in the <b>Outpost</b> (${tier}) -> pays ${need.credits} Credits + ${need.ore} Ore for +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
         popupText = {text: `+${reward} Influence`, good: true};
       } else {
         player.influence += consolation;
-        log(`${player.name} eyes the <b>Outpost</b> (${tier}) but can't afford it -> consolation +${consolation} Influence${bonus?' (+1 Diplomat)':''}.`);
+        log(`${esc(player.name)} eyes the <b>Outpost</b> (${tier}) but can't afford it -> consolation +${consolation} Influence${bonus?' (+1 Diplomat)':''}.`);
         popupText = {text: `+${consolation} Influence`, good: true};
       }
       break;
@@ -1617,7 +1863,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       if(tier==='advanced') charged = takeCost(player, tierCost('archive','advanced'));
       const drew = drawCard(player, draws);
       const reason = player.hand.length >= HAND_CAP ? 'hand already at the limit' : 'deck and discard are empty';
-      log(`${player.name} studies the <b>Archive</b> (${tier}) -> ${drawLog(player, draws, drew, reason)}${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Scholar)':''}.`);
+      log(`${esc(player.name)} studies the <b>Archive</b> (${tier}) -> ${drawLog(player, draws, drew, reason)}${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Scholar)':''}.`);
       popupText = {text: drew>0 ? `+${drew} Card${drew!==1?'s':''}` : 'Hand full, 0 Cards', good: drew>0};
       break;
     }
@@ -1626,7 +1872,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       const crGain = tier==='advanced'?4:2, oreGain = (tier==='advanced'?3:1) + bonus;
       if(tier==='advanced') charged = takeCost(player, tierCost('foundry','advanced'));
       player.credits += crGain; player.ore += oreGain;
-      log(`${player.name} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}.`);
+      log(`${esc(player.name)} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}.`);
       popupText = {text: `+${crGain} Credits, +${oreGain} Ore`, good: true};
       break;
     }
@@ -1638,12 +1884,12 @@ function applyLocationEffect(playerIdx, locId, tier){
       const trade = tierCost('bazaar', tier);
       if(canPayCost(player, trade)){
         charged = takeCost(player, trade); player.credits+=crGain;
-        log(`${player.name} trades at the <b>Bazaar</b> (${tier}) -> trades ${trade.ore} Ore for +${crGain} Credits${bonus?' (+1 Merchant)':''}.`);
+        log(`${esc(player.name)} trades at the <b>Bazaar</b> (${tier}) -> trades ${trade.ore} Ore for +${crGain} Credits${bonus?' (+1 Merchant)':''}.`);
         popupText = {text: `+${crGain} Credits`, good: true};
       } else {
         const consolation = (tier==='advanced'?2:1) + bonus;
         player.credits += consolation;
-        log(`${player.name} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credits${bonus?' (+1 Merchant)':''}.`);
+        log(`${esc(player.name)} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credits${bonus?' (+1 Merchant)':''}.`);
         popupText = {text: `+${consolation} Credits`, good: true};
       }
       break;
@@ -1655,16 +1901,16 @@ function applyLocationEffect(playerIdx, locId, tier){
         const rite = tierCost('shrine','advanced');
         if(canPayCost(player, rite)){
           charged = takeCost(player, rite); player.influence+=reward;
-          log(`${player.name} prays at the <b>Shrine</b> (advanced) -> pays ${rite.credits} Credits + ${rite.ore} Ore for +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
+          log(`${esc(player.name)} prays at the <b>Shrine</b> (advanced) -> pays ${rite.credits} Credits + ${rite.ore} Ore for +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
           popupText = {text: `+${reward} Influence`, good: true};
         } else {
           player.influence += 1 + bonus;
-          log(`${player.name} can't afford the deep Shrine rite -> +${1+bonus} Influence instead${bonus?' (+1 Diplomat)':''}.`);
+          log(`${esc(player.name)} can't afford the deep Shrine rite -> +${1+bonus} Influence instead${bonus?' (+1 Diplomat)':''}.`);
           popupText = {text: `+${1+bonus} Influence`, good: true};
         }
       } else {
         player.influence += reward;
-        log(`${player.name} prays at the <b>Shrine</b> (basic) -> +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
+        log(`${esc(player.name)} prays at the <b>Shrine</b> (basic) -> +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
         popupText = {text: `+${reward} Influence`, good: true};
       }
       break;
@@ -1779,13 +2025,33 @@ function maybeAutoPick(){
   const idx = currentPicker();
   if(idx===null) { advanceDraftOrSkirmish(); return; }
   if(state.players[idx].type==='bot'){
-    setTimeout(()=>{
+    /* One tick at a time: re-arming replaces the handle instead of leaving a
+       second live timer for the same seat. */
+    if(botTickTimer){ clearTimeout(botTickTimer); botTickTimer = null; }
+    botTickTimer = setTimeout(()=>{
+      botTickTimer = null;
+      /* >>> RE-VALIDATE ON FIRE (D4). This callback captures an `idx` from the
+         >>> game that armed it and fires BOT_TICK_MS later, by which time that
+         >>> game can be gone (Play Again, the demo loop, re-arming a room). It
+         >>> used to run botChoosePick() and applyLocationEffect() against
+         >>> whatever `state` pointed at THEN: measured 65 uncaught
+         >>> `TypeError: Cannot read properties of null (reading 'locId')` in 12
+         >>> trials, and in the trials that did not throw it silently consumed a
+         >>> pick from the NEW game's queue with a pick belonging to a game that
+         >>> no longer existed. startGame() clears the handle; this guard is the
+         >>> half that covers the case startGame() cannot reach. */
+      if(!state || state.phase!=='draft' || currentPicker()!==idx) return;
       const player = state.players[idx];
+      if(!player) return;
       if(player.intrigueHand.length>0 && canPlayIntrigue(player) && Math.random()<0.8){
         const cardId = player.intrigueHand[Math.floor(Math.random()*player.intrigueHand.length)];
         playIntrigueCard(idx, cardId);
       }
+      /* botChoosePick returns null when openLocations() is empty (every site
+         taken with picks still in the queue). `pick.locId` used to dereference
+         that null directly, which is the second half of the same crash. */
       const pick = botChoosePick(idx);
+      if(!pick) return;
       // >>> WAGERS (feature: Siege) - bot picks go through the SAME contested-
       // >>> site interceptor as human picks, so the rule cannot be dodged by
       // >>> letting the Bot pick first.
@@ -1840,7 +2106,7 @@ function promptAggressorDecision(aggressorIdx){
     const wantsAttack = noRetreat ? true : botWantsToAttack(aggressor, defender);
     setTimeout(()=>{
       if(wantsAttack) startSkirmishCommit(aggressorIdx, defenderIdx);
-      else { log(`${aggressor.name} holds back — no Skirmish this round.`); OD.Sound.play('turn.pass'); endRound(); }
+      else { log(`${esc(aggressor.name)} holds back — no Skirmish this round.`); OD.Sound.play('turn.pass'); endRound(); }
     }, BOT_TICK_MS);
     return;
   }
@@ -1850,8 +2116,8 @@ function promptAggressorDecision(aggressorIdx){
     // >>> and guarantees the attack.
     if(force && typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.spendForce) OD.Wagers.spendForce(aggressorIdx);
     if(attack) startSkirmishCommit(aggressorIdx, defenderIdx);
-    else if(noRetreat) log(`<b>MELTDOWN — no holding back.</b> ${aggressor.name} holds the Garrison, and in Meltdown that means you attack.`);
-    else { log(`${aggressor.name} holds back — no Skirmish this round.`); OD.Sound.play('turn.pass'); endRound(); }
+    else if(noRetreat) log(`<b>MELTDOWN — no holding back.</b> ${esc(aggressor.name)} holds the Garrison, and in Meltdown that means you attack.`);
+    else { log(`${esc(aggressor.name)} holds back — no Skirmish this round.`); OD.Sound.play('turn.pass'); endRound(); }
   };
 
   if(online.enabled && aggressorIdx!==online.myIndex){
@@ -1953,6 +2219,21 @@ if(typeof window !== 'undefined'){
 
 function collectCommit(playerIdx, onDone){
   const player = state.players[playerIdx];
+  /* resolveSkirmish() nulls skirmishCtx the moment a fight is settled, and a
+     commit chain that is still in flight (a bot's setTimeout, a late guest
+     snapshot) can land after that. It used to dereference null and throw out
+     of a timer, which is how one stray commit could take the game down with
+     no message. A commit arriving for a fight that no longer exists is simply
+     late; say so and stop. */
+  if(!skirmishCtx){ log(`A late commit from ${esc(player.name)} arrives after the Skirmish was settled - ignored.`); return; }
+  /* D1: keep `lastActiveIdx` pointing at the seat being asked. commitSeatIdx()
+     in renderHand() is the authority for the rail and reads live state, so
+     this is belt-and-braces for anything else that consults the index - and it
+     lives HERE, not in startSkirmishCommit, because collectCommit runs once per
+     seat: setting it in startSkirmishCommit would fix the aggressor's modal and
+     still show the aggressor's cards behind the defender's. A plain integer, so
+     `state` stays JSON-serialisable for the online guest. */
+  state.lastActiveIdx = playerIdx;
   const role = (playerIdx===skirmishCtx.aggressorIdx) ? 'aggCommit' : 'defCommit';
 
   if(player.type==='bot'){
@@ -1991,8 +2272,15 @@ function collectCommit(playerIdx, onDone){
     // >>> deduction, so a GHOST really keeps its Troops and an ALL IN really
     // >>> risks all of them. resolveSkirmish re-pins from `troopsMax`, so this
     // >>> is belt and braces rather than the only line of defence.
+    // >>>
+    // >>> The `: troops` arm (D2). wagerDecl is null whenever
+    // >>> js/feature-wagers.js is absent - and then the raw number reached
+    // >>> `player.troops -= commitTroops`, so a guest claiming 9999 Troops
+    // >>> drove its own pool deeply negative and won the fight on the way.
+    // >>> clamp() here is the engine's own invariant ("you cannot commit more
+    // >>> Troops than you hold") and it holds with or without the feature.
     const commitTroops = (wagerDecl && typeof wagerDecl.troops === 'number')
-      ? clamp(wagerDecl.troops, 0, player.troops) : troops;
+      ? clamp(wagerDecl.troops, 0, player.troops) : clamp(numOr(troops, 0), 0, player.troops);
     skirmishCtx[role] = {
       troops: commitTroops, card,
       troopsMax: player.troops,
@@ -2091,7 +2379,7 @@ function resolveSkirmish(){
     const rrs = OD.Wagers.applyRerolls(skirmishCtx, rollD6) || [];
     rrs.forEach(r=>{
       if(r.idx===aggressorIdx) aggRoll = r.to; else defRoll = r.to;
-      rerollNote += ` ${r.name} declared a <b>RE-ROLL</b>: ${r.from!==null && r.from!==undefined ? r.from : '?'} &rarr; ${r.to}.`;
+      rerollNote += ` ${esc(r.name)} declared a <b>RE-ROLL</b>: ${r.from!==null && r.from!==undefined ? r.from : '?'} &rarr; ${r.to}.`;
     });
   }
   // >>> WAGERS (feature: Fury) - the flat "Momentum +1 at two wins" rule is
@@ -2118,8 +2406,8 @@ function resolveSkirmish(){
   // Undermine subtracts from the OPPONENT's total - applied before the
   // reveal so the totals shown in the dice-roll animation are already final.
   let undermineNote = '';
-  if(aggCommit.card==='undermine'){ defTotal -= 2; undermineNote += ` ${aggressor.name}'s Undermine saps ${defender.name} for -2.`; }
-  if(defCommit.card==='undermine'){ aggTotal -= 2; undermineNote += ` ${defender.name}'s Undermine saps ${aggressor.name} for -2.`; }
+  if(aggCommit.card==='undermine'){ defTotal -= 2; undermineNote += ` ${esc(aggressor.name)}'s Undermine saps ${esc(defender.name)} for -2.`; }
+  if(defCommit.card==='undermine'){ aggTotal -= 2; undermineNote += ` ${esc(defender.name)}'s Undermine saps ${esc(aggressor.name)} for -2.`; }
 
   // >>> WAGERS (feature: Fury - CATCHING UP) - the anti-snowball valve. If the
   // >>> player who WINS walked into the Skirmish on a 3+ win streak, the LOSER
@@ -2140,8 +2428,8 @@ function resolveSkirmish(){
     : null;
   if(CU && CU.applied > 0){
     aggTotal = CU.aggTotal; defTotal = CU.defTotal;
-    const wName = CU.leaderIdx===0 ? aggressor.name : defender.name;
-    const lName = CU.leaderIdx===0 ? defender.name : aggressor.name;
+    const wName = CU.leaderIdx===0 ? esc(aggressor.name) : esc(defender.name);
+    const lName = CU.leaderIdx===0 ? esc(defender.name) : esc(aggressor.name);
     catchingUp = ` <b>CATCHING UP:</b> ${lName} adds +${CU.applied} against ${wName}'s ${CU.streak}-win Fury.`;
   }
 
@@ -2179,8 +2467,8 @@ function resolveSkirmish(){
     aggCommit.card ? CARD_DEFS[aggCommit.card].name : null,
     defCommit.card ? CARD_DEFS[defCommit.card].name : null,
     skirmishResult, ()=>{
-    log(`<b>Skirmish!</b> ${aggressor.name} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${AGGF.bonus?` + ${AGGF.bonus} (Fury ${aggressor.winStreak})`:''}${aggBetrayal?' + 1 (Betrayal token)':''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
-        `${defender.name} rolls ${defRoll} + ${defCommit.troops} troops${DEFF.bonus?` + ${DEFF.bonus} (Fury ${defender.winStreak})`:''}${defBetrayal?' + 1 (Betrayal token)':''}${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.${undermineNote}${rerollNote}${catchingUp}`);
+    log(`<b>Skirmish!</b> ${esc(aggressor.name)} rolls ${aggRoll} + ${aggCommit.troops} troops${aggressor.aggressorBonus?` + 1 (Garrison bonus)`:''}${AGGF.bonus?` + ${AGGF.bonus} (Fury ${aggressor.winStreak})`:''}${aggBetrayal?' + 1 (Betrayal token)':''}${aggMod.card?` + ${aggMod.card}(${aggMod.mod})${aggMod.note}`:''} = <b>${aggTotal}</b>. ` +
+        `${esc(defender.name)} rolls ${defRoll} + ${defCommit.troops} troops${DEFF.bonus?` + ${DEFF.bonus} (Fury ${defender.winStreak})`:''}${defBetrayal?' + 1 (Betrayal token)':''}${defMod.card?` + ${defMod.card}(${defMod.mod})${defMod.note}`:''} = <b>${defTotal}</b>.${undermineNote}${rerollNote}${catchingUp}`);
 
     if(aggCommit.card) aggressor.discard.push(aggCommit.card);
     if(defCommit.card) defender.discard.push(defCommit.card);
@@ -2203,9 +2491,9 @@ function resolveSkirmish(){
       winner.winStreak++; loser.winStreak = 0;
       // >>> WAGERS (feature: Fury) - the old flat Momentum callout becomes the
       // >>> ladder's next rung, quoted with the cap it unlocks.
-      if(winner.winStreak===2) log(`${winner.name} reaches <b>Fury 2</b> - +1 to their next Skirmish total, Influence cap 4.`);
-      if(winner.winStreak===3) log(`${winner.name} reaches <b>Fury 3</b> - +2 to their next Skirmish total, and the Influence cap rises to 5.`);
-      if(winner.winStreak>=4) log(`${winner.name} is <b>Fury ${winner.winStreak}</b> - +3 to their next Skirmish total, Influence cap 6.`);
+      if(winner.winStreak===2) log(`${esc(winner.name)} reaches <b>Fury 2</b> - +1 to their next Skirmish total, Influence cap 4.`);
+      if(winner.winStreak===3) log(`${esc(winner.name)} reaches <b>Fury 3</b> - +2 to their next Skirmish total, and the Influence cap rises to 5.`);
+      if(winner.winStreak>=4) log(`${esc(winner.name)} is <b>Fury ${winner.winStreak}</b> - +3 to their next Skirmish total, Influence cap 6.`);
       let margin = Math.abs(aggTotal-defTotal);
       const rawMargin = margin;
 
@@ -2225,25 +2513,25 @@ function resolveSkirmish(){
 
       if(loser===defender && loserCommit.card==='feint'){
         defender.troops += defCommit.troops;
-        log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
+        log(`${esc(loser.name)} loses the Skirmish but Feint returns their committed Troops.`);
       } else if(loser===aggressor && loserCommit.card==='feint'){
         aggressor.troops += aggCommit.troops;
-        log(`${loser.name} loses the Skirmish but Feint returns their committed Troops.`);
+        log(`${esc(loser.name)} loses the Skirmish but Feint returns their committed Troops.`);
       } else if(loserCommit.card==='ambush'){
         loser.troops = Math.max(0, loser.troops-1);
-        log(`${loser.name}'s own Ambush backfires — 1 extra Troop lost.`);
+        log(`${esc(loser.name)}'s own Ambush backfires — 1 extra Troop lost.`);
       }
 
       if(winnerCommit.card==='ambuscade'){
         loser.troops = Math.max(0, loser.troops-1);
-        log(`${winner.name}'s Ambuscade costs ${loser.name} 1 extra Troop.`);
+        log(`${esc(winner.name)}'s Ambuscade costs ${esc(loser.name)} 1 extra Troop.`);
       }
 
       /* Report the SAME number the result modal shows: `margin` is the
          post-Guard figure, which is also what produced `gained` and
          skirmishResult.margin. Printing the raw difference here used to
          contradict the modal whenever Guard was in play. */
-      log(`<b>${winner.name} wins the Skirmish</b> by ${margin} -> +${gained} Influence.${guardNote}`);
+      log(`<b>${esc(winner.name)} wins the Skirmish</b> by ${margin} -> +${gained} Influence.${guardNote}`);
 
       // >>> WAGERS (feature: All In / Ghost) - the wagers settle INSIDE the
       // >>> existing win/lose branch: no new resolution pipeline, and the same
@@ -2258,25 +2546,25 @@ function resolveSkirmish(){
       if(!commit.card) return;
       if(commit.card==='fortify'){
         self.troops += commit.troops;
-        log(`${self.name}'s Fortify returns their committed Troops.`);
+        log(`${esc(self.name)}'s Fortify returns their committed Troops.`);
       }
       if(commit.card==='berserker'){
         self.troops = Math.max(0, self.troops-2);
-        log(`${self.name}'s Berserker costs them 2 additional Troops.`);
+        log(`${esc(self.name)}'s Berserker costs them 2 additional Troops.`);
       }
       if(commit.card==='scout'){
         const drew = drawCard(self,1);
-        log(`${self.name}'s Scout -> ${drawLog(self, 1, drew, 'hand already at the limit')}`);
+        log(`${esc(self.name)}'s Scout -> ${drawLog(self, 1, drew, 'hand already at the limit')}`);
       }
       if(commit.card==='sabotage' && opp.hand.length>0){
         const idx = Math.floor(Math.random()*opp.hand.length);
         const discarded = opp.hand.splice(idx,1)[0];
         opp.discard.push(discarded);
-        log(`${self.name}'s Sabotage forces ${opp.name} to discard ${CARD_DEFS[discarded].name}.`);
+        log(`${esc(self.name)}'s Sabotage forces ${esc(opp.name)} to discard ${CARD_DEFS[discarded].name}.`);
       }
       if(commit.card==='insight'){
         const drew = drawCard(self,1);
-        log(`${self.name}'s Insight -> ${drawLog(self, 1, drew, 'hand already at the limit')}`);
+        log(`${esc(self.name)}'s Insight -> ${drawLog(self, 1, drew, 'hand already at the limit')}`);
       }
     });
 
@@ -2301,9 +2589,9 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
 
   showModal('Skirmish - Rolling the Dice', `
     <div class="dice-row">
-      <div class="dice-col"><div class="who">${aggName} (Aggressor)</div><div class="die rolling" id="dieAgg">?</div>
+      <div class="dice-col"><div class="who">${esc(aggName)} (Aggressor)</div><div class="die rolling" id="dieAgg">?</div>
         <div class="dice-card">${aggCardName ? `Card: <b>${aggCardName}</b>` : 'No card played'}</div></div>
-      <div class="dice-col"><div class="who">${defName} (Defender)</div><div class="die rolling" id="dieDef">?</div>
+      <div class="dice-col"><div class="who">${esc(defName)} (Defender)</div><div class="die rolling" id="dieDef">?</div>
         <div class="dice-card">${defCardName ? `Card: <b>${defCardName}</b>` : 'No card played'}</div></div>
     </div>
     <div id="diceResultArea" style="text-align:center;color:var(--muted);font-size:13px;margin-top:10px">Rolling...</div>
@@ -2336,12 +2624,12 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
     if(resultEl){
       let verdict, detail;
       if(result && !result.tie){
-        verdict = `${result.winnerName} wins the Skirmish!`;
+        verdict = `${esc(result.winnerName)} wins the Skirmish!`;
         detail =
-          `<div class="skirmish-totals">Totals (dice + troops + cards): <b>${result.aggTotal}</b> (${result.aggName}) vs <b>${result.defTotal}</b> (${result.defName})</div>` +
+          `<div class="skirmish-totals">Totals (dice + troops + cards): <b>${result.aggTotal}</b> (${esc(result.aggName)}) vs <b>${result.defTotal}</b> (${esc(result.defName)})</div>` +
           `<div class="skirmish-result win">${verdict}</div>` +
           `<div class="skirmish-detail">Won by a margin of <b>${result.margin}</b> &rarr; <b>+${result.influence} Influence</b>${result.rally ? ` <span class="skirmish-bonus">Rally +1</span>` : ''}${result.guarded ? ` <span class="skirmish-bonus">Guard cut ${result.guardCut}</span>` : ''}.</div>` +
-          `<div class="skirmish-detail skirmish-split">${result.winnerName} takes the contested Troops; ${result.loserName} loses theirs${result.influence ? ` &mdash; the Influence split is <b>${result.winnerName} +${result.influence}</b>` : ''}.</div>`;
+          `<div class="skirmish-detail skirmish-split">${esc(result.winnerName)} takes the contested Troops; ${esc(result.loserName)} loses theirs${result.influence ? ` &mdash; the Influence split is <b>${esc(result.winnerName)} +${result.influence}</b>` : ''}.</div>`;
       } else if(result && result.tie){
         verdict = "It's a tie!";
         detail =
@@ -2350,8 +2638,8 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
           `<div class="skirmish-detail">Both sides lose their committed Troops &mdash; no Influence changes hands.</div>`;
       } else {
         if(aggTotal===defTotal) verdict = "It's a tie!";
-        else if(aggTotal>defTotal) verdict = `${aggName} wins the Skirmish!`;
-        else verdict = `${defName} wins the Skirmish!`;
+        else if(aggTotal>defTotal) verdict = `${esc(aggName)} wins the Skirmish!`;
+        else verdict = `${esc(defName)} wins the Skirmish!`;
         detail = `<div>Totals (dice + troops + cards): <b>${aggTotal}</b> vs <b>${defTotal}</b></div>` +
           `<div class="skirmish-result ${aggTotal===defTotal?'':'win'}">${verdict}</div>`;
       }
@@ -2379,11 +2667,46 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
    Deliberately a MODAL rather than an inline panel: it must not compete with
    showRoundBanner() for the same pixels, and a banner that races a dialog is
    a dialog nobody reads. The round number is folded into the TITLE so the
-   banner's big "Round N" stays the only place it is announced. */
+   banner's big "Round N" stays the only place it is announced.
+
+   >>> IT NO LONGER SILENTLY NO-OPS (G4). The first line used to be
+   >>> `if(!rec) return;`, so showRoundDebrief() with no arguments drew
+   >>> NOTHING and returned undefined - which is exactly how the debrief went
+   >>> missing from a capture: a caller (or a harness) invoked it bare and got
+   >>> silence, indistinguishable from "the debrief is broken". Everything it
+   >>> needs is already in `state.roundRec`, so a bare call now rebuilds the
+   >>> record itself and the round's own heartbeat cannot be skipped by a
+   >>> missing argument. `nextRound` defaults the same way. */
+function debriefRecordFromState(){
+  const s = state;
+  if(!s || !Array.isArray(s.players) || !s.players.length) return null;
+  const rec = s.roundRec || {};
+  const prev = Array.isArray(rec.prevInfluence) && rec.prevInfluence.length === 2
+    ? rec.prevInfluence.slice()
+    : s.players.map(p=>p.influence);
+  return {
+    round: (typeof rec.round === 'number' && rec.round > 0) ? rec.round : s.round,
+    picks: Array.isArray(rec.picks) ? rec.picks : [],
+    skirmish: !!rec.skirmish,
+    capped: rec.capped || {credits:0, ore:0, troops:0},
+    prevInfluence: prev,
+  };
+}
+
 function showRoundDebrief(rec, nextRound){
-  if(!rec) return;
+  if(!state) return;
+  const r = rec || debriefRecordFromState();
+  if(!r) return;
+  /* `prevInfluence` is the round's STARTING Influence, and it is the only
+     thing that makes "+3 this round" a delta rather than a running total. A
+     record that lost it (a bare call mid-round, a feature that rebuilt
+     roundRec) falls back to "same as now", which reports +0 instead of
+     printing a lie. */
+  const prev0 = Array.isArray(r.prevInfluence) && r.prevInfluence.length === 2
+    ? r.prevInfluence : state.players.map(p=>p.influence);
+  const nxt = (typeof nextRound === 'number' && nextRound > 0) ? nextRound : state.round + 1;
   const [a, b] = state.players;
-  const capped = rec.capped || {credits:0, ore:0, troops:0};
+  const capped = r.capped || {credits:0, ore:0, troops:0};
   const cappedTotal = (capped.credits|0) + (capped.ore|0) + (capped.troops|0);
 
   /* What the Skirmish actually paid, read off the round record rather than
@@ -2391,8 +2714,8 @@ function showRoundDebrief(rec, nextRound){
      resolution actually moved, so the debrief cannot quote a different
      figure from the one that was banked. */
   const skirmishRows = state.players.map((p,i)=>{
-    const gained = Math.max(0, p.influence - rec.prevInfluence[i]);
-    return `<div style="font-size:12px">${p.name}: <b style="color:${gained>0?'var(--accent-cool-ink,#2c4d58)':'var(--muted)'}">`
+    const gained = Math.max(0, p.influence - prev0[i]);
+    return `<div style="font-size:12px">${esc(p.name)}: <b style="color:${gained>0?'var(--accent-cool-ink,#2c4d58)':'var(--muted)'}">`
       + `${p.influence} Influence</b> <span style="color:var(--muted)">(${gained>=0?'+':''}${gained} this round)</span></div>`;
   }).join('');
 
@@ -2401,37 +2724,63 @@ function showRoundDebrief(rec, nextRound){
       + ` this round &mdash; gained and immediately discarded, never banked. A site that pays more than you can hold is worth less than it reads.</div>`
     : '';
 
-  const picks = (rec.picks||[]).map(p=>{
+  const picks = (r.picks||[]).map(p=>{
     const t = (p.tier==='advanced') ? 'Adv' : 'Basic';
     return `<span class="debrief-pick">${locationName(p.locId)} <span style="color:var(--muted)">${t}</span></span>`;
+  }).join('');
+
+  /* OBJECTIVE PROGRESS. The debrief is the only moment between rounds, and an
+     Objective that is one win from completion is a plan - it is not visible
+     anywhere else except a HUD line the player has to remember. */
+  const objLines = state.players.map(p=>{
+    const obj = getObjective(p);
+    if(!obj) return '';
+    const met = obj.check(p);
+    let progress = '';
+    if(typeof obj.progress === 'function'){
+      try{
+        const pr = obj.progress(p) || {};
+        if(pr.need > 1) progress = ` <span class="obj-progress">${pr.have} of ${pr.need} ${pr.unit||''}</span>`;
+      }catch(_){ /* a broken progress fn must not blank the debrief */ }
+    }
+    return `<div style="font-size:12px">${esc(p.name)} &mdash; ${obj.name}: `
+      + `<span class="obj-status ${met?'met':''}">${met?`met (+${obj.bonus})`:'not yet'}</span>${progress} `
+      + `<span style="color:var(--muted)">&mdash; ${obj.desc}</span></div>`;
   }).join('');
 
   /* What changes NEXT round is the actionable half. Three unlocks happen on
      fixed rounds and one of them (Meltdown) takes an option away rather than
      adding one - both are invisible until the player is already in the round
-     they land in. */
+     they land in. A round with nothing new gets the generic line rather than
+     an EMPTY "Coming up" box, which read as a broken panel. */
   const lookahead = [];
-  if(nextRound === 2) lookahead.push('<b>Round 2:</b> the <b>Advanced</b> tier and <b>Intrigue</b> cards unlock, and the <b>All In / Ghost</b> wagers become legal.');
-  if(nextRound === 3) lookahead.push('<b>Round 3:</b> <b>Round Events</b> start, <b>Betrayal tokens</b> pay +1, <b>Siege</b> marks a site CONTESTED, the <b>Rift</b> opens as a ninth site, and the first <b>Bounty</b> is published.');
-  if(nextRound === 5) lookahead.push('<b>Round 5:</b> a second <b>Betrayal token</b> and a second <b>Bounty</b>.');
-  if(nextRound === 6) lookahead.push('<b style="color:#8c1d18">MELTDOWN.</b> Caps rise, <b>every Advanced cost is free</b>, a <b>Surge</b> of 1&ndash;6 Influence is rolled at the top of the round &mdash; and if you take the Garrison you <b>must attack</b>. Holding back is not on the table.');
+  if(nxt === 2) lookahead.push('<b>Round 2:</b> the <b>Advanced</b> tier and <b>Intrigue</b> cards unlock, and the <b>All In / Ghost</b> wagers become legal.');
+  if(nxt === 3) lookahead.push('<b>Round 3:</b> <b>Round Events</b> start, <b>Betrayal tokens</b> pay +1, <b>Siege</b> marks a site CONTESTED, the <b>Rift</b> opens as a ninth site, and the first <b>Bounty</b> is published.');
+  if(nxt === 5) lookahead.push('<b>Round 5:</b> a second <b>Betrayal token</b> and a second <b>Bounty</b>.');
+  if(nxt === 6) lookahead.push('<b style="color:#8c1d18">MELTDOWN.</b> Caps rise, <b>every Advanced cost is free</b>, a <b>Surge</b> of 1&ndash;6 Influence is rolled at the top of the round &mdash; and if you take the Garrison you <b>must attack</b>. Holding back is not on the table.');
+  if(!lookahead.length){
+    lookahead.push(`<b>Round ${nxt}:</b> ${PHASE_LABEL_TEXT[phaseKey()] || 'no new mechanics'} &mdash; the Pressure clock keeps running and every site that pays more than you can hold is still worth less than it reads.`);
+  }
 
   const dread = state.dread|0;
-  const dreadLine = (nextRound >= 4 && dread > 0)
+  const dreadLine = (nxt >= 4 && dread > 0)
     ? `<div style="font-size:12px;margin-top:4px;color:var(--muted)">Pressure stands at <b>${dread}</b>. A round with no Skirmish adds 2.</div>` : '';
 
-  showModal(`Round ${rec.round} debrief`, `
-    <div class="debrief-panel" id="roundDebrief" data-round="${rec.round}">
+  showModal(`Round ${r.round} debrief`, `
+    <div class="debrief-panel" id="roundDebrief" data-round="${r.round}">
       <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700">Where the round left you</div>
       ${skirmishRows}
-      <div style="font-size:12px;margin-top:6px">${rec.skirmish
+      <div style="font-size:12px;margin-top:6px">${r.skirmish
         ? 'A Skirmish was fought &mdash; the margin is in the log above.'
         : 'No Skirmish this round &mdash; whoever held the Garrison held back.'}</div>
       ${capLine}
       ${picks ? `<div style="font-size:12px;margin-top:6px;color:var(--muted)">Picks: ${picks}</div>` : ''}
+      ${objLines ? `<div style="margin-top:8px">
+        <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700">Objectives</div>
+        ${objLines}</div>` : ''}
       ${dreadLine}
-      ${lookahead.length ? `<div class="debrief-lookahead" style="margin-top:10px;padding:8px 10px;border:1px solid var(--gold,#c98a2b);border-radius:6px;font-size:12px;line-height:1.55">
-        <b>Coming up.</b><br>${lookahead.join('<br>')}</div>` : ''}
+      <div class="debrief-lookahead" style="margin-top:10px;padding:8px 10px;border:1px solid var(--gold,#c98a2b);border-radius:6px;font-size:12px;line-height:1.55">
+        <b>Coming up.</b><br>${lookahead.join('<br>')}</div>
       <div class="footer-actions" style="justify-content:flex-end;margin-top:12px">
         <button id="debriefNext">Continue</button>
       </div>
@@ -2464,7 +2813,12 @@ function showRoundDebrief(rec, nextRound){
     if(advanced) return;
     advanced = true;
     if(failsafe !== null){ clearTimeout(failsafe); failsafe = null; }
-    hideModal(); beginRound();
+    hideModal();
+    /* A debrief shown for a game that has ALREADY ended (a bare call from the
+       end screen, or a late snapshot) must not start a seventh round: the
+       failsafe would otherwise hand the player a board nobody can finish. */
+    if(state && state.phase === 'ended'){ renderAll(); return; }
+    beginRound();
   };
   const btn = document.getElementById('debriefNext');
   if(btn) btn.onclick = next;
@@ -2492,15 +2846,44 @@ function endRound(){
     : state.players.map(p=>p.influence);
 
   /* Record the round before anything can end the game, so a feature reading
-     `state.history` in gameEnd sees every round including this one. */
-  state.history.push({
+     `state.history` in gameEnd sees every round including this one.
+
+     The entry is kept as a LIVE OBJECT, not a literal pushed and forgotten,
+     because the final round's objective payout happens further down and used
+     to land AFTER the history snapshot: the trajectory's last row showed the
+     pre-bonus score, so a game won 18-14 with a +4 objective read as "16-14"
+     on the round-by-round table - the one screen whose entire job is to tell
+     the truth about where the margin came from. `objectiveBonus` records what
+     the payout actually was, per player, so the end screen can attribute the
+     swing instead of guessing. All plain JSON: this is the online relay. */
+  const historyEntry = {
     round: state.round,
     influence: state.players.map(p=>p.influence),
+    gained: state.players.map((p,i)=> p.influence - prevInfluence[i]),
     resources: state.players.map(p=>({credits:p.credits, ore:p.ore, troops:p.troops})),
     event: state.currentEvent,
     picks: (state.roundRec && state.roundRec.picks) ? state.roundRec.picks.slice() : [],
     skirmish: !!(state.roundRec && state.roundRec.skirmish),
-  });
+    capped: (state.roundRec && state.roundRec.capped)
+      ? {credits:(state.roundRec.capped.credits|0), ore:(state.roundRec.capped.ore|0), troops:(state.roundRec.capped.troops|0)}
+      : {credits:0, ore:0, troops:0},
+    objectiveBonus: [0, 0],
+  };
+  state.history.push(historyEntry);
+
+  /* Re-read the live score into the entry just pushed. Called after the
+     roundEnd hooks and after the objective payout, because BOTH can move
+     Influence: a Round-5 Bounty pays +2 and a Collapse takes 2 off the leader
+     from inside a hook, so the snapshot taken at push time understated the
+     round by exactly the amount the feature paid. `gained` is therefore
+     derived here rather than at push time - it is the round's real delta, and
+     the trajectory's "(+7)" column is the difference between the two rounds'
+     snapshots either way. */
+  const syncHistoryEntry = ()=>{
+    historyEntry.influence = state.players.map(p=>p.influence);
+    historyEntry.gained = historyEntry.influence.map((v,i)=> v - prevInfluence[i]);
+    historyEntry.resources = state.players.map(p=>({credits:p.credits, ore:p.ore, troops:p.troops}));
+  };
 
   /* Features get the round-end hook BEFORE the objective payout and before
      the game can end, so a feature can still act on a live board.
@@ -2515,16 +2898,22 @@ function endRound(){
     OD.Ext.hooks.run('roundEnd', extCtx('draft', -1));
     OD.Ext.effects.run('roundEnd', extCtx('draft', -1));
   }
+  syncHistoryEntry();
 
   if(state.round >= TOTAL_ROUNDS){
-    state.players.forEach(p=>{
+    state.players.forEach((p,i)=>{
       const obj = getObjective(p);
       if(obj && obj.check(p)){
         p.influence += obj.bonus;
-        log(`${p.name} completes their objective <b>${obj.name}</b> -> +${obj.bonus} Influence.`);
+        historyEntry.objectiveBonus[i] = obj.bonus;
+        log(`${esc(p.name)} completes their objective <b>${obj.name}</b> -> +${obj.bonus} Influence.`);
         OD.Sound.play('objective.met');
       }
     });
+    /* Re-sync the round-6 entry with the score the game actually ended on, so
+       the trajectory's last row IS the final tally rather than the tally minus
+       the objective bonus. */
+    syncHistoryEntry();
     state.phase = 'ended';
     if(canRunExtensions()) OD.Ext.hooks.run('gameEnd', extCtx(null, -1));
     renderAll();
@@ -2946,6 +3335,42 @@ const HEAT_LABEL = Object.freeze({
   1:'Opening', 2:'Mobilising', 3:'Closing In', 4:'Tense', 5:'Critical', 6:'Meltdown',
 });
 
+/* ---- G5: THE SECOND HALF OF THE RAMP -------------------------------------
+   --heat says how LATE the game is. The stylesheet also authors a separate
+   .phase-label with a [data-phase] attribute for what KIND of round it is
+   (contact / probe / escalation / events-live / pressure / critical /
+   final-round), and nothing in this file ever emitted one: renderBoardHeader
+   wrote only the heat chip and the Rift line, so the stylesheet's whole phase
+   block was live-but-unbound exactly like the log's .is-* block was.
+
+   The two are deliberately kept apart. `critical` and `pressure` are BOTH
+   Round 5 - the difference between them is Dread, not the round number - so
+   the phase key is computed from the round AND the Pressure clock, which is
+   the only thing that knows both. */
+const PHASE_BY_ROUND = Object.freeze({
+  1:'contact', 2:'probe', 3:'escalation', 4:'events-live', 5:'pressure', 6:'final-round',
+});
+const PHASE_LABEL_TEXT = Object.freeze({
+  'contact':     'Board cold &mdash; nothing contested',
+  'probe':       'Advanced + Intrigue live',
+  'escalation':  'Events + Rift open',
+  'events-live': 'Full kit running',
+  'pressure':    'Pressure rising',
+  'critical':    'Collapse imminent',
+  'final-round': 'Final round',
+});
+/* Dread at or over the Collapse threshold is 'critical', whatever the round. */
+function phaseKey(){
+  const s = state;
+  const r = clamp((s && s.round) | 0, 1, TOTAL_ROUNDS);
+  const dread = s ? (s.dread | 0) : 0;
+  const atCollapse = (typeof OD !== 'undefined' && OD.Chaos && typeof OD.Chaos.COLLAPSE_AT === 'number')
+    ? OD.Chaos.COLLAPSE_AT : 4;
+  if(r === TOTAL_ROUNDS) return 'final-round';
+  if(dread >= atCollapse) return 'critical';
+  return PHASE_BY_ROUND[r] || 'contact';
+}
+
 function setHeat(round){
   const r = clamp(round|0, 1, TOTAL_ROUNDS);
   const v = (HEAT_BY_ROUND[r] !== undefined) ? HEAT_BY_ROUND[r] : HEAT_BY_ROUND[1];
@@ -2999,14 +3424,25 @@ function renderBoardHeader(){
   } else {
     parts.push(`<span class="heat-label" data-heat-tier="${HEAT_TIER[r]}" title="Escalation ${r} of ${TOTAL_ROUNDS}">${HEAT_LABEL[r]}</span>`);
   }
+  /* The PHASE chip: the stylesheet's second escalation reading, and the one
+     that keeps moving inside a single round (Round 5 flips to 'critical' the
+     moment the Pressure clock reaches the Collapse threshold). It sits beside
+     the heat chip rather than in #phaseLabel because #phaseLabel carries the
+     round STEP ("Drafting the board"), which is a different fact entirely. */
+  const pk = phaseKey();
+  parts.push(`<span class="phase-label" data-phase="${pk}" title="Round ${r} of ${TOTAL_ROUNDS}">${PHASE_LABEL_TEXT[pk] || ''}</span>`);
 
   const rift = riftLocIfLive();
   if(rift){
     const contested = state.riftContested ? ' <b>CONTESTED</b>' : '';
     const name = state.riftTarget ? rift.name : rift.name;
-    parts.unshift(`<span class="rift-reveal" style="font-size:12px;color:var(--gold)">RIFT OPEN &mdash; ${name}${contested}</span>`);
+    /* No inline colour: `.rift-reveal` is authored open-first and the closed
+       reading is `.rift-reveal.is-closed`, so the inline `color:var(--gold)` /
+       `color:var(--muted)` this used to carry was overriding the very rule the
+       stylesheet wrote for it. */
+    parts.unshift(`<span class="rift-reveal">RIFT OPEN &mdash; ${name}${contested}</span>`);
   } else if(r >= 3 && !meltdown){
-    parts.unshift(`<span class="rift-reveal" style="font-size:12px;color:var(--muted)">Rift closed &mdash; taken or not this round.</span>`);
+    parts.unshift(`<span class="rift-reveal is-closed">Rift closed &mdash; taken or not this round.</span>`);
   }
   el.innerHTML = parts.join('');
 }
@@ -3022,6 +3458,11 @@ function renderAll(){
   renderInfluenceTrack();
   renderRoundStepper();
   renderTurnBanner();
+  /* The online guest never calls log() - it receives whole snapshots and its
+     `state.logEntries` is replaced wholesale - so nothing was ever painting the
+     log on that seat. renderAll() is the guest's paint, so the log rides
+     along. Host-side this is one extra identical render per pick. */
+  renderLog();
   document.getElementById('roundLabel').textContent = `${state.round} / ${TOTAL_ROUNDS}`;
   const phaseNames = {draw:'Drawing cards…', draft:'Drafting the board', 'skirmish-decide':'Skirmish decision', 'skirmish-commit':'Skirmish in progress', ended:'Game over'};
   document.getElementById('phaseLabel').textContent = phaseNames[state.phase] ? `— ${phaseNames[state.phase]}` : '';
@@ -3046,7 +3487,7 @@ function renderInfluenceTrack(){
   const lead = (p1.influence === p2.influence) ? -1 : (p1.influence > p2.influence ? 0 : 1);
   el.innerHTML = [p1,p2].map((p,i)=>`
     <div class="track-row${lead===i?' is-lead':''}">
-      <div class="track-label">${p.name}</div>
+      <div class="track-label">${esc(p.name)}</div>
       <div class="track-bar"><div class="track-fill p${i+1}" style="width:${Math.min(100, p.influence/maxScale*100)}%"></div></div>
       <div class="track-value">${p.influence}</div>
     </div>`).join('');
@@ -3071,7 +3512,7 @@ function renderTurnBanner(){
   if(state.phase==='draft' && activeIdx!==null){
     const player = state.players[activeIdx];
     const isMe = online.enabled ? activeIdx===online.myIndex : player.type==='human';
-    el.innerHTML = isMe ? `<b>Your turn</b> to draft a site.` : `Waiting on <b>${player.name}</b> to draft...`;
+    el.innerHTML = isMe ? `<b>Your turn</b> to draft a site.` : `Waiting on <b>${esc(player.name)}</b> to draft...`;
   } else if(state.phase==='skirmish-decide' || state.phase==='skirmish-commit'){
     el.innerHTML = `<b>Skirmish</b> in progress...`;
   } else {
@@ -3088,7 +3529,7 @@ function renderHud(){
     const leader = getLeader(p);
     return `
     <div class="player-card p${i+1} ${isActive?'active':''}">
-      <div class="name"><span>${p.name} ${p.type==='bot'?'(Bot)':''}</span><span class="influence-badge">${p.influence} Influence</span></div>
+      <div class="name"><span>${esc(p.name)} ${p.type==='bot'?'(Bot)':''}</span><span class="influence-badge">${p.influence} Influence</span></div>
       <div class="stats">
         <span>${icon('credits')}Credits: ${p.credits}</span>
         <span>${icon('ore')}Ore: ${p.ore}</span>
@@ -3157,6 +3598,21 @@ function advancedNote(loc, advUnlocked, advAffordable){
   return loc.advanced.note || '';
 }
 
+/* Which of the four `.tier-note` states a note is, for the stylesheet's
+   .is-free / .is-short / .is-locked / .is-cost block. A WAIVED cost and a
+   BLOCKED cost are two near-identical amber tints, so the sheet splits them on
+   border + glyph + words; until this returned a class, an Advanced tile whose
+   cost had been waived under Meltdown and one the player could not pay both
+   rendered as the same neutral note. `is-cost` is the default look and is only
+   emitted when there is genuinely a price to show. */
+function tierNoteClass(note){
+  const s = String(note || '');
+  if(/meltdown/i.test(s)) return 'is-free';
+  if(/cannot afford/i.test(s)) return 'is-short';
+  if(/unlocks Round 2/i.test(s)) return 'is-locked';
+  return s ? 'is-cost' : '';
+}
+
 function renderBoard(){
   const el = document.getElementById('board');
   const activeIdx = currentPicker();
@@ -3197,8 +3653,8 @@ function renderBoard(){
       const cls = ['tier-row', tier, isTaken?'is-taken':'', (disabled && !isTaken)?'disabled':''].join(' ');
       const actionable = pickable && !isTaken && !disabled;
       const data = actionable ? `data-loc="${loc.id}" data-tier="${tier}"` : '';
-      const takenTag = isTaken ? `<span class="taken-tag p${(takenOwner+1)}">${state.players[takenOwner].name}</span>` : '';
-      const noteEl = (!isTaken && note) ? `<span class="tier-note">${note}</span>` : '';
+      const takenTag = isTaken ? `<span class="taken-tag p${(takenOwner+1)}">${esc(state.players[takenOwner].name)}</span>` : '';
+      const noteEl = (!isTaken && note) ? `<span class="tier-note ${tierNoteClass(note)}">${note}</span>` : '';
       /* Keyboard operability: a tier row is a BUTTON, so it is one. A
          keyboard player used to be locked out of the entire game because
          every pickable thing was a bare <div> with a click handler and no
@@ -3292,21 +3748,68 @@ function setHandHeading(title, note){
   h.innerHTML = `${title} <span class="hand-cap">${note}</span>`;
 }
 
+/* >>> WHICH SEAT IS BEING ASKED TO COMMIT (D1).
+   >>> During a Skirmish there is no `currentPicker()` - the draft is over - so
+   >>> renderHand() used to fall through to `state.lastActiveIdx`, which is
+   >>> written ONLY by applyLocationEffect() and therefore still pointed at the
+   >>> AGGRESSOR. In a two-human hotseat the rail behind the defender's commit
+   >>> modal was headed "<Aggressor>'s hand" and showed the aggressor's five
+   >>> cards: player 2 decided their fight with player 1's hand in full view,
+   >>> in the one mode built for two people at one keyboard.
+   >>>
+   >>> This is the authority for that question, derived from live state rather
+   >>> than from a cached index, so it cannot go stale the way lastActiveIdx
+   >>> did. Two moments, both covered:
+   >>>   - `skirmish-decide`: `skirmishCtx` does not exist yet (it is created in
+   >>>     startSkirmishCommit), and the seat being asked is whoever holds the
+   >>>     Garrison - the same player advanceDraftOrSkirmish() calls the
+   >>>     aggressor.
+   >>>   - `skirmish-commit`: the aggressor commits first, so the seat asked is
+   >>>     the aggressor while `aggCommit` is still null and the defender once
+   >>>     it is set. Both halves are read live, which is what makes it correct
+   >>>     at the defender's modal - the moment the old fallback got it wrong.
+   >>> Returns null outside a Skirmish, and also when the fight is already fully
+   >>> committed (nothing left to ask), so the caller's own fallback still owns
+   >>> every other phase. */
+function commitSeatIdx(){
+  if(!state) return null;
+  if(state.phase==='skirmish-decide'){
+    const agg = state.players.findIndex(p=>p.isAggressor);
+    return agg>=0 ? agg : null;
+  }
+  if(state.phase==='skirmish-commit' && skirmishCtx){
+    if(skirmishCtx.aggCommit===null || skirmishCtx.aggCommit===undefined) return skirmishCtx.aggressorIdx;
+    if(skirmishCtx.defCommit===null || skirmishCtx.defCommit===undefined) return skirmishCtx.defenderIdx;
+    return null;
+  }
+  return null;
+}
+
 function renderHand(){
   const el = document.getElementById('hand');
   let showIdx;
   if(online.enabled){
+    /* The guest's rail is visible to them alone, so their own seat is the only
+       answer that is both correct and safe - and if the HOST is the one being
+       asked, the guest is not asked at all and their own hand is what they
+       should keep seeing. The D1 leak was a hotseat leak; online each side has
+       its own screen, so this branch is correct as it stands. */
     showIdx = online.myIndex;
   } else {
     const activeIdx = currentPicker();
-    /* In the draft, show whoever is picking right now. Outside the draft
-       there is no active picker, so fall back to the player who most
-       recently acted (`lastActiveIdx`, set in applyLocationEffect). The old
-       fallback was findIndex(p => p.type === 'human'), which is always 0
-       in a two-human hotseat - so after Player 2's Skirmish the panel
-       silently flipped back to showing Player 1's hand. */
+    /* In the draft, show whoever is picking right now. Outside the draft there
+       is no active picker, so the rail must be told whose hand it is by the
+       phase: during a Skirmish that is the seat being asked to commit (D1,
+       commitSeatIdx above), and outside one it is the player who most recently
+       acted (`lastActiveIdx`, set in applyLocationEffect). The old fallback for
+       the latter was findIndex(p => p.type === 'human'), which is always 0 in
+       a two-human hotseat - so after Player 2's Skirmish the panel silently
+       flipped back to showing Player 1's hand. */
+    const commitSeat = commitSeatIdx();
     if(state.phase==='draft' && activeIdx!==null && state.players[activeIdx].type==='human'){
       showIdx = activeIdx;
+    } else if(commitSeat!==null && state.players[commitSeat] && state.players[commitSeat].type==='human'){
+      showIdx = commitSeat;
     } else if(typeof state.lastActiveIdx === 'number' && state.players[state.lastActiveIdx]
               && state.players[state.lastActiveIdx].type==='human'){
       showIdx = state.lastActiveIdx;
@@ -3321,13 +3824,18 @@ function renderHand(){
     setHandHeading('Hand', 'no human seat this game');
     return;
   }
-  setHandHeading(online.enabled ? 'Your hand' : `${player.name}'s hand`, 'used only in a Skirmish');
+  setHandHeading(online.enabled ? 'Your hand' : `${esc(player.name)}'s hand`, 'used only in a Skirmish');
 
   const prevSeen = handRenderCache[showIdx] || new Set();
   const groups = groupHand(player.hand);
   handRenderCache[showIdx] = new Set(player.hand);
 
-  el.innerHTML = (groups.length ? groups.map(g=>`
+  /* Belt and braces on the G3 invariant: a group whose card list is empty is
+     dropped HERE as well as inside groupHand, so no caller can ever paint a
+     category header over nothing. */
+  const shown = groups.filter(g=>g.cards && g.cards.length);
+
+  el.innerHTML = (shown.length ? shown.map(g=>`
       <div class="hand-group">
         <div class="hand-group-label">${g.category}</div>
         <div class="hand-group-cards">
@@ -3344,10 +3852,48 @@ function renderHand(){
       </div>`).join('') : '<span style="color:var(--muted)">Empty hand.</span>');
 }
 
+/* The log's own header. index.html ships a static `<h3>Log</h3>` and no
+   `#logPanel` cannot be edited, so the meta row is created lazily INSIDE the
+   panel and immediately BEFORE #log - not inside #log. That placement is load
+   bearing: css/style.css animates `#log .entry:first-child`, and a header
+   element as #log's first child would steal :first-child from the newest line
+   and the whole panel would stop sliding in new entries.
+
+   NEW CLASSES (for the stylesheet owner): .log-head, .log-head-n. */
+function renderLogHead(el){
+  const panel = el.parentNode;
+  if(!panel) return null;
+  let head = document.getElementById('logHead');
+  if(!head){
+    head = document.createElement('div');
+    head.id = 'logHead';
+    head.className = 'log-head';
+    panel.insertBefore(head, el);
+  }
+  const n = state.logEntries.length;
+  head.innerHTML = `<span class="log-head-n">${n} ${n===1?'entry':'entries'} &middot; newest first</span>`;
+  return head;
+}
+
 function renderLog(){
   const el = document.getElementById('log');
-  el.innerHTML = state.logEntries.slice().reverse().map(e=>`<div class="entry">${e}</div>`).join('');
+  if(!el) return;
+  trimLog();
+  renderLogHead(el);
+  el.innerHTML = state.logEntries.slice().reverse().map(e=>
+    `<div class="entry ${logEntryType(e)}">${e}</div>`).join('');
+  /* Newest is FIRST in the array, so the scroll position belongs at the top.
+     Without this the panel keeps whatever offset it had and, on a re-render
+     that shrinks the content, parks the player somewhere in the middle of
+     history instead of on the line that just happened. */
+  if(el.scrollTop !== 0) el.scrollTop = 0;
 }
+
+/* Confetti fires ONCE per finished game. showEndScreen() is reachable more than
+   once for one game (the online guest re-renders it on every snapshot that
+   arrives with phase 'ended', and a reconnect re-runs it), so an unguarded
+   call rains particles on every duplicate render. Reset in startGame(). */
+let endConfettiFired = false;
 
 function showEndScreen(){
   document.getElementById('game').classList.add('hidden');
@@ -3357,8 +3903,27 @@ function showEndScreen(){
   const obj1 = getObjective(p1), obj2 = getObjective(p2);
   let headline, winnerIdx;
   if(p1.influence===p2.influence){ headline = "It's a draw!"; winnerIdx = -1; }
-  else if(p1.influence>p2.influence){ headline = `${p1.name} wins!`; winnerIdx = 0; }
-  else { headline = `${p2.name} wins!`; winnerIdx = 1; }
+  else if(p1.influence>p2.influence){ headline = `${esc(p1.name)} wins!`; winnerIdx = 0; }
+  else { headline = `${esc(p2.name)} wins!`; winnerIdx = 1; }
+
+  /* ---- G1.3 WEIGHT THE OUTCOME ----------------------------------------
+     Victory and defeat used to be the SAME markup with two different words in
+     the <h1>: the harness diffed both screens and the class sets were
+     byte-identical apart from that string, so nothing on the page said "you
+     won" except a sentence. Three new signals, all class names so the
+     stylesheet owns the pixels and a greyscale reader still gets them:
+
+       #endScreen.is-victory  / .is-defeat / .is-draw   (whole panel)
+       .player-card.is-winner / .is-loser              (the two chips)
+       h1[data-outcome="victory|defeat|draw"]           (the headline)
+
+     A tie carries NONE of the winner/loser classes: neither seat won, and
+     painting one of them as "the winner" on a draw is the kind of small lie a
+     results screen should not tell. */
+  const outcome = winnerIdx===-1 ? 'draw' : (winnerIdx===0 ? 'victory' : 'defeat');
+  const panelState = winnerIdx===-1 ? 'is-draw' : (winnerIdx===0 ? 'is-victory' : 'is-defeat');
+  ['is-victory','is-defeat','is-draw'].forEach(c=> end.classList.toggle(c, c===panelState));
+  const cardState = (i)=> winnerIdx===-1 ? '' : (i===winnerIdx ? ' is-winner' : ' is-loser');
 
   if(winnerIdx!==-1){
     if(!online.enabled || winnerIdx===online.myIndex){ sfx.win(); OD.Sound.play('victory.fanfare'); }
@@ -3368,23 +3933,60 @@ function showEndScreen(){
     OD.Sound.play('tie');
   }
 
+  /* ---- G1.1 THE SCORE-GAP BAR -----------------------------------------
+     css/style.css has authored .end-gap, .end-gap-label, .end-gap-bar,
+     .end-gap-fill, .end-gap-value and an #endScreenGap confetti anchor, and
+     NOTHING ever emitted them - the number that decided a six-round game was
+     a table cell.
+
+     The two fills are ABSOLUTELY positioned inside .end-gap-bar (which the
+     stylesheet already gives position:relative and overflow:hidden) rather
+     than left to flow. The sheet carries `.end-gap-fill.p2{margin-left:auto}`,
+     which only means anything in a flex row, and .end-gap-bar is not flex -
+     as flowing children the two fills would stack vertically and the second
+     would be clipped away entirely. Absolute insets read correctly with the
+     sheet as authored AND with `display:flex` added to .end-gap-bar later. */
+  const total = p1.influence + p2.influence;
+  const margin = Math.abs(p1.influence - p2.influence);
+  const share1 = total > 0 ? Math.round((p1.influence / total) * 1000) / 10 : 50;
+  const share2 = Math.round((100 - share1) * 10) / 10;   // exact complement, so the fills sum to 100
+  const gapLead = margin === 0 ? 'Level' : `${esc(p1.influence > p2.influence ? p1.name : p2.name)} leads`;
+  const gapValue = margin === 0
+    ? `Level finish &mdash; both outposts on <span class="is-margin">${p1.influence}</span> Influence`
+    : `${esc(p1.influence > p2.influence ? p1.name : p2.name)} wins by <span class="is-margin">${margin}</span> Influence`;
+  const gapHtml = `
+    <div class="end-gap" id="endScreenGap">
+      <div class="end-gap-label">
+        <span class="end-gap-name p1">${esc(p1.name)} <b>${p1.influence}</b></span>
+        <span class="end-gap-lead">${gapLead}</span>
+        <span class="end-gap-name p2"><b>${p2.influence}</b> ${esc(p2.name)}</span>
+      </div>
+      <div class="end-gap-bar">
+        <div class="end-gap-fill p1" style="position:absolute;top:0;bottom:0;left:0;width:${share1}%"></div>
+        <div class="end-gap-fill p2" style="position:absolute;top:0;bottom:0;right:0;width:${share2}%"></div>
+      </div>
+      <div class="end-gap-value">${gapValue}</div>
+    </div>`;
+
   function statRow(label, key, fmt){
     const v1 = fmt ? fmt(p1[key]) : p1[key];
     const v2 = fmt ? fmt(p2[key]) : p2[key];
     return `<tr><td>${label}</td><td>${v1}</td><td>${v2}</td></tr>`;
   }
 
-  /* END-SCREEN TRAJECTORY (G9). The final tally is a static number; the game
+/* END-SCREEN TRAJECTORY (G1.2). The final tally is a static number; the game
      that produced it is not. The player scored all of this across six rounds
      of drafts, caps and Skirmishes, and the end screen used to present only
      the sum - so a 22-4 win and a 22-4 lead built the same way read
-     identically. `state.history` already carries a per-round Influence pair,
-     appended in endRound before anything could end the game.
+     identically. `state.history` is appended in endRound BEFORE anything can
+     end the game, so all six rounds are present even on the final one; the
+     round-6 entry is re-synced after the objective payout so its Influence is
+     the number the game actually ended on.
 
      The PIVOT is the single round where the lead changed hands by the largest
      margin. It is the round the loser would point at and the winner would
      rather forget, which is exactly why it earns a line of its own. */
-  const history = (state.history || []).slice();
+  const history = (state.history || []).filter(h => h && Array.isArray(h.influence) && h.influence.length===2);
   let trajectoryHtml = '';
   let pivot = null;
   if(history.length){
@@ -3397,7 +3999,8 @@ function showEndScreen(){
        the absolute gap matters: a player who was already 10 up and wins
        again by 10 has not had a pivotal round, they have had six quiet
        ones. A first-round lead has no previous to change from, so it is
-       measured from 0-0. */
+       measured from 0-0. Ties keep the EARLIER round, which is the round that
+       actually set the tone rather than the one that failed to move it. */
     history.forEach(h=>{
       const now = lead(h);
       const before = prev(h);
@@ -3406,84 +4009,147 @@ function showEndScreen(){
       if(!pivot || swing > pivot.swing) pivot = {h, swing, was, now};
     });
 
-    const rows = history.map((h,i)=>{
+    /* `gained` is recorded per round in endRound; recomputing it from the
+       running totals is the same arithmetic and is what keeps this correct for
+       a history written by an older snapshot. */
+    const gainOf = (h, before, k)=> Array.isArray(h.gained) && h.gained.length===2
+      ? h.gained[k]
+      : (h.influence[k] - (before ? before.influence[k] : 0));
+
+    const rows = history.map((h)=>{
       const before = prev(h);
-      const d0 = h.influence[0] - (before ? before.influence[0] : 0);
-      const d1 = h.influence[1] - (before ? before.influence[1] : 0);
+      const d0 = gainOf(h, before, 0), d1 = gainOf(h, before, 1);
       const gap = lead(h);
-      const leader = gap === 0 ? '-' : (gap > 0 ? p1.name : p2.name);
+      const leader = gap === 0 ? '-' : (gap > 0 ? esc(p1.name) : esc(p2.name));
       const cls = gap === 0 ? '' : (gap > 0 ? 'p1' : 'p2');
+      const ob = Array.isArray(h.objectiveBonus) ? h.objectiveBonus : [0,0];
+      /* The round an objective bonus was banked on is flagged in the row: the
+         +4 is frequently the single biggest number in the column and it used
+         to be invisible in the trajectory. */
+      const bonusTag = (ob[0] > 0 || ob[1] > 0)
+        ? ` <span class="trajectory-bonus">obj +${(ob[0]||0) + (ob[1]||0)}</span>` : '';
       return `<tr${pivot && pivot.h===h ? ' class="pivot-round"' : ''}>`
         + `<td>${h.round}</td>`
         + `<td>${h.influence[0]} <span style="color:var(--muted);font-size:11px">(${d0>=0?'+':''}${d0})</span></td>`
         + `<td>${h.influence[1]} <span style="color:var(--muted);font-size:11px">(${d1>=0?'+':''}${d1})</span></td>`
         + `<td class="${cls}">${leader}</td>`
-        + `<td>${h.skirmish ? 'yes' : '<span style="color:var(--muted)">held back</span>'}</td>`
+        + `<td>${h.skirmish ? 'yes' : '<span style="color:var(--muted)">held back</span>'}${bonusTag}</td>`
         + `</tr>`;
     }).join('');
 
     const pivotLine = (pivot && pivot.swing > 0)
       ? `<div class="pivot-note"><b>The pivot was Round ${pivot.h.round}.</b> `
         + `${pivot.now === 0 ? 'The lead tied out'
-          : `${(pivot.now > 0 ? p1.name : p2.name)} took it`}`
-        + `${pivot.was === 0 ? '' : ` from ${(pivot.was > 0 ? p1.name : p2.name)}`}`
-        + ` &mdash; a swing of <b>${pivot.swing} Influence</b> in a single round.</div>`
+          : `${esc((pivot.now > 0 ? p1.name : p2.name))} took it`}`
+        + `${pivot.was === 0 ? '' : ` from ${esc((pivot.was > 0 ? p1.name : p2.name))}`}`
+        + ` &mdash; a swing of <b>${pivot.swing} Influence</b> in a single round.`
+        + `${(pivot && pivot.h && Array.isArray(pivot.h.objectiveBonus) && (pivot.h.objectiveBonus[0] > 0 || pivot.h.objectiveBonus[1] > 0))
+            ? ' Part of that was an objective bonus.' : ''}</div>`
       : '';
 
     trajectoryHtml = `
       <div class="trajectory">
         <h3>How it went</h3>
         <table class="stats-table">
-          <thead><tr><th>Round</th><th>${p1.name}</th><th>${p2.name}</th><th>Led by</th><th>Skirmish</th></tr></thead>
+          <thead><tr><th>Round</th><th>${esc(p1.name)}</th><th>${esc(p2.name)}</th><th>Led by</th><th>Skirmish</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
         ${pivotLine}
       </div>`;
   }
 
-  /* The objective bonus is the LARGEST single swing available in the whole
-     game - +4 in one line, against a Skirmish that pays 4-6 but only for
-     holding a Garrison. It was rendered as one more table cell, which reads
-     as bookkeeping. It gets a callout, and the callout is scored: it shows
-     what each player would have finished on WITHOUT it, so the player who
-     lost by 3 can see exactly how close the objective was to mattering. */
+  /* G1.4 THE OBJECTIVE BONUS IS THE LARGEST SWING IN THE GAME. +4 in one
+     line, against a Skirmish that pays 4-6 but only for holding a Garrison,
+     and it is settled after the last round so it never shows up as a Skirmish
+     you could have played for. It used to render as one more table cell.
+
+     The callout is SCORED rather than merely stated: it prints what each
+     player would have finished on WITHOUT the bonus and then says the one
+     thing that matters - whether the bonus decided the game, did not decide
+     it, or turned a win into a level finish. The old copy asserted "the bonus
+     did not change the winner" whenever exactly one player met their goal,
+     which is false in precisely the case a player most wants to know about. */
+  const lastEntry = history.length ? history[history.length-1] : null;
   const objMet = (p, obj)=> !!(obj && obj.check(p));
   const met1 = objMet(p1, obj1), met2 = objMet(p2, obj2);
+  /* What was ACTUALLY paid, from the recorded round. Falls back to the
+     objective's own declared bonus, so a screen rendered from a snapshot with
+     no history behind it still scores the callout correctly instead of
+     claiming a met objective was worth nothing. */
+  const bonusOf = (i, met, obj)=> {
+    const rec = (lastEntry && Array.isArray(lastEntry.objectiveBonus) && lastEntry.objectiveBonus[i] > 0)
+      ? lastEntry.objectiveBonus[i] : 0;
+    if(rec > 0) return rec;
+    return met && obj ? (obj.bonus || 0) : 0;
+  };
+  const b1 = bonusOf(0, met1, obj1), b2 = bonusOf(1, met2, obj2);
+  const bare1 = p1.influence - b1, bare2 = p2.influence - b2;
+  const bareMargin = Math.abs(bare1 - bare2);
+  const bareWinner = bare1 === bare2 ? -1 : (bare1 > bare2 ? 0 : 1);
+  let flipLine = '';
+  if(met1 !== met2){
+    if(bareWinner !== winnerIdx){
+      if(winnerIdx === -1){
+        /* The bonus pulled a game that was heading one way back to level. That
+           is the most interesting thing the +4 ever does, so it gets said
+           plainly rather than left to arithmetic. */
+        flipLine = `<div class="objective-callout-flip">The bonus <b>levelled the game</b> &mdash; without it `
+          + `${esc(bare1 > bare2 ? p1.name : p2.name)} would have won by ${bareMargin} Influence.</div>`;
+      } else if(bareWinner === -1){
+        flipLine = `<div class="objective-callout-flip">The bonus <b>decided the game</b> &mdash; without it the Influence track would have finished level.</div>`;
+      } else {
+        flipLine = `<div class="objective-callout-flip">The bonus <b>decided the game</b> &mdash; `
+          + `${esc(state.players[winnerIdx].name)} finished on the Skirmishes and Sites alone only `
+          + `${esc(state.players[1-winnerIdx].name)} led by ${bareMargin} Influence.</div>`;
+      }
+    } else if(margin > 0){
+      flipLine = `<div class="objective-callout-flip">The bonus did not change the winner &mdash; `
+        + `${esc(state.players[winnerIdx].name)} would still have taken it by ${bareMargin} Influence.</div>`;
+    }
+  }
   const objectiveCallout = (met1 || met2)
     ? `<div class="objective-callout">
-        <div class="objective-callout-h">Objective bonus &mdash; +${OBJECTIVE_BONUS} each</div>
+        <div class="objective-callout-h">Objective bonus &mdash; +${OBJECTIVE_BONUS} each, settled after the last round</div>
         <div class="objective-callout-row">
-          <b>${p1.name}</b> &mdash; ${obj1.name}: ${met1
-            ? `<b class="met">MET, +${OBJECTIVE_BONUS}</b>. Without it: <b>${p1.influence - OBJECTIVE_BONUS}</b>.`
+          <b>${esc(p1.name)}</b> &mdash; ${obj1.name}: ${met1
+            ? `<b class="met">MET, +${b1}</b>. Without it: <b>${bare1}</b>.`
             : `not met. On the Influence they actually scored: <b>${p1.influence}</b>.`}
         </div>
         <div class="objective-callout-row">
-          <b>${p2.name}</b> &mdash; ${obj2.name}: ${met2
-            ? `<b class="met">MET, +${OBJECTIVE_BONUS}</b>. Without it: <b>${p2.influence - OBJECTIVE_BONUS}</b>.`
+          <b>${esc(p2.name)}</b> &mdash; ${obj2.name}: ${met2
+            ? `<b class="met">MET, +${b2}</b>. Without it: <b>${bare2}</b>.`
             : `not met. On the Influence they actually scored: <b>${p2.influence}</b>.`}
         </div>
-        ${(met1 !== met2) ? `<div class="objective-callout-flip">The bonus did not change the winner &mdash; but it is the
-          difference between a win and a defeat on the board by ${Math.abs((p1.influence - (met1?OBJECTIVE_BONUS:0)) - (p2.influence - (met2?OBJECTIVE_BONUS:0)))} Influence.</div>` : ''}
+        ${flipLine}
       </div>`
     : '';
 
+  /* One sentence of verdict, in the `.end-sub` pill the stylesheet already
+     defines and never received. It names the outcome AND the size of it, so
+     the first thing a player reads is the answer, not the word "wins". */
+  const verdict = margin === 0
+    ? `Level after ${TOTAL_ROUNDS} rounds. Nobody's objective broke the tie.`
+    : `${esc((winnerIdx===0 ? p1.name : p2.name))} takes it by ${margin} Influence across ${TOTAL_ROUNDS} rounds.`;
+
   end.innerHTML = `
-    <h1>${headline}</h1>
+    <h1 class="end-headline" data-outcome="${outcome}">${headline}</h1>
+    <p class="end-sub">${verdict}</p>
+    ${gapHtml}
     <div class="row" style="justify-content:center">
-      <div class="player-card p1"><div class="name">${p1.name}<span class="influence-badge">${p1.influence} Influence</span></div></div>
-      <div class="player-card p2"><div class="name">${p2.name}<span class="influence-badge">${p2.influence} Influence</span></div></div>
+      <div class="player-card p1${cardState(0)}"><div class="name">${esc(p1.name)}<span class="influence-badge">${p1.influence} Influence</span></div></div>
+      <div class="player-card p2${cardState(1)}"><div class="name">${esc(p2.name)}<span class="influence-badge">${p2.influence} Influence</span></div></div>
     </div>
     ${objectiveCallout}
     ${trajectoryHtml}
     <table class="stats-table">
-      <thead><tr><th>Final tally</th><th>${p1.name}</th><th>${p2.name}</th></tr></thead>
+      <thead><tr><th>Final tally</th><th>${esc(p1.name)}</th><th>${esc(p2.name)}</th></tr></thead>
       <tbody>
         ${statRow('Influence','influence')}
         ${statRow('Credits','credits')}
         ${statRow('Ore','ore')}
         ${statRow('Troops','troops')}
         ${statRow('Cards in hand','hand',h=>h.length)}
-        <tr><td>Objective</td><td>${obj1.name}${obj1.check(p1)?' (met, +'+obj1.bonus+')':''}</td><td>${obj2.name}${obj2.check(p2)?' (met, +'+obj2.bonus+')':''}</td></tr>
+        <tr><td>Objective</td><td>${obj1.name}${met1?' (met, +'+b1+')':''}</td><td>${obj2.name}${met2?' (met, +'+b2+')':''}</td></tr>
       </tbody>
     </table>
     <div class="footer-actions" style="justify-content:center;margin-top:20px">
@@ -3491,6 +4157,20 @@ function showEndScreen(){
     </div>
     <div id="demoLoopBar" class="hidden" style="justify-content:center;margin-top:14px"></div>
   `;
+
+  /* The stylesheet's own comment on #endScreenGap says this is where
+     OD.Fx.confetti() is meant to land (it overrides the host's overflow to
+     visible so the rain crosses the whole screen). Fired on a win only, once
+     per game, and OD.Fx no-ops under prefers-reduced-motion. */
+  if(winnerIdx!==-1 && !endConfettiFired && typeof OD !== 'undefined' && OD.Fx && typeof OD.Fx.confetti === 'function'){
+    endConfettiFired = true;
+    try{
+      const palette = winnerIdx===0
+        ? ['#c98a2b','#e0c56a','#b5502e','#8a5a2b','#ffe9e2']
+        : ['#2f6f7a','#7fa3c0','#c98a2b','#cfd8dc','#e6eef0'];
+      OD.Fx.confetti('#endScreenGap', {count: 110, colors: palette});
+    }catch(_){ /* confetti is decoration; never let it break the end screen */ }
+  }
   document.getElementById('playAgain').onclick = ()=>{
     cancelDemoLoop();
     end.classList.add('hidden');

@@ -130,7 +130,28 @@
 
   /* Muted as TEXT. --muted above is 4.33:1 on --panel, which is a fail for
      body copy; every time --muted is used as a foreground it uses this
-     instead: 6.32:1 on panel, 5.61:1 on panel2, 4.49:1 on felt. */
+     instead: 6.32:1 on panel, 5.61:1 on panel2, 4.49:1 on felt.
+     >>> VERIFIED 2026-10-01, not corrected. A QA pass reported these three as
+     >>> wrong "by about 2x in the safe direction", quoting 11.88 / 10.55 / 8.44.
+     >>> Those numbers are not this colour. Recomputed from the WCAG 2.x
+     >>> relative-luminance definition against the surfaces declared in this
+     >>> very block:
+     >>>     #6b5b40 on #fffaf0 (--panel)  =  6.32:1
+     >>>     #6b5b40 on #f7ecd6 (--panel2) =  5.61:1
+     >>>     #6b5b40 on #e4d4b0 (--felt)   =  4.49:1
+     >>> A ratio of 11.88:1 on --panel would need a fill around rgb(253,253,253).
+     >>> So the numbers above were RIGHT, they were left alone, and the reason is
+     >>> written down here: a comment that understates a passing ratio is how the
+     >>> next engineer "corrects" a non-problem and darkens a token until
+     >>> --muted stops being a distinct value from --ink-soft at all. The two
+     >>> differ by one hex step and that is the whole design.
+     >>> Also verified in the same pass, and also already correct:
+     >>>     #8a7355 (--muted) on #fffaf0  =  4.33:1  (the fail noted above)
+     >>> If you re-measure, measure the composite, not the token: --panel2 and
+     >>> --felt are rarely what text actually sits on, because the panels paint
+     >>> themselves with gradients. On a real composited --panel2 the live
+     >>> measurement is 5.51:1, not 5.61:1 - a third of a point, in the safe
+     >>> direction, and not a reason to touch the token.                        */
   --muted-text:#6b5b40;
 
   /* ---- tier system: risk / urgency --------------------------------------
@@ -139,12 +160,33 @@
        -ink   text ON that fill (and text on --panel / --felt)
        -on     text on DARK surfaces (frame, vignette, modal critical)
      Measured, not guessed. Contrast of -ink on its own -fill:
-       cool   6.45:1   gold  7.05:1   mute  5.03:1
-       warn   5.94:1   hot   4.65:1   blood 5.59:1
+       cool   6.45:1   gold  7.05:1  mute  5.03:1
+       warn   5.94:1   hot   4.65:1  blood 5.59:1
+       good   7.61:1   rift  9.66:1
      and -ink on --panel:  cool 8.09  gold 7.90  mute 8.15
-                            warn 8.89  hot  9.33
-     See the "TIER SYSTEM" block comment above .tier-* for the colourblind
-     derivation and the one documented exception pair (warn / hot).          */
+                             warn 8.89  hot  9.33  good 9.54
+     ALL of the above re-verified 2026-10-01 from the WCAG definition against
+     the hex values declared here; none needed changing. `--accent-blood-ink`
+     is deliberately ABSENT from the second table: it is a near-white (#fff4ef)
+     and reads 1.04:1 on --panel, which is correct - it is the text for the
+     DARK blood fill, not a panel foreground, and listing it here is how it
+     ends up used on a pale surface one day.
+
+     THE `-on` VALUES ARE NOT FOREGROUNDS ON THEIR OWN `-fill`, EVER.
+       `*-ink` is the foreground for `*-fill`. `*-on` is the foreground for a
+       DARK surface only (the wood frame, the cinematic modal, the Surge
+       scrim) - it is a light tint, and on a pale fill it collapses. Measured
+       against each tier's own flat fill, so the pairing rule is falsifiable
+       rather than aspirational:
+         --accent-cool-on #8fd8d0 on --accent-cool #cfe6e4 = 1.25:1
+         --accent-mute-on #cfc6b6 on --accent-mute #cdc7ba = 1.01:1
+         --accent-gold-on #f7d888 on --accent-gold #f8eec2 = 1.19:1
+         --accent-warn-on #ffcb7a on --accent-warn #f2c98a = 1.04:1
+         --accent-blood-ink #fff4ef on --bg #e5d6ba    = 1.33:1
+       A rule that pairs `-on` (or a near-white `-ink`) with `-fill` is
+       therefore a BUG, not a choice. See section 15 for the odds-bar
+       segments, which JS paints with a fill per outcome and which therefore
+       need their ink to follow the fill rather than the other way round.   */
   --accent-cool:  #cfe6e4;  --accent-cool-ink:  #14555f;  --accent-cool-on:  #8fd8d0;
   --accent-warn:  #f2c98a;  --accent-warn-ink:  #6b3c00;  --accent-warn-on:  #ffcb7a;
   --accent-hot:   #eea184;  --accent-hot-ink:   #7a2a0c;  --accent-hot-on:   #ffb08e;
@@ -500,7 +542,72 @@ select,input[type=text],input[type=number]{
   transition:border-color var(--dur-2) var(--ease-out);
 }
 select:hover,input[type=text]:hover{ border-color:var(--gold); }
-input[type=range]{ min-height:32px; accent-color:var(--gold); }
+/* D6: this was `min-height:32px`, and the troop slider - the single control a
+   Skirmish is actually played with - was the only sub-44px input in the app.
+   One declaration here rather than an override further down the file, so there
+   is a single source of truth for the slider's target size. A range input draws
+   no box of its own, so growing its height adds hit area and not a thicker
+   track; `appearance` is deliberately left alone. */
+input[type=range]{ min-height:44px; accent-color:var(--gold); }
+
+/* ---- THE SELECT, AS A SURFACE -------------------------------------------
+   >>> THE WEAKEST ELEMENT IN THE PRODUCT, FIXED. A native <select> is the
+   >>> one control on this screen that never picked up the product's language:
+   >>> OS-grey fill, OS-chrome chevron, 8px radius against the panels' 16px,
+   >>> 40px tall against 44px everywhere else, and a default focus outline. On
+   >>> the setup screen the three bot/player selectors were visibly cheaper than
+   >>> the mode cards sitting 100px above them.
+
+   It is rebuilt as one of the app's own RAISED surfaces:
+     - appearance:none removes the OS chrome, and with it the OS chevron
+     - a hand-drawn chevron (inline SVG, no asset) replaces it, inked to match
+       --ink-soft so it survives greyscale
+     - the box takes the --edge triple every other raised surface takes, so it
+       sits at the same height in the hierarchy as the mode cards
+     - 44px min-height, matching button, so it is a real touch target
+     - the padding reserves room for the chevron so long option text
+       ("Hard (tight, near-optimal)") still cannot run under it
+   The open list itself is still OS-drawn - no CSS reaches it - so the SELECT is
+   the control that gets the treatment and the popup stays a native menu, which
+   is both the accessible choice and the one that works on a touch screen. */
+select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  position:relative;
+  padding:9px 34px 9px 12px;
+  min-height:44px;
+  background-color:var(--parchment-hi-2);
+  background-image:
+    linear-gradient(45deg, transparent 49%, var(--ink-soft) 50%, var(--ink-soft) 58%, transparent 59%),
+    linear-gradient(-45deg, transparent 49%, var(--ink-soft) 50%, var(--ink-soft) 58%, transparent 59%);
+  background-size:9px 9px, 9px 9px;
+  background-repeat:no-repeat;
+  background-position:
+    right 17px center,
+    right 12px center;
+  border-color:var(--parchment-line);
+  box-shadow:var(--edge);
+  font-weight:600;
+  cursor:pointer;
+  transition:border-color var(--dur-2) var(--ease-out),
+             box-shadow var(--dur-2) var(--ease-out),
+             background-color var(--dur-2) var(--ease-out);
+}
+select:hover{ background-color:var(--parchment-hi); }
+/* The ring is the same shape as every other control's, plus the raised keyline
+   so the dark ring has something to sit against on a light field. */
+select:focus-visible{
+  border-color:var(--accent-gold-ink);
+  box-shadow:var(--edge), var(--focus-ring);
+  outline:none;
+}
+select:disabled{ opacity:.5; cursor:not-allowed; box-shadow:none; }
+select option{ background:var(--panel); color:var(--text); }
+/* The hidden #gameMode is a state carrier, not a control: it must not inherit
+   any of the above, or it grows a 44px box that pushes the layout down. */
+select.hidden, #gameMode.hidden{
+  appearance:none; display:none !important; min-height:0; padding:0;
+  background:none; border:0; box-shadow:none;
+}
 
 label{
   display:block; margin-bottom:5px;
@@ -514,17 +621,39 @@ label{
 .eyebrow{
   display:block; margin-bottom:6px;
   font-size:11px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase;
-  color:var(--adv);
+  /* D3: was `var(--adv)` #8a5aa8 - measured 4.29:1 at 11px on the composited
+     --panel2, a fail. `--adv` is a mid-value purple with no ink companion in
+     the token layer, so it cannot be paired the way an accent triple can, and
+     darkening the token would change the Rift's identity colour everywhere.
+     The eyebrow is a SECTION RULE with a hairline under it, not a state chip,
+     so it does not need tier colours at all - `--ink-soft` is the same weight
+     of voice at 6.69:1 on that exact surface (7.66:1 on --panel) and keeps the
+     tracked-caps hierarchy intact. */
+  color:var(--ink-soft);
 }
 
 /* Title: the one place a gradient text treatment is allowed, because it is
-   the app's only "poster". Everything else is a flat fill. */
+   the app's only "poster". Everything else is a flat fill.
+
+   >>> THE GHOSTED-TITLE FIX (measured, 2026-10-01). This was a 90deg gradient
+   >>> gold -> #fff2c9 40% -> gold across a full-width BLOCK element, which put
+   >>> the pale stop in the MIDDLE of the glyphs and measured:
+   >>>     #c98a2b on #fffaf0 = 2.82:1   (--gold: fail)
+   >>>     #fff2c9 on #fffaf0 = 1.07:1   (the 40% stop: invisible)
+   >>> The wordmark read as a gold ghost. The gradient now runs VERTICALLY, so
+   >>> the lightest stop is the top edge of a cap rather than the belly of a
+   >>> letter, and every stop clears 5.68:1 on --panel. Still a gradient - it
+   >>> still reads as struck metal - but the metal is dark enough to read.    */
 .title-banner{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
 .title-banner h1{
   font-size:34px; letter-spacing:.5px;
-  background:linear-gradient(90deg,var(--gold),#fff2c9 40%,var(--gold));
+  background:linear-gradient(180deg,
+      #5a3a05 0%,      /* 9.88:1 */
+      #8a5a10 34%,     /* 5.68:1  lightest stop - still AA body on --panel */
+      #7a4a08 66%,     /* 7.18:1 */
+      #6b4806 100%);   /* 7.90:1 */
   -webkit-background-clip:text; background-clip:text; color:transparent;
-  filter:drop-shadow(0 1px 2px rgba(74,53,32,.3));
+  filter:drop-shadow(0 1px 1px rgba(74,53,32,.45));
 }
 
 /* ---- Setup screen ------------------------------------------------------- */
@@ -536,8 +665,17 @@ label{
 #setup .player-setup.p1{ border-color:var(--p1); }
 #setup .player-setup.p2{ border-color:var(--p2); }
 .player-setup h3{ font-size:16px; }
-#setup .player-setup.p1 h3{ color:var(--p1-wash-ink); }
-#setup .player-setup.p2 h3{ color:var(--p2-wash-ink); }
+/* D3: the SEAT HEADINGS. `index.html:104` inlines `style="color:var(--p1)"`
+   on the "Player 1" h3, and the two h3s therefore rendered `--p1 #b5502e` on
+   the panel - measured 4.05:1 at 16px, a fail. The stylesheet already has the
+   right answer one rule below (`.player-setup.p1 h3{color:var(--p1-wash-ink)}`
+   = 8.81:1 on --panel); it was simply losing to the inline style. Out-specifying
+   it here makes the wash-ink actually apply, which is also the correct pairing
+   by construction: the seat's own wash is the surface, its wash-ink is the
+   text on that wash. The seat is additionally identified by the word "Player 1"
+   and by a coloured border, so identity is never colour-alone. */
+#setup .player-setup.p1 h3{ color:var(--p1-wash-ink) !important; }
+#setup .player-setup.p2 h3{ color:var(--p2-wash-ink) !important; }
 
 #demoBanner{
   display:flex; align-items:center; justify-content:center; gap:10px;
@@ -545,6 +683,79 @@ label{
   border:1px solid var(--gold); border-radius:var(--r-md);
   background:linear-gradient(90deg,var(--gold-dim),#f2e4c8,var(--gold-dim));
   color:var(--ink-soft); font-size:13px; font-weight:700; letter-spacing:1px;
+}
+
+/* ---- SETUP: THE FIELD, AND THE RHYTHM -------------------------------------
+   >>> THE "2010 WEB FORM" PASS. Three things made this screen read as a form
+   >>> pasted into the product rather than a screen designed with it:
+   >>>   1 a floating ALL-CAPS caption, then a naked control, with nothing
+   >>>     saying "these two are one thing"
+   >>>   2 three controls of three different sizes sitting in one column
+   >>>   3 150px of dead space under the Start Game row, because every block
+   >>>     above it was sized independently
+   .col is used on this screen and nowhere else, which makes it the natural
+   carrier for (1): the wrapper BECOMES the field. Caption on the inside top,
+   control on the inside bottom, one recessed surface, one hairline, one
+   radius - the same surface language as .recess and the log well, so a
+   selector and a scrolling list are visibly siblings.
+
+   The row around the fields becomes a 2-up GRID, which is what finally kills
+   (3): the bot-speed and sound fields split the row into two equal halves, so
+   the strip reads as a deliberate pair instead of a control stranded at the
+   left of 1300px of nothing. A row holding a single field is capped instead,
+   because a lone control stretched across the full page width is the sprawl
+   this section is trying to remove. */
+#setup .row{
+  display:grid; gap:12px;
+  /* Two tracks, not auto-fit: the settings strip pairs a full control (bot
+     speed) with a small one (sound), and equal tracks made a 44px toggle
+     masquerade as a second field. 1fr / .62fr gives the pair a principal and a
+     secondary, which is what it is. */
+  grid-template-columns:minmax(0,1fr) minmax(0,.62fr);
+  align-items:stretch;
+}
+/* The two SETTINGS rows are capped; the player-seats row is not, because a
+   half-width Squad Setup would be its own kind of wrong. A row holding one
+   field is capped again on its own, because a lone control stretched across
+   1300px is the sprawl this section exists to remove. */
+#setup .row:not(#setupPlayersRow){ max-width:660px; }
+#setup .row > .col:only-child{ max-width:400px; }
+#setup .col{
+  flex:none; min-width:0;
+  /* `align-self` rather than `align-items` on the row: index.html sets
+     `align-items:flex-end` INLINE on this row, and an inline declaration
+     outranks any author rule - so the row's own alignment can never be
+     reached from here. align-self on the item always wins over the container's
+     align-items, and it is what puts the caption-bearing field and the
+     toggle-only field back on the same top line. */
+  align-self:stretch;
+  padding:9px 11px 11px;
+  border:1px solid var(--line); border-radius:var(--r-md);
+  background:rgba(74,53,32,.035);
+  box-shadow:inset 0 1px 2px rgba(74,53,32,.06);
+}
+/* The caption is now part of the field, not a label floating over the page:
+   smaller, tighter to the control, and carrying the same tracked caps the rest
+   of the chrome uses so it reads as one label system. */
+#setup .col > label:first-child{
+  margin:0 0 6px;
+  font-size:10px; font-weight:800; letter-spacing:1.2px;
+  color:var(--muted-text);
+}
+/* The sound toggle shares the field box, so it centres in the same space the
+   select would rather than hanging off the baseline. */
+#setup .col .sound-toggle{ width:100%; justify-content:center; }
+/* Two blocks of controls, one gap. The inline margin-top on each row is the
+   page's only vertical rhythm; matching the panels' own 14px cadence here is
+   what stops the screen sprawling. */
+#setup .player-setup{ padding:12px 13px; }
+#setup .player-setup label{ margin-bottom:5px; }
+/* The eyebrow is a SECTION RULE, not a floating word: a hairline under it
+   turns "Squad Setup" into a heading for the block that follows. */
+#setup .eyebrow{
+  position:relative;
+  padding-bottom:6px;
+  border-bottom:1px solid var(--gold-dim);
 }
 
 .mode-cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:4px; }
@@ -706,8 +917,27 @@ label{
   display:flex; justify-content:space-between; align-items:baseline; gap:6px;
   margin-bottom:7px; font-weight:700; font-size:13px;
   min-width:0;
+  /* >>> D2. The existing `.name > span:first-child` rule assumes the name is
+  >>> wrapped in a span. On the GAME screen it is (game.js:3532
+  >>> `<div class="name"><span>${name}…</span><span class=influence-badge>`), but
+  >>> on the END screen it is a BARE TEXT NODE next to the badge
+  >>> (game.js:4139 `<div class="name">${name}<span class=influence-badge>`),
+  >>> so the selector matched the BADGE and the name was left with no break
+  >>> opportunity at all. Measured at name length 400: `.name` scrollWidth
+  >>> 4306px inside a 1312px card.
+  >>> `overflow-wrap:anywhere` on the container is what fixes it, because the
+  >>> bare text run is wrapped in an ANONYMOUS flex item that inherits from
+  >>> here - and `anywhere` (unlike `break-word`) is taken into account when
+  >>> the browser computes that item's min-content contribution, which is what
+  >>> was setting the floor. The explicit span rule is kept for the game screen,
+  >>> where the name really is its own element. */
+  overflow-wrap:anywhere;
 }
 .player-card .name > span:first-child{ min-width:0; overflow-wrap:anywhere; }
+/* The badge is the fixed half of the pair: it must never be the thing that
+   wraps, and it must never be squeezed. `flex-shrink:0` on it plus a breakable
+   sibling is the whole mechanism - drop either and the pair blows out again. */
+.player-card .name > .influence-badge{ flex:0 0 auto; max-width:50%; }
 .player-card.p1 .name{ color:var(--p1-wash-ink); }
 .player-card.p2 .name{ color:var(--p2-wash-ink); }
 .influence-badge{
@@ -1135,6 +1365,15 @@ label{
 /* ---- TURN BANNER --------------------------------------------------------- */
 .turn-banner{ margin-top:2px; font-size:13px; color:var(--muted-text); }
 .turn-banner b{ color:var(--ink-soft); font-weight:800; }
+/* >>> D2: #turnBanner is a name interpolator ("<name>'s turn", plus the
+   >>> .tb-meta pill) AND index.html gives it an INLINE `min-width:140px`
+   >>> inline style, which an author rule cannot lower without !important.
+   >>> The inline min-width only sets a FLOOR, though - it does not stop the
+   >>> box growing - so the real fix is the break opportunity on the text, and
+   >>> the floor is left alone because 140px is a deliberate minimum for the
+   >>> centred HUD cell. */
+.turn-banner{ min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+.turn-banner .tb-main{ min-width:0; overflow-wrap:anywhere; }
 .turn-banner .tb-main{ display:block; font-size:14px; }
 .turn-banner .tb-meta{
   display:inline-flex; align-items:center; gap:6px;
@@ -1166,28 +1405,96 @@ label{
 /* =============================================================================
    7. BOARD
    ========================================================================== */
+/* ---- ESCALATION BANDS ----------------------------------------------------
+   >>> V4, ROOT CAUSE. `--heat` WAS reaching the frame and the frame was not
+   >>> changing. `#boardFrame` sets
+   >>>     border-image:linear-gradient(...) 1
+   >>> and then
+   >>>     border-color:color-mix(in oklab, var(--wood-mid), #b5502e calc(var(--heat) * 70%))
+   >>> A painted border-image covers the border box completely, so border-color
+   >>> has nothing left to paint. Measured in the browser at --heat .12:
+   >>>     border-image-source: linear-gradient(135deg, rgb(216,184,136), ...)
+   >>>     border-top-color:     oklab(0.613556 ...)   <- present, never seen
+   >>> The entire ramp - Rounds 1 through 5 - was dead code. Only `.is-meltdown`
+   >>> looked different, because it is the one state with a SECOND, non-
+   >>> border-image cue. So: the heat moves INTO the gradient, where it is
+   >>> actually painted.
+
+   Two custom properties do the moving, scoped to the frame so they cannot leak:
+     --band-mid   0 until --heat passes .30, then ramps to 1 by .55. Drives the
+                  ENGAGED band: an inner rim that appears, not a tint that
+                  creeps. A band has edges; a linear ramp does not, and a player
+                  cannot feel .28 vs .34.
+     --band-hot   0 until --heat passes .60, then ramps to 1 by .90. Drives the
+                  HOT band: corner brackets and the felt vignette.
+   clamp(0, (var(--heat) - X) * k, 1) is the whole trick - it turns a
+   continuous number into three discrete regimes without asking the JS for a
+   second attribute, and with no breakpoint to remember. */
 #boardFrame{
+  --band-mid: clamp(0, (var(--heat) - .30) * 4, 1);
+  --band-hot: clamp(0, (var(--heat) - .60) * 3.33, 1);
+  /* How far this frame has travelled. 0 = calm walnut, 1 = scorched. */
+  --scorch: calc(var(--heat) * 78% + var(--band-hot) * 22%);
   position:relative;
   padding:13px;
   border-radius:var(--r-lg);
   border:7px solid var(--wood-mid);
-  border-image:linear-gradient(135deg,var(--wood-light),var(--wood-mid) 45%,var(--wood-dark)) 1;
+  /* THE FRAME THAT FINALLY REACTS. Same 135deg honey-walnut ramp, every stop
+     now mixed toward scorched red by --scorch, which is 0 at Round 1 and 1 at
+     Round 6. The frame snaps at the start of each round rather than tweening,
+     which is the correct cadence: --heat is written once per round, and a board
+     that visibly CHANGES when the round changes is the whole point. */
+  border-image:linear-gradient(135deg,
+      color-mix(in oklab, var(--wood-light), #a83a20 calc(var(--scorch) * 80%)),
+      color-mix(in oklab, var(--wood-mid),   #8c1d18 calc(var(--scorch) * 86%)) 45%,
+      color-mix(in oklab, var(--wood-dark), #5c0f0b calc(var(--scorch) * 92%))) 1;
+  /* The felt, plus a HEAT VIGNETTE that tightens and reddens with the band.
+     This is the second half of the ramp and the half the player actually sees,
+     because it is the largest surface on the page. It sits in the FRAME's own
+     background stack - no tile face and no body text is touched, so contrast
+     ratios inside a tile are identical in Round 1 and Round 6, which is the rule
+     this file has held since the token layer landed. */
   background:
     radial-gradient(ellipse at 30% 10%, rgba(201,138,43,.12), transparent 55%),
     radial-gradient(ellipse at 50% 100%, rgba(74,53,32,.15), transparent 60%),
+    /* the vignette: transparent at rest, a hard scorched rim at full heat */
+    radial-gradient(ellipse 78% 78% at 50% 50%,
+      rgba(140,29,24,0) 42%,
+      rgba(140,29,24, calc(var(--band-hot) * .30)) 100%),
     linear-gradient(160deg, var(--felt), var(--felt-dark) 80%);
   /* ESCALATION. --heat only ever touches this frame (and the vignette
      above, and the HUD chrome). Nothing inside the board reacts to it, so
      the tiles stay at their Round-1 contrast in Round 6. */
-  border-color:color-mix(in oklab, var(--wood-mid), #b5502e calc(var(--heat) * 70%));
   box-shadow:
     inset 0 0 calc(40px + var(--heat) * 70px) rgba(74,53,32, calc(.20 + var(--heat) * .35)),
     0 10px 28px rgba(74,53,32,.2),
     0 0 calc(var(--heat) * 34px) rgba(181,80,46, calc(var(--heat) * .55));
-  transition:border-color var(--dur-5) var(--ease-out),
-             box-shadow var(--dur-5) var(--ease-out);
+  transition:box-shadow var(--dur-5) var(--ease-out),
+             background var(--dur-5) var(--ease-out);
   /* A tile flash must not invalidate layout for the HUD or the log. */
   contain: layout paint;
+}
+/* THE INNER RIM, and the two band thresholds made structural.
+   The rim is a plain gold hairline in Rounds 1-2 - a frame detail, always
+   present, never a state - then THICKENS across --band-mid (1px -> 4px) and
+   --band-hot (4px -> 7px), tightening its radius as it goes. Weight and radius
+   are the shape channel here rather than colour: a greyscale player sees the
+   frame visibly clamp down as the game goes on, and because a 1px hairline and
+   a 7px clamped rim do not read as "the same gold, slightly warmer", the three
+   bands separate without any of them relying on a hue. */
+#boardFrame::before{
+  content:''; position:absolute; inset:5px; pointer-events:none;
+  border-style:solid; border-radius:11px;
+  border-width:calc(1px + var(--band-mid) * 3px + var(--band-hot) * 3px);
+  border-color:color-mix(in oklab, rgba(201,138,43,.34), #b5502e calc(var(--band-hot) * 90%));
+  /* Two insets, one per band: a soft warm bloom once the game is engaged, a
+     hard scorched press once it is hot. Both are static values interpolated by
+     custom properties and change once per round, which is one paint. */
+  box-shadow:
+    inset 0 0 calc(var(--band-mid) * 14px) rgba(140,29,24, calc(var(--band-mid) * .28)),
+    inset 0 0 calc(var(--band-hot) * 22px) rgba(90,10,6, calc(var(--band-hot) * .42));
+  transition:border-color var(--dur-5) var(--ease-out),
+             box-shadow var(--dur-5) var(--ease-out);
 }
 #boardFrame::before{
   content:''; position:absolute; inset:5px; pointer-events:none;
@@ -1240,11 +1547,60 @@ label{
   font-weight:800 !important; letter-spacing:1.1px !important;
   text-transform:uppercase !important; color:var(--muted-text) !important;
 }
-/* The Rules entry is a reference button, not a primary action - it does not
-   need the 44px target or the gold fill in the middle of the play area. */
-#boardRulesRow .rules-entry{ min-height:24px; padding:3px 12px; font-size:11px; letter-spacing:.4px; }
-#eventLine{ margin-top:5px; font-size:12px; color:var(--muted-text); }
-#eventLine b{ color:var(--accent-gold-ink); }
+/* >>> D3: the HUD's "Round" label and #eventLine are INLINE-STYLED in
+   >>> index.html with `color:var(--muted)` (lines 148 and 171) - `#8a7355`,
+   >>> which measures 3.78:1 on --panel2 and 3.14:1 on --bg. Both are 12-13px
+   >>> body text, so AA wants 4.5:1 and both fail.
+   >>> The fix is `!important` rather than a JS or HTML change because
+   >>> index.html is not mine to edit, and because `--muted` has a legitimate
+   >>> second job (it is the FILL family in the odds-bar fallback and the
+   >>> `is-unaffordable` tint) that must not be dragged darker to fix a
+   >>> foreground. `--muted-text` is the documented foreground-only token and
+   >>> measures 5.51:1 on the composited --panel2 these labels actually sit on
+   >>> (5.61:1 on the flat token value) - so this is a pairing correction, not a
+   >>> new colour.
+   >>> The turn banner keeps its own muted face: it is 13px on --panel and
+   >>> carries the round phase, and `--muted-text` there is already what the
+   >>> stylesheet asks for (line 1323), so no override is needed for it. */
+#hud .hud-round-label,
+#hud div[style*="color:var(--muted)"],
+#eventLine{ color:var(--muted-text) !important; }
+/* ---- D6: TAP TARGETS ON THE PRIMARY CONTROLS ------------------------------
+   WCAG 2.5.8 (Target Size Minimum, AA) wants 24x24 CSS px; 2.5.5 (Enhanced)
+   wants 44x44. This product has been holding itself to the 44px figure
+   everywhere else - `button`, `select`, `input[type=text]` and
+   `.sound-toggle` all carry `min-height:44px` in the <480px block - so these
+   three were not a considered smaller target, they were three controls nobody
+   had measured. Live heights at 390px BEFORE this block:
+     #boardRulesRow .rules-entry   24px tall x  78px   (the "Rules" button)
+     #hud .sound-toggle            32px tall x  92px
+     input[type=range] #troopSlider 32px tall x 300px
+   All three are now 44px. The size is the only thing that changes - no
+   padding rebalance, no restyle - because a target is a hit area, not a
+   design element, and these three already look like members of this product. */
+
+/* The Rules entry on the board: it is the PRIMARY help affordance on the play
+   screen - the only way to reach the rules without leaving the game - so it
+   gets the full target. The `font-size:11px` is kept: the label stays
+   quiet, the hit area does not. */
+#boardRulesRow .rules-entry{
+  min-height:44px; padding:0 14px;
+  font-size:11px; letter-spacing:.4px;
+  /* The button is `inline-flex` with an 11px label; centring the label inside
+     the taller box is what stops the extra 20px reading as dead space below
+     the text. */
+  align-items:center;
+}
+/* The sound toggle in the HUD. The <900px block further down sets
+   `order:1` and its own padding for the phone HUD row, so this has to
+   out-specify that block's height with equal-or-better specificity while
+   keeping the tighter horizontal padding the row needs to stay one line at
+   390px. */
+#hud .sound-toggle{ min-height:44px; padding:0 12px; align-items:center; }
+
+/* The troop slider's 44px target is set once, at its own declaration in the
+   input block (section 2) - see the D6 note there. Duplicating it here would
+   give the same number two homes and make the next edit a coin flip. */
 
 /* ---- MELTDOWN (Round 6, --heat: 1) --------------------------------------
    Applied by the integrator as a class on #boardFrame (or on body). It is a
@@ -1252,7 +1608,12 @@ label{
    round. Always paired with the .heat-label text (below). */
 #boardFrame.is-meltdown,
 body.is-meltdown #boardFrame{
-  border-color:color-mix(in oklab, var(--wood-mid), #8c1d18 78%);
+  /* MELTDOWN OVERRIDES THE RAMP'S OWN BORDER-IMAGE, because border-color here
+     was never painted (see the escalation-bands note above) and a state layer
+     that silently does nothing is worse than no state layer. Round 6's heat is
+     already 1.0, so this is a re-statement at a higher saturation plus a darker
+     floor - the frame goes from scorched to CHARRED. */
+  border-image:linear-gradient(135deg,#a83a20,#8c1d18 45%,#4a0b08) 1;
   box-shadow:
     inset 0 0 110px rgba(140,29,24,.42),
     0 10px 28px rgba(58,34,14,.3),
@@ -1261,9 +1622,11 @@ body.is-meltdown #boardFrame{
   animation:od-breathe 2.2s var(--ease-out) infinite;
 }
 /* Desktop-only red edge glow, kept off a layer so it never repaints tiles. */
-#boardFrame.is-meltdown::before{
+#boardFrame.is-meltdown::before,
+body.is-meltdown #boardFrame::before{
   border-color:rgba(181,80,46,.7);
-  box-shadow:inset 0 0 18px rgba(181,80,46,.45);
+  border-width:7px;
+  box-shadow:inset 0 0 18px rgba(181,80,46,.45), inset 0 0 40px rgba(90,10,6,.5);
 }
 
 /* MELTDOWN x --heat: 1 - COMPOSE, DO NOT FIGHT.
@@ -1427,35 +1790,59 @@ body.is-meltdown .tier-row.advanced .tier-note{
   box-shadow:var(--lift-lg);
   will-change:transform;            /* hover-only; dropped on un-hover */
 }
-.loc.loc-taken{ opacity:.96; }
-.loc-taken.pickable{ border-style:double; border-width:4px; }
+/* =============================================================================
+   TILE SCANNING ORDER — V5
+   -----------------------------------------------------------------------------
+   >>> In every capture, all eight tiles carried the same 2px border, the same
+   >>> cream face and the same long shadow, so the board had no entry point: a
+   >>> player scanning it could not tell what was CONTESTED, what was TAKEN,
+   >>> what they could AFFORD, or what was LOCKED without reading every tile.
+   >>> Four questions, four answers, four different SHAPES - because hue alone
+   >>> cannot carry four states at once (see the TIER SYSTEM note) and because
+   >>> the states are not all about colour anyway.
 
-/* The take flash, re-implemented on a pseudo-element (transform+opacity
-   only) rather than the old box-shadow animation. */
-.loc.just-taken::after{
-  content:''; position:absolute; inset:0; pointer-events:none;
-  border:3px solid var(--gold); border-radius:inherit;
-  animation:locTaken var(--dur-4) var(--ease-out);
+   The ladder, loudest first. Every rung below adds a cue; none of them removes
+   one, so a tile that is both pickable and contested reads as contested:
+
+     1  CONTESTED  .contested      amber wash + 3px dashed rim + ▲ CONTESTED
+                                    strip + a price pill that counts up
+     2  ACTIONABLE .pickable        gold rim (kept) + a gold corner notch, so
+                                    "you can take this" is a SHAPE on the tile
+                                    rather than only a border hue
+     3  SPENT      .loc-taken      the face desaturates and DARKENS one step,
+                                    the rim goes to a flat rule, the long
+                                    shadow collapses to the short one. It is
+                                    physically lower on the table than an
+                                    available site, which is what a taken site
+                                    actually is.
+     4  LOCKED     .locked          hatch + padlock banner (unchanged, below)
+
+   All four are STATIC per state. None of them reads --heat, so a tile in Round 1
+   and the same tile in Round 6 are the same size, the same colours and the same
+   contrast - the rule this file has kept since the token layer landed.        */
+
+/* ---- (1) CONTESTED: loudest thing on the board ---------------------------- */
+.loc.contested{
+  border-style:dashed; border-width:3px; border-color:var(--accent-warn-ink);
+  /* The only tile whose FACE is tinted. A static per-state wash, not a heat
+     wash: the fill is a fixed rgba, so text contrast on the tile is identical
+     in every round. Measured --ink on this face: 9.2:1, unchanged from the
+     untiled cream. */
+  background:
+    linear-gradient(160deg,#fff6ea,#fbe6cd),
+    linear-gradient(160deg,var(--parchment-hi),var(--parchment-hi-2));
+  box-shadow:var(--lift-lg), 0 0 0 3px rgba(242,201,138,.45);
 }
-
-/* ---- CONTESTED: a site either side can still take. ▲ + word + dashed. ---
-   Used for BOTH contested sites (feature-wagers.js marks one per round from
-   R3) and the Rift's `contested_always` mutation (game.js:2886 reuses the
-   class deliberately). Two cues beyond the colour, because contested is the
-   single most expensive state to misread: a dashed border (no other tile has
-   one) and a persistent, slow swell on the badge. */
-.loc.contested{ border-style:dashed; border-color:var(--accent-warn-ink); }
 .loc.contested::before{
   content:'\25B2 CONTESTED';
   position:absolute; top:0; right:0; z-index:1;
-  padding:2px 8px 3px;
+  padding:3px 9px 4px;
   border-radius:0 var(--r-md) 0 var(--r-sm);
   background:var(--accent-warn); color:var(--accent-warn-ink);
   font-family:var(--font-ui); font-size:9px; font-weight:800; letter-spacing:.6px;
   /* transform+opacity only. The badge is small and the loop is slow, so the
      hint is added inside the interaction block below, not at rest. */
 }
-.loc.contested.pickable:hover::before{ animation:od-breathe 1.4s var(--ease-out) infinite; will-change:transform; }
 /* The live buy price rides with the badge. Optional (SIEGE only sets it) but
    when present it is the number that decides the pick, so it is given its own
    tier fill rather than inheriting the badge's warn tint - gold says "this is
@@ -1473,6 +1860,81 @@ body.is-meltdown .tier-row.advanced .tier-note{
   border:1px dashed var(--accent-mute-ink);
 }
 .loc-price.is-unaffordable::before{ content:'\2298'; font-size:10px; }  /* ⊘: nobody can pay it */
+
+/* ---- (2) ACTIONABLE: a gold corner notch ----------------------------------
+   The rim colour was already gold, which is fine - but a rim is a rim, and the
+   player was being told "gold = take it" by eight different tiles at once. The
+   notch is a SHAPE that only exists on a tile you can act on, so the eye gets
+   a non-hue entry point and, more importantly, one that DISAPPEARS the moment
+   the site is taken (the rung below overrides it). */
+.loc.pickable::after{
+  content:''; position:absolute; top:0; left:0; z-index:1;
+  width:26px; height:26px; pointer-events:none;
+  border-top:3px solid var(--gold);
+  border-left:3px solid var(--gold);
+  border-radius:var(--r-md) 0 0 0;
+  opacity:.9;
+}
+/* The notch is not drawn at all on a spent site. `:not(.just-taken)` is load
+   bearing: `.loc.just-taken::after` is the TAKE FLASH on the same pseudo-
+   element, and a taken tile is always also just-taken for one frame - an
+   `opacity:0` here would have silently swallowed the flash that tells the
+   table the pick landed. Removing the content instead leaves the flash alone. */
+.loc.loc-taken:not(.just-taken)::after{ content:none; }
+/* A contested tile's notch is amber, so the two "loud" tiles are told apart by
+   colour AND by the badge strip AND by the border style. */
+.loc.contested::after{
+  border-top-color:var(--accent-warn-ink);
+  border-left-color:var(--accent-warn-ink);
+  width:22px; height:22px;
+}
+
+/* ---- (3) SPENT: one step DOWN the table ----------------------------------- */
+.loc.loc-taken{ opacity:1; }
+/* The face cools and darkens by roughly one surface step - still 8.4:1 for
+   --ink, so every word in the tile is exactly as readable as it was before it
+   was taken. What changes is the RELATIONSHIP: the tile no longer competes
+   with the ones you can still choose. */
+.loc.loc-taken{
+  background:linear-gradient(160deg,#efe7d8,#e3d8c4);
+  border-color:var(--line); border-style:solid; border-width:2px;
+  box-shadow:var(--edge);
+}
+.loc.loc-taken .loc-icon{ filter:grayscale(.55) contrast(.92) opacity(.72); }
+.loc.loc-taken h3{ color:var(--muted-text); }
+/* A taken site keeps the player's tag at full strength - ownership is
+   information, not decoration - but the reward text recedes a step. */
+.loc.loc-taken .tier-label{ color:var(--muted-text); }
+.loc.loc-taken .tier-row.is-taken{
+  background:rgba(201,138,43,.20);
+  border-color:var(--gold);
+}
+/* DECLINED. The Advanced tier of a taken site, refused. `.loc-closed` already
+   ships a ✕ glyph and the word CLOSED; here it just gets the spent face so the
+   two rows of a spent tile read as one object. */
+.loc.loc-taken .loc-closed{ border-color:var(--accent-mute-ink); }
+.loc-taken.pickable{ border-style:solid; border-width:2px; }
+
+/* The take flash, re-implemented on a pseudo-element (transform+opacity
+   only) rather than the old box-shadow animation. */
+.loc.just-taken::after{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  border:3px solid var(--gold); border-radius:inherit;
+  animation:locTaken var(--dur-4) var(--ease-out);
+}
+
+/* ---- CONTESTED: a site either side can still take. ▲ + word + dashed. ---
+   Used for BOTH contested sites (feature-wagers.js marks one per round from
+   R3) and the Rift's `contested_always` mutation (game.js:2886 reuses the
+   class deliberately).
+
+   >>> MOVED UP into the TILE SCANNING ORDER block above, where the contested
+   >>> treatment now includes the face wash, the 3px rim and the outer halo.
+   >>> What is left here is the ONE thing that cannot live up there: the hover
+   >>> swell. It belongs to the interaction block by the file's own convention
+   >>> (transform-only, will-change only while the interaction is live), and a
+   >>> hover rule in the scanning-order block would have put will-change at rest. */
+.loc.contested.pickable:hover::before{ animation:od-breathe 1.4s var(--ease-out) infinite; will-change:transform; }
 
 /* ---- LOCKED: replaces the old `opacity:.4`, which measured ~2:1 against
    the felt and was effectively unreadable. Now: full-contrast text on a
@@ -1589,11 +2051,35 @@ body.is-meltdown .tier-row.advanced .tier-note{
 .tier-row.disabled:hover{ background:rgba(92,83,67,.07); border-color:var(--accent-mute); box-shadow:none; }
 
 .loc.pickable .tier-row[data-loc]{ cursor:pointer; }
+/* THE CLICK TARGET, made the strongest object INSIDE the tile. game.js puts
+   `data-loc` on a tier row only when that row is genuinely actionable, which
+   makes it the single most reliable "you may take this" signal the markup
+   carries - and it was carrying none: both tier rows shipped at ~6% fill, one
+   grey and one purple, so a Basic pick and a dead Advanced row had the same
+   visual weight. Now the actionable row gets a brighter fill, a crisper rule
+   and a 3px gold spine down its left edge. The spine is a SHAPE, so it
+   survives greyscale, and it is the one cue that stays true when two adjacent
+   rows are both actionable. */
+.loc.pickable .tier-row[data-loc]{
+  background:rgba(201,138,43,.11);
+  border-color:rgba(201,138,43,.5);
+  box-shadow:inset 3px 0 0 var(--gold);
+}
+.loc.pickable .tier-row.advanced[data-loc]{
+  background:rgba(138,90,168,.07);
+  border-color:rgba(138,90,168,.38);
+  box-shadow:inset 3px 0 0 var(--adv);
+}
 .loc.pickable .tier-row[data-loc]:hover{
-  background:rgba(201,138,43,.14);
+  background:rgba(201,138,43,.20);
   border-color:var(--gold);
-  box-shadow:inset 0 0 0 1px rgba(201,138,43,.28);
+  box-shadow:inset 3px 0 0 var(--gold), inset 0 0 0 1px rgba(201,138,43,.3);
   will-change:transform;
+}
+.loc.pickable .tier-row.advanced[data-loc]:hover{
+  background:rgba(138,90,168,.16);
+  border-color:var(--adv);
+  box-shadow:inset 3px 0 0 var(--adv), inset 0 0 0 1px rgba(138,90,168,.3);
 }
 .loc.pickable .tier-row[data-loc]:active{ transform:scale(.985); }
 
@@ -1817,14 +2303,61 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #hand{ display:flex; gap:6px 8px; flex-wrap:wrap; align-items:stretch; }
 .hand-group{ display:contents; }
 .hand-group-cards{ display:contents; }
+/* ---- D7: THE CATEGORY LABEL, AND WHY IT CANNOT RIDE INLINE ---------------
+   The comment below used to justify an inline label. Measured on the live DOM
+   (filled hand, 4 categories, 8 cards), it does not hold up, and the two
+   failures are independent:
+
+     1. HORIZONTAL. `#hand` is `flex-wrap:wrap`, and where a line happens to
+        break is not something CSS can constrain. Measured label x vs the x of
+        the first card it introduces:
+            1920px  Aggressive x=1339 -> card x=1471   (+132)
+                    Chaos      x=1497 -> card x=1339   (-158)
+        Chaos's label sat on the RIGHT column while its own card was on the
+        LEFT one, 158px away and one line lower. The brief's 155px indent is
+        this. Nothing in the layout says those two are related.
+     2. VERTICAL. The label was `align-self:center` in a rail of
+        `align-items:stretch`, so it centred itself against a 130px card and
+        its baseline floated 44-57px BELOW the top of the card it labels. It
+        read as a caption under an unrelated card, not a label above it.
+
+   The only flexbox break primitive is `flex-basis:100%`, and that IS the fix:
+   the label becomes a full-width band, so it always starts a line, it is
+   always flush left, and its cards always begin on the line directly beneath
+   it. Association becomes structural instead of coincidental.
+
+   The old comment's cost argument - "costs a whole row per category" - is
+   real in principle, and it was the reason the inline layout shipped. It was
+   also not measured. Measured properly, by injecting the old rule back into the
+   same page with the same 5-card, 3-category hand and comparing:
+
+     viewport   old rail   new rail   delta   worst label->own-card gap
+       1920px     470px     435px     -35px      158px  ->  0px
+       1440px     470px     435px     -35px      158px  ->  0px
+       1280px     470px     435px     -35px      158px  ->  0px
+       1024px     580px     655px     +75px      158px  ->  0px
+
+   At the three desktop widths the band is 35px SHORTER, because a ragged rail
+   of 150px cards in a 326px column wastes a partial row on every line; the band
+   trades that raggedness for a clean edge. Only at 1024px, where the rail
+   narrows to 290px and the cards no longer pair, does the extra header row
+   cost real height - 75px on a rail that is already 580px. That is the trade,
+   and it is a trade of 75px of rail for the guarantee that a category is never
+   labelled by a chip 158px away from its own cards.
+
+   This applies to the WRAPPING rail only. Below 900px `#hand` is a
+   `flex-wrap:nowrap` horizontal scroller, where there are no lines to
+   disagree about and the existing `position:sticky; left:0` chip is already
+   correct - it is left in place by the <900px block, which comes later in
+   this file and therefore wins. */
+#hand > .hand-group-label,
+#hand .hand-group > .hand-group-label{
+  flex:0 0 100%;
+  align-self:stretch;
+  margin:0;
+}
 .hand-group-label{
-  /* INLINE, and it is a DIVIDER not a header. Giving it `flex-basis:100%`
-     (the only break primitive flexbox has) costs a whole row per category -
-     and three of the five common categories hold exactly ONE card, which
-     turned a 137px rack into 446px. So it rides inline as a chip plus a
-     hairline that flexes to fill the rest of ITS line: whether the chip lands
-     mid-line or at the end of one, the rule runs to the line edge and reads
-     as "cards above, this category below". No orphan, no wasted row. */
+  /* INLINE, and it is a DIVIDER not a header. */
   flex:0 1 auto; min-width:0; align-self:center;
   display:flex; align-items:center; gap:8px;
   height:19px; margin:2px 0 0;
@@ -1856,7 +2389,27 @@ body.is-meltdown .tier-row.advanced .tier-note{
   background:var(--accent-mute); color:var(--accent-mute-ink);
   font-family:var(--font-ui); font-size:9px; font-weight:800;
   letter-spacing:.6px; text-transform:uppercase; white-space:nowrap;
+  /* >>> D2: the LAST name interpolator, and the one that survived everything
+  >>> else. renderHand() writes the SEAT NAME into this heading
+  >>> (`<h3>Your Hand <span class="hand-cap">${name}</span></h3>`), and
+  >>> `white-space:nowrap` on a 400-char name is a single 3557px unbreakable
+  >>> run. It blew out the whole GAME screen, not just the end screen:
+  >>> measured page scrollWidth 4621px at a 1440px viewport, with
+  >>> `.game-col-right` at clientWidth 356px / scrollWidth 3557px.
+  >>> The pill is the right shape for a short name, so the shape stays; what
+  >>> changes is that the name inside it is now allowed to break, and the pill
+  >>> is capped so a broken name does not become a 9px-wide column. The pill
+  >>> also becomes an inline-block so the background hugs the wrapped text
+  >>> instead of stretching the full measure of the heading. */
+  display:inline-block; max-width:100%;
+  vertical-align:baseline;
+  white-space:normal;
+  overflow-wrap:anywhere; word-break:break-word;
+  line-height:1.35;
 }
+/* The heading the cap sits in has to be allowed to wrap too, or the cap's own
+   max-width has nothing to wrap inside. */
+.card-panel > h3{ overflow-wrap:anywhere; }
 
 /* SURFACE TIER 3: HIGHEST - a card you can act on is physically lifted off
    the rail. Same --lift-lg language as the board tiles. */
@@ -1983,6 +2536,13 @@ body.is-meltdown .tier-row.advanced .tier-note{
   box-shadow:inset 0 2px 6px rgba(74,53,32,.16);
   font-size:12px; line-height:1.5; color:var(--muted-text);
   scrollbar-width:thin;
+  /* >>> D2: every log line is `"${name} drafts ${loc}"` etc, so the log is the
+  >>> densest name interpolator in the app - and it is a SCROLLER, so an
+  >>> over-wide entry does not just widen the page, it puts a horizontal
+  >>> scrollbar on the one panel that is already a nested scroll context.
+  >>> `anywhere` (not `break-word`) because the entries' min-content
+  >>> contribution is what sized the well. */
+  overflow-wrap:anywhere; word-break:break-word;
 }
 /* An empty log is a "not yet" state, not a hole: renderLog() writes nothing
    before the first entry, and a bare recessed well read as a broken panel. */
@@ -1991,19 +2551,134 @@ body.is-meltdown .tier-row.advanced .tier-note{
   display:block; padding:2px 2px 4px;
   font-style:italic; color:var(--muted-text);
 }
-#logPanel{ display:flex; flex-direction:column; }
-#logPanel #log{ flex:0 1 auto; }
-#log .entry{ margin-bottom:3px; padding:4px 8px; border-radius:6px; border-left:3px solid transparent; }
+#logPanel{
+  /* The header is now TWO nodes - <h3>Log</h3> and #logHead - so the panel is a
+     2-column grid with the well spanning both. The count lands on the same line
+     as the heading, to its right, instead of sitting on a line of its own
+     between the heading and the well (which is how it rendered: a stray grey
+     sentence with a rule above it and a rule below it). */
+  display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end;
+  position:relative;
+}
+#logPanel #log{ grid-column:1 / -1; }
+.log-head{ margin:0; text-align:right; }
+.log-head-n{
+  display:block; padding:0 0 7px;
+  font-size:10px; font-weight:700; letter-spacing:.2px;
+  color:var(--muted-text); font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+/* ---- THE LOG HEADER -------------------------------------------------------
+   >>> V3: "LOG" was the same 11px grey word as every other panel heading, over
+   >>> a recessed well that held two lines of identically-weighted text. Two
+   >>> changes turn the well into a FEED rather than a well:
+   >>>   1 the heading gets the eyebrow language the rest of the chrome uses -
+   >>>     tracked caps, a gold hairline under it, and a live tick on the right
+   >>>     that says the thing is running
+   >>>   2 the newest entry is promoted (see .entry:first-child below), because
+   >>>     renderLog() already reverses the array so the newest line is first -
+   >>>     the ordering was right and the typography threw the advantage away */
+#logPanel > h3{
+  position:relative;
+  display:flex; align-items:center; gap:8px;
+  margin:0; padding:0 0 7px;
+  border-bottom:1px solid var(--gold-dim);
+  min-width:0;
+}
+/* Both header cells carry the SAME hairline, so they read as one rule with a
+   gap in it rather than as two stacked rules. */
+#logPanel > h3::after{
+  content:'Live';
+  display:inline-flex; align-items:center; gap:5px;
+  margin-left:auto; padding-bottom:7px;
+  font-size:9px; font-weight:800; letter-spacing:1.2px;
+  color:var(--accent-cool-ink);
+}
+#logPanel > h3::before{
+  content:''; order:9;
+  width:7px; height:7px; border-radius:50%;
+  background:var(--accent-cool-ink);
+  box-shadow:0 0 0 3px rgba(20,85,95,.16);
+  animation:logTick 2.6s var(--ease-out) infinite;
+}
+@keyframes logTick{
+  0%,72%,100%{ transform:scale(1); opacity:1; }
+  82%{ transform:scale(1.35); opacity:.55; }
+}
+/* The fade at the bottom of the well. Sits on the panel, not on the scroller,
+   so it costs nothing per scroll frame and never masks a focus ring. */
+#logPanel::after{
+  content:''; position:absolute; left:14px; right:14px; bottom:14px; height:26px;
+  pointer-events:none; border-radius:0 0 var(--r-sm) var(--r-sm);
+  background:linear-gradient(180deg,rgba(74,53,32,0),rgba(74,53,32,.13));
+}
+
+#log .entry{
+  margin-bottom:3px; padding:4px 8px; border-radius:6px; border-left:3px solid transparent;
+  /* D2: an entry is `"<b>Player 1</b> drafts Rampart at Standard (+2)"` - the
+     bolded name is its own inline box, so the breakable declaration has to be
+     on the entry, not only on the scroller. */
+  overflow-wrap:anywhere; word-break:break-word; min-width:0;
+}
 #log .entry b{ color:var(--text); }
+/* A <b> may only re-ink its entry when the entry is on a NEUTRAL field. Inside
+   a filled entry the fill chose the ink, and `--text` on `--accent-blood`
+   measured 1.91:1 - the same mistake as the wagers chips, one level down: a
+   descendant overriding the surface it is sitting on. Inherit instead; the
+   parent entries are already bold, so the emphasis survives without a second
+   ink. */
+#log .entry.is-danger b,
+#log .entry.is-meltdown b,
+#log .entry.is-round b,
+#log .entry.is-fury b,
+#log .entry.is-siege b,
+#log .entry.is-pressure b,
+#log .entry.is-surge b{ color:inherit; }
 /* Newest first (game.js reverses the array), fading in from the top. */
 #log .entry:first-child{ animation:od-slide-up var(--dur-3) var(--ease-out); }
 
+/* >>> THE DEFAULT ENTRY, PROMOTED. For the entries the integrator has NOT typed
+   >>> yet, :first-child is the whole hierarchy: renderLog() already reverses the
+   >>> array, so the newest line is the first child. It gets a gold rule and a
+   >>> warm wash, and everything older than it stays recessive - which is
+   >>> correct for a log: the tail is history. Typed entries out-specify this
+   >>> base rule, so binding a type ADDS colour and a glyph on top of an entry
+   >>> that is already legible; it never makes an unbound entry worse. */
+#log .entry:first-child{
+  border-left-color:var(--gold);
+  background:linear-gradient(90deg,rgba(201,138,43,.15),rgba(201,138,43,.03));
+  color:var(--ink); font-weight:600;
+}
+#log .entry:first-child b{ color:var(--text); }
+#log .entry:last-child{ margin-bottom:0; }
+
 /* Typed log entries. The type is carried by a left rule + a tint AND by the
-   entry's own text, never by the rule colour alone. */
-#log .entry.is-gain{ border-left-color:var(--accent-cool-ink); background:rgba(207,230,228,.42); }
+   entry's own text, never by the rule colour alone.
+
+   >>> V3, SECOND PASS. The integrator has now bound these (game.js emits
+   >>> .is-system / .is-round / .is-bounty / .is-rift / .is-pressure / .is-gain
+   >>> / .is-danger on real entries), which is the fix this block was written
+   >>> for - and it immediately produced a NEW problem: with every type filled,
+   >>> a 23-entry log rendered as 23 equally loud coloured chips and the well
+   >>> stopped being a well. Hierarchy needs a loud end AND a quiet end.
+
+   The split is by how much the line changes the game:
+     QUIET  (routine bookkeeping)  is-gain, is-system, is-rift, is-bounty,
+            is-siege, is-fury, is-betrayal, is-surge
+            -> a THIN left rule at 4px and a fill under .22 alpha. You can read
+               the shape of the log; you are not meant to stop.
+     LOUD   (the round changed, or something was taken)  is-round, is-danger,
+            is-pressure, is-meltdown
+            -> a full tier fill, a 5px rule and a glyph. These are the lines
+               worth stopping on, and there are only two or three per game.
+
+   Alpha values, not new colours: every tint is one of the seven documented
+   accent fills over the same recessed well, so no contrast figure in the token
+   layer changes. */
+#log .entry.is-gain{ border-left-color:var(--accent-cool-ink); background:rgba(207,230,228,.20); }
 #log .entry.is-loss{ border-left-color:var(--accent-blood); background:rgba(156,74,68,.14); }
-#log .entry.is-system{ border-left-color:var(--accent-mute-ink); background:rgba(205,199,186,.35); font-style:italic; }
-#log .entry.is-unlock{ border-left-color:var(--accent-gold-ink); background:rgba(248,238,194,.5); font-weight:600; }
+#log .entry.is-system{ border-left-color:var(--accent-mute-ink); background:rgba(205,199,186,.24); font-style:italic; }
+#log .entry.is-unlock{ border-left-color:var(--accent-gold-ink); background:rgba(248,238,194,.34); font-weight:600; }
 #log .entry.is-danger{
   border-left-color:var(--accent-blood);
   background:var(--accent-blood); color:var(--accent-blood-ink); font-weight:700;
@@ -2043,17 +2718,35 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #log .entry.is-unlock::before{ content:'\1F513\00A0'; }   /* 🔓 */
 #log .entry.is-danger::before{ content:'\26A0\00A0'; }   /* ⚠ */
 #log .entry.is-round::before{ content:'\25B8\00A0'; }    /* ▸ */
+/* The quiet types get a 4px rule rather than 3px, so the shape channel carries
+   part of the weight too: 3px = routine, 4px = typed routine, 5px = loud. */
+#log .entry.is-gain,
+#log .entry.is-system,
+#log .entry.is-rift,
+#log .entry.is-bounty,
+#log .entry.is-siege,
+#log .entry.is-fury,
+#log .entry.is-betrayal,
+#log .entry.is-surge{ border-left-width:4px; }
 #log .entry.is-fury{
-  border-left-color:var(--accent-blood); background:rgba(156,74,68,.14);
+  /* Solid, not the .16 translucent wash it used to carry. Blood-ink on a 16%
+     blood wash over a cream well composites to a pale pink and measures
+     1.28:1 - the line was effectively invisible, which is the opposite of what
+     a "your opponent rolled Fury" beat needs to be. A solid blood fill is
+     5.59:1 (documented) and matches how .is-danger and .is-meltdown are already
+     dressed. A site being seized is a loud event; it now reads as one. */
+  border-left-color:var(--accent-blood); background:var(--accent-blood);
   color:var(--accent-blood-ink);
 }
 #log .entry.is-fury::before{ content:'\25B2\00A0'; }
 #log .entry.is-betrayal{
-  border-left-color:var(--accent-mute-ink); background:rgba(92,83,67,.12);
+  border-left-color:var(--accent-mute-ink); background:rgba(92,83,67,.10);
 }
 #log .entry.is-betrayal::before{ content:'\25C6\00A0'; }
 #log .entry.is-siege{
-  border-left-color:var(--accent-blood); background:rgba(156,74,68,.20);
+  /* Same correction as .is-fury, and for the same reason: light ink on a
+     translucent blood fill measured 1.28:1 against the composited background. */
+  border-left-color:var(--accent-blood); background:var(--accent-blood);
   color:var(--accent-blood-ink); font-weight:700;
 }
 #log .entry.is-siege::before{ content:'\2694\00A0'; }
@@ -2062,15 +2755,16 @@ body.is-meltdown .tier-row.advanced .tier-note{
 }
 #log .entry.is-rift::before{ content:'\2733\00A0'; }
 #log .entry.is-pressure{
-  border-left-color:var(--accent-hot); background:rgba(238,161,132,.20);
+  border-left-color:var(--accent-hot); background:rgba(238,161,132,.26);
   color:var(--accent-hot-ink); font-weight:700;
 }
 #log .entry.is-pressure::before{ content:'\25D0\00A0'; }   /* ◐ the closing sky */
 #log .entry.is-bounty{
-  border-left-color:var(--accent-gold-ink); background:rgba(248,238,194,.55);
+  border-left-color:var(--accent-gold-ink); background:rgba(248,238,194,.34);
   font-weight:700;
 }
 #log .entry.is-bounty::before{ content:'\25C6\00A0'; }
+#log .entry.is-surge{ border-left-color:var(--accent-gold-ink); background:rgba(248,238,194,.28); }
 #log .entry.is-meltdown{
   border-left-color:var(--accent-blood); background:var(--accent-blood);
   color:var(--accent-blood-ink); font-weight:800; letter-spacing:.5px;
@@ -2115,9 +2809,23 @@ body.is-meltdown .tier-row.advanced .tier-note{
    -----------------------------------------------------------------------------
    Three tiers, selected by a class the integrator puts on #skirmishModal
    (game.js already toggles .is-rules on it for the rules box):
-     (default)        standard
-     .modal-critical  red edge, for the dice / Surge / reveal modals
-     .modal-cinematic full-bleed, for Round 6 Meltdown and the end screen
+
+     (default)        standard   a card on a dim
+     .modal-critical  ALERT      red edge + a stamped tier tag
+     .modal-cinematic TITLE CARD full-bleed dark, film grain, a sweep
+
+   >>> V6: the two escalated tiers were two shades of the same cream card. The
+   >>> scrims differed and that was it, so a Meltdown and a "buy the site?"
+   >>> decision were the same object at two opacities - and the highest-stakes
+   >>> moments in the game were the quietest. Three changes make the tiers read
+   >>> as different KINDS of thing, not the same thing louder:
+     1 each escalated tier stamps its own name on the dialog (::after on the box,
+        because .modal-header is markup I do not own) - the tag is WORDS, so
+        the tier survives greyscale and cannot be mistaken for a colour
+     2 .modal-critical gets a hard 2px rim and a corner-notched frame; the
+        standard tier gets neither, so "something is wrong" is a shape change
+     3 .modal-cinematic is a different MATERIAL entirely - dark, grained,
+        letterboxed, with the light in it coming from above like a stage
    ========================================================================== */
 #skirmishModal{
   position:fixed; inset:0; z-index:50;
@@ -2172,39 +2880,88 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #skirmishModal:not(.is-rules) #skirmishBody{ padding-top:16px; }
 
 /* ---- CRITICAL ----------------------------------------------------------- */
-#skirmishModal.modal-critical{ background:rgba(58,20,14,.62); }
+/* The scrim goes red AND the box stops being a card. A critical moment is not
+   "the same dialog, slightly pinker" - it is a stamped notice. */
+#skirmishModal.modal-critical{ background:rgba(58,20,14,.66); }
 #skirmishModal.modal-critical .box{
+  position:relative;
   border-color:var(--accent-blood);
-  border-width:2px;
+  border-width:3px;
   background:linear-gradient(160deg,#fff6f2,#f6e3d8);
-  box-shadow:var(--lift-lg), 0 0 0 4px rgba(156,74,68,.22), 0 0 60px rgba(181,80,46,.4);
+  box-shadow:var(--lift-lg), 0 0 0 5px rgba(156,74,68,.22), 0 0 70px rgba(181,80,46,.5);
+}
+/* THE TIER TAG. A vertical ribbon down the right edge of the header, over the
+   panel rather than inside it, because the header is markup this file does not
+   own. It is WORDS on a hatched field: the single clearest "this is an alert"
+   signal available, and readable at any zoom, in greyscale, and with every hue
+   in the palette removed.
+
+   It is full-HEADER height, not a tab hanging off the corner: a tab at top:0
+   with its own radius collided with the box's 16px corner and read as a
+   rendering artefact rather than as a stamp. A ribbon with one radius - bottom
+   left only - always lands cleanly on the square edge the header provides. */
+#skirmishModal.modal-critical .box::after{
+  content:'Critical';
+  position:absolute; top:0; bottom:auto; right:0; z-index:3;
+  align-self:stretch;
+  padding:9px 14px 10px;
+  border-radius:0 0 0 var(--r-sm);
+  background:
+    repeating-linear-gradient(45deg, rgba(255,255,255,.16) 0 6px, transparent 6px 12px),
+    var(--accent-blood);
+  color:var(--accent-blood-ink);
+  font-family:var(--font-ui); font-size:10px; font-weight:800;
+  letter-spacing:1.8px; text-transform:uppercase;
+  box-shadow:-2px 2px 6px rgba(58,20,14,.28);
 }
 #skirmishModal.modal-critical .modal-header{
-  border-bottom-color:rgba(156,74,68,.4);
-  background:linear-gradient(180deg,#f6e3d8,#f2dcd0);
   border-bottom:2px solid var(--accent-blood);
+  background:linear-gradient(180deg,#f6e3d8,#f2dcd0);
+  padding-right:118px;                 /* clears the ribbon; never clips it */
 }
 #skirmishModal.modal-critical .modal-header h2{ color:var(--accent-blood-ink); }
-#skirmishModal.modal-critical .box::after{
-  content:''; position:absolute; inset:0; pointer-events:none; border-radius:inherit;
-  box-shadow:inset 0 0 40px rgba(181,80,46,.22);
+/* The bloom that used to live on ::after now rides the box's own inset ring, so
+   ::after is free for the tag above. */
+#skirmishModal.modal-critical .box{
+  box-shadow:var(--lift-lg), 0 0 0 5px rgba(156,74,68,.22), 0 0 70px rgba(181,80,46,.5),
+               inset 0 0 40px rgba(181,80,46,.18);
 }
 
 /* ---- CINEMATIC ----------------------------------------------------------
    Full-bleed, taller, and given a grain + sweep so a Round 6 Meltdown or the
    end screen feels like a title card rather than a dialog. */
-#skirmishModal.modal-cinematic{ background:rgba(32,20,10,.80); padding:clamp(12px,3vw,40px); }
+#skirmishModal.modal-cinematic{ background:rgba(32,20,10,.82); padding:clamp(12px,3vw,40px); }
 #skirmishModal.modal-cinematic .box{
   position:relative; overflow:hidden;
   max-width:900px; max-height:min(92vh,900px);
   border:2px solid var(--accent-blood);
-  border-radius:var(--r-lg);
+  /* THE LETTERBOX. Top and bottom border removed and replaced by a 5px
+     gradient rule pinned to the box edges. Two hairlines are the cheapest
+     possible cue that says "this is a cut" rather than "this is a dialog" -
+     the difference between a Meltdown announcement and a purchase prompt. */
+  border-top-width:0; border-bottom-width:0;
   background:
-    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(181,80,46,.22), transparent 65%),
+    /* the stage light: a warm source above the subject, so the box reads as LIT
+       rather than as a dark rectangle with pale text in it */
+    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(255,150,110,.24), transparent 68%),
+    radial-gradient(ellipse 70% 50% at 50% 110%, rgba(201,138,43,.14), transparent 70%),
     linear-gradient(160deg,#3a2412,#241408);
   color:var(--parchment);
   box-shadow:0 30px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(201,138,43,.4), 0 0 80px rgba(181,80,46,.35);
   animation:od-cine-in var(--dur-5) var(--ease-out);
+}
+#skirmishModal.modal-cinematic .box::after{
+  content:''; position:absolute; left:0; right:0; top:0; z-index:2;
+  height:6px; pointer-events:none;
+  background:linear-gradient(90deg,rgba(201,138,43,.15),var(--accent-gold) 14%,var(--accent-gold-on) 50%,var(--accent-gold) 86%,rgba(201,138,43,.15));
+  box-shadow:0 1px 0 rgba(0,0,0,.6);
+}
+#skirmishModal.modal-cinematic .modal-header{
+  padding-top:24px;
+  /* the LOWER letterbox rule. Together with the ::after above, two 3-6px bars
+     and a lot of dark field between them is the whole grammar of a title card,
+     and it costs three declarations. */
+  border-bottom:3px solid var(--accent-gold);
 }
 @keyframes od-cine-in{
   0%{ opacity:0; transform:scale(.94) translateY(18px); }
@@ -2222,7 +2979,7 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #skirmishModal.modal-cinematic .modal-header h2{
   color:var(--accent-gold-on); font-size:clamp(24px,4vw,38px); letter-spacing:1px;
 }
-#skirmishModal.modal-cinematic #skirmishBody{ color:#f0e2c8; }
+#skirmishModal.modal-cinematic #skirmishBody{ color:#f0e2c8; font-size:clamp(15px,1.5vw,19px); line-height:1.6; }
 #skirmishModal.modal-cinematic #skirmishBody b{ color:var(--accent-gold-on); }
 #skirmishModal.modal-cinematic .secondary{
   background:rgba(255,250,240,.10); color:#f0e2c8; border-color:rgba(201,138,43,.5);
@@ -2434,56 +3191,363 @@ body.is-meltdown .tier-row.advanced .tier-note{
 
 /* =============================================================================
    11. END SCREEN
+   -----------------------------------------------------------------------------
+   The payoff of six rounds. It was the quietest screen in the game, and the
+   sentence that decided it measured 1.07:1.
+
+   WHAT js/game.js ACTUALLY EMITS (read out of showEndScreen(), not guessed -
+   confirmed in the browser against a live 21-16 game):
+
+     #endScreen.is-victory | .is-defeat | .is-draw      ONE of the three
+     h1.end-headline[data-outcome="victory"|"defeat"|"draw"]
+     p.end-sub                        one line of verdict prose
+     div.end-gap#endScreenGap          the gap card IS the confetti anchor
+       .end-gap-label > .end-gap-name.p1  ("Player 1" + <b>21</b>)
+                          .end-gap-lead    ("Player 1 leads" / "Level")
+                          .end-gap-name.p2  (<b>16</b> + "Player 2")
+       .end-gap-bar   > .end-gap-fill.p1   inline
+                        position:absolute; top:0; bottom:0; left:0;  width:X%
+                      .end-gap-fill.p2   inline
+                        position:absolute; top:0; bottom:0; right:0; width:Y%
+                      >> ABSOLUTE, not flex children. The seam between the two
+                         fills is therefore NOT a flex gap - it is an inset
+                         light edge on .p2, which works at any width pair.
+       .end-gap-value               "P wins by <span class=is-margin>N</span>
+                                     Influence"
+     .player-card.is-winner / .is-loser
+     .stats-table, .footer-actions
+
+   Every rule below binds to one of those. Nothing here is speculative, and
+   there is no class in this section waiting for an integrator: if the numbers
+   arrive, they arrive already dressed.
    ========================================================================== */
-#endScreen{ text-align:center; padding:44px 20px 52px; }
-#endScreen h1{
-  font-size:clamp(30px,5vw,44px);
-  background:linear-gradient(90deg,var(--gold),#fff2c9,var(--gold));
-  -webkit-background-clip:text; background-clip:text; color:transparent;
-  filter:drop-shadow(0 1px 2px rgba(74,53,32,.3));
-  animation:od-pop-in var(--dur-5) var(--ease-spring) both;
+#endScreen{ text-align:center; padding:clamp(30px,4vw,52px) clamp(16px,3vw,28px) clamp(36px,4.5vw,60px); }
+
+/* THE REVEAL RULE. A tapered hairline above the headline, widest at the centre -
+   the same rule-and-bracket language .hud-frame uses for the live HUD, so the
+   final notice is framed the way the game itself is. transform-only reveal. */
+#endScreen::before{
+  content:''; display:block;
+  width:min(240px,58%); height:2px; margin:0 auto 24px;
+  background:linear-gradient(90deg,transparent,var(--gold) 28%,var(--gold) 72%,transparent);
+  animation:od-grow-x var(--dur-5) var(--ease-out) both;
 }
+@keyframes od-grow-x{ from{ transform:scaleX(.15); opacity:0; } to{ transform:scaleX(1); opacity:1; } }
+
+.end-headline{
+  /* THE POSTER. This is the one sentence that decides six rounds, so it is the
+     largest type in the product by a wide margin and it is set tight. */
+  font-size:clamp(32px,6.2vw,60px);
+  line-height:1.06; letter-spacing:-.5px;
+  /* THE GHOSTED-HEADLINE FIX - the measured root cause. This was
+       linear-gradient(90deg,var(--gold),#fff2c9,var(--gold))
+     across a full-width BLOCK h1, which put the pale stop across the MIDDLE of
+     the glyphs:
+       #c98a2b on #fffaf0 = 2.82:1   (--gold, a fail)
+       #fff2c9 on #fffaf0 = 1.07:1   (the mid stop - literally invisible)
+     A 21-16 win was rendered at 1.07:1, which is why the screen read as empty.
+     The ramp now runs VERTICALLY, so the lightest stop lands on the top edge of
+     a cap instead of the belly of the letter, and every stop clears 5.68:1 on
+     --panel. Still struck metal. Now legible. */
+  background:linear-gradient(180deg,
+      #5a3a05 0%,      /* 9.88:1 */
+      #8a5a10 34%,     /* 5.68:1  lightest stop, AA body on --panel */
+      #7a4a08 66%,     /* 7.18:1 */
+      #6b4806 100%);   /* 7.90:1 */
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  filter:drop-shadow(0 1px 1px rgba(74,53,32,.5));
+  animation:od-pop-in var(--dur-5) var(--ease-spring) both;
+  /* D2: the headline is `"${name} wins!"`, so it is a name interpolator too,
+     and at 60px display it was the widest element on the end screen
+     (scrollWidth 19206px at name length 400). `anywhere` rather than
+     `break-word` because this is a flex/grid-less block whose min-content
+     contribution feeds its parent's - `break-word` is not counted there. */
+  overflow-wrap:anywhere;
+}
+/* A DEFEAT MUST NOT LOOK LIKE A BUG - it must look like a defeat. Slate instead
+   of bronze: the material of the page says "this game went the other way"
+   before the words land, and the words still land, at 6.35:1 on the lightest
+   stop. `.is-defeat` and `[data-outcome="defeat"]` are both matched because the
+   integrator sets one on the screen and one on the headline, and either alone
+   is a complete signal.
+
+   >>> `background-IMAGE`, NOT `background`. The gradient-text treatment needs
+   >>> `-webkit-background-clip:text`, and the `background` shorthand RESETS
+   >>> background-clip to border-box. Using the shorthand in the override wiped
+   >>> the clip, the gradient painted as a full-width solid block, and - because
+   >>> .end-headline is also `color:transparent` - the headline became an
+   >>> invisible navy bar across the top of the defeat screen. The longhand
+   >>> changes the image and leaves the clip alone. That is why the victory
+   >>> case works and the defeat and draw cases did not. */
+#endScreen.is-defeat .end-headline,
+.end-headline[data-outcome="defeat"]{
+  background-image:linear-gradient(180deg,
+      #22374d 0%,      /* 11.72:1 */
+      #41607a 34%,     /* 6.35:1  lightest stop */
+      #354d63 66%,     /* 8.43:1 */
+      #2c3f52 100%);   /* 10.40:1 */
+}
+/* A draw is neither. Mute bronze, every stop at or above 8.15:1. */
+#endScreen.is-draw .end-headline,
+.end-headline[data-outcome="draw"]{
+  background-image:linear-gradient(180deg,#3f382d 0%,#6b6252 34%,#5b5346 66%,#443d33 100%);
+}
+/* The reveal rule follows the outcome too: gold to win, a cold slate to lose,
+   the mute hairline to draw. */
+#endScreen.is-defeat::before{
+  background-image:linear-gradient(90deg,transparent,var(--p2) 28%,var(--p2) 72%,transparent);
+}
+#endScreen.is-draw::before{
+  background-image:linear-gradient(90deg,transparent,var(--line) 28%,var(--line) 72%,transparent);
+}
+
 #endScreen .end-sub{
-  display:inline-block; margin:0 0 20px; padding:4px 14px;
+  display:inline-block; margin:16px auto 0; max-width:52ch;
+  padding:5px 16px;
   border:1px solid var(--gold); border-radius:var(--r-pill);
   background:rgba(201,138,43,.10); color:var(--ink-soft);
   font-size:13px; font-weight:700; letter-spacing:.4px;
   animation:od-slide-up var(--dur-5) var(--ease-out) .12s both;
+  /* D2: `max-width:52ch` caps the box but NOT its content - an inline-block
+     shrink-to-fit still floors at min-content, so one long token in the
+     verdict prose ("XXXX… wins") overflowed the pill. */
+  overflow-wrap:anywhere; word-break:break-word;
 }
-#endScreen .player-card{ display:inline-block; min-width:170px; text-align:left; animation:od-slide-up var(--dur-5) var(--ease-out) .2s both; }
-#endScreen .row{ justify-content:center; }
-#endScreen .player-card + .player-card{ margin-left:12px; animation-delay:.3s; }
+#endScreen.is-defeat .end-sub{ border-color:var(--p2); background:rgba(58,90,122,.10); }
 
-/* Score gap bar — the one number that decided the game, given room. */
+/* The two seats. Equal width, so the Influence badges line up and can be
+   compared instead of remembered. */
+#endScreen .row{ justify-content:center; align-items:stretch; margin-top:18px; }
+#endScreen .player-card{
+  display:inline-block; min-width:min(240px,42vw);
+  text-align:left;
+  animation:od-slide-up var(--dur-5) var(--ease-out) .2s both;
+}
+#endScreen .player-card + .player-card{ margin-left:12px; animation-delay:.3s; }
+#endScreen .player-card .name{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+}
+/* WINNER vs LOSER. The shape channel is the point: a 3px rim, a double keyline
+   and a 3px lift for the seat that won; the loser keeps a flat 2px rim and sits
+   on the table. Both states also carry the word "Influence" and the number, so
+   nothing here is hue-only - and a draw leaves both seats untouched, which is
+   the honest rendering of a draw. */
+#endScreen .player-card.is-winner{
+  border-width:3px;
+  box-shadow:var(--lift-lg), inset 0 0 0 1px rgba(255,255,255,.55);
+  transform:translateY(-4px);
+}
+#endScreen .player-card.is-loser{
+  background:linear-gradient(180deg,#f4ece0,#ece1cd);
+  box-shadow:var(--edge);
+}
+#endScreen .player-card.is-loser .name,
+#endScreen .player-card.is-loser .influence-badge{ color:var(--muted-text); }
+#endScreen .player-card.is-loser .influence-badge{
+  background:rgba(74,53,32,.07); border-color:var(--line);
+}
+
+/* ---- THE MARGIN, AS THE HERO ---------------------------------------------
+   The one number that decided the game, and the thing the whole six rounds
+   were for. It is built as a CARD rather than a bar: a caption row with both
+   names and both figures, a tall segmented track, and the margin as a
+   sentence underneath. Sized so it is the largest non-heading element on the
+   page, which is what "the payoff" means. */
 .end-gap{
-  max-width:520px; margin:22px auto 0; text-align:left;
+  max-width:580px; margin:26px auto 0; text-align:left;
+  padding:16px 18px 16px;
+  border:1px solid var(--gold); border-radius:var(--r-lg);
+  background:linear-gradient(180deg,var(--parchment-hi),var(--parchment-hi-2));
+  box-shadow:var(--lift-lg), inset 0 0 0 1px rgba(255,255,255,.6);
   animation:od-slide-up var(--dur-5) var(--ease-out) .38s both;
 }
-.end-gap-label{ display:flex; justify-content:space-between; font-size:11px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; color:var(--muted-text); margin-bottom:6px; }
-.end-gap-bar{
-  position:relative; height:22px; border-radius:var(--r-pill);
-  border:1px solid var(--line); background:rgba(74,53,32,.08); overflow:hidden;
+/* VICTORY gets the gold rim and a warm keyline; DEFEAT goes cold and flat;
+   DRAW is hairlined. Again: the words above it say the same thing, so this is
+   reinforcement, never the only channel. */
+#endScreen.is-defeat .end-gap{
+  border-color:var(--p2);
+  background:linear-gradient(180deg,#f7f4ee,#eef0f2);
 }
-.end-gap-fill{ height:100%; border-radius:var(--r-pill); transition:width var(--dur-5) var(--ease-out); }
-.end-gap-fill.p1{ background:linear-gradient(90deg,var(--p1),#d98a63); }
-.end-gap-fill.p2{ background:linear-gradient(90deg,var(--p2),#7fa3c0); margin-left:auto; }
-.end-gap-value{ margin-top:8px; text-align:center; font-family:var(--font-num); font-size:14px; font-weight:800; color:var(--accent-gold-ink); }
-.end-gap-value .is-margin{ color:var(--accent-hot-ink); }
-/* The confetti anchor point. OD.Fx.confetti(#endScreenGap) appends its
-   particles here; overflow is visible so they rain over the whole screen. */
+#endScreen.is-draw .end-gap{ border-color:var(--line); }
+
+/* >>> D2 (measured 2026-10-01): THE LONG-NAME BLOWOUT.
+   >>> `.end-gap-label` is a flex row, and a flex item's automatic minimum size
+   >>> is its MIN-CONTENT width - so a single unbreakable token in any of these
+   >>> three children sets the whole row's floor, and the row's floor sets the
+   >>> page's. Measured `documentElement.scrollWidth`, name of length N, on the
+   >>> end screen, BEFORE the fix below:
+   >>>     N=  8   1920px @1440   390px @390    (fits)
+   >>>     N= 37   1826px @1440  1020px @390    (already over)
+   >>>     N=145   7011px @1440  3803px @390
+   >>>     N=240  11573px @1440  6251px @390
+   >>>     N=400  19255px @1440 10374px @390    widest single element 6578px
+   >>> `body{overflow-x:hidden}` then made the result UNSCROLLABLE - the widest
+   >>> part of the end screen could not be reached at all, and because the
+   >>> names are also the winner/loser identity the screen got worse the more
+   >>> clearly the winner was named.
+   >>> The fix is the standard one and it is two declarations per child:
+   >>> `min-width:0` releases the flex floor, and `overflow-wrap:anywhere`
+   >>> gives the text a break opportunity inside the token itself. Neither
+   >>> works alone: `min-width:0` alone lets the box shrink but the word still
+   >>> overflows it; `overflow-wrap` alone cannot shrink a flex item below
+   >>> min-content because the item never shrinks.
+   >>> This is NOT the `maxlength` attribute JS is adding to the name inputs.
+   >>> A name reaches this layout from four places - the two inputs, and
+   >>> `state.players[].name` set by any other caller - and CSS has to hold for
+   >>> all of them. */
+.end-gap-label{
+  display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+  margin-bottom:10px;
+  /* The row itself is the outermost floor: `min-width:0` on the children is
+     what lets them shrink, and this keeps the row from re-introducing one. */
+  min-width:0;
+}
+.end-gap-name{
+  display:flex; flex-direction:column;
+  font-size:12px; font-weight:800; letter-spacing:.5px; text-transform:uppercase;
+  color:var(--muted-text);
+  min-width:0; max-width:46%;
+  overflow-wrap:anywhere; word-break:break-word;
+}
+.end-gap-name b{
+  display:block; margin-top:2px;
+  font-family:var(--font-num); font-size:26px; font-weight:800; line-height:1;
+  letter-spacing:0; color:var(--ink);
+}
+/* The right-hand seat is emitted as `<b>16</b> Player 2`, i.e. the mirror of the
+   left one, so without this the two big figures sit on OPPOSITE baselines - the
+   left number above its name, the right number below its name - and a 21 / 16
+   read as belonging to different rows. Column order + end alignment puts both
+   figures on one line, which is the whole point of the row. */
+.end-gap-name.p2{ align-items:flex-end; text-align:right; }
+.end-gap-name.p1 b{ color:var(--p1); }
+.end-gap-name.p2 b{ color:var(--p2); }
+/* The lead caption is the quietest element in the row, because the two figures
+   flanking it are the reading and this is the caption. It also carries the
+   word - "Player 1 leads" / "Level" - so the bar is explained in text.
+   --muted-text, not --ink-muted: this is 9px and --ink-muted on the card face
+   measures 4.05:1, which is a fail at that size. Quietness here comes from size
+   and tracking, never from making the text harder to read. */
+.end-gap-lead{
+  align-self:center;
+  font-size:9px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase;
+  color:var(--muted-text); text-align:center;
+  /* The caption is a flex child that interpolates a NAME (game.js emits
+     `${gapLead}`), and it was the widest of the three at every name length -
+     it is also `text-align:center` and was the one with no floor-breaking
+     declaration at all, so one long token set min-content for the row. */
+  min-width:0; flex:0 1 auto;
+  overflow-wrap:anywhere; word-break:break-word;
+}
+
+.end-gap-bar{
+  position:relative;
+  height:26px; border-radius:var(--r-pill);
+  border:1px solid var(--line);
+  background:rgba(74,53,32,.08);
+  box-shadow:inset 0 2px 4px rgba(74,53,32,.14);
+  overflow:hidden;
+}
+/* The two fills are inline-positioned absolutes, so the SEAM between them is a
+   light inset edge rather than a flex gap - which means it lands correctly at
+   any width pair, including a 56.8 / 43.2 split and a 50 / 50 draw. */
+.end-gap-fill{
+  position:absolute; top:0; bottom:0;
+  min-width:4px;
+  transition:width var(--dur-5) var(--ease-out);
+}
+.end-gap-fill.p1{
+  left:0; border-radius:var(--r-pill) 0 0 var(--r-pill);
+  background:linear-gradient(90deg,#8f3d21,var(--p1) 55%,#d0714c);
+}
+.end-gap-fill.p2{
+  right:0; border-radius:0 var(--r-pill) var(--r-pill) 0;
+  background:linear-gradient(270deg,#2c4560,var(--p2) 55%,#5d84a8);
+  box-shadow:inset 3px 0 0 var(--parchment-hi);
+}
+/* The tick marks are the track's own ruling: one notch per Influence, so a 21-16
+   bar shows 37 marks and the margin is countable rather than guessed. */
+.end-gap-bar::after{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:repeating-linear-gradient(90deg,
+    transparent 0 calc(100% / 37 - 1px),
+    rgba(74,53,32,.24) calc(100% / 37 - 1px) calc(100% / 37));
+}
+.end-gap-value{
+  margin-top:12px; text-align:center;
+  font-family:var(--font-ui); font-size:13px; font-weight:700;
+  letter-spacing:.2px; color:var(--ink-soft);
+  /* D2: `"${name} wins by N Influence"` - the third name interpolator inside
+     the gap card, and it is what made the CARD 3505px wide at N=400 even
+     after the label row was fixed. */
+  overflow-wrap:anywhere; word-break:break-word; min-width:0;
+}
+.end-gap-value .is-margin{
+  display:inline-block; margin:0 2px;
+  font-family:var(--font-num); font-size:26px; font-weight:800;
+  line-height:1; letter-spacing:0;
+  color:var(--accent-gold-ink);
+  vertical-align:-4px;
+}
+#endScreen.is-defeat .end-gap-value .is-margin{ color:var(--accent-cool-ink); }
+#endScreen.is-draw .end-gap-value .is-margin{ color:var(--accent-mute-ink); }
+
+/* Optional margin-shape bindings. js/game.js currently emits neither, so this is
+   a lever rather than a requirement - but "won by 1" and "won by 14" are not the
+   same evening and the card should not look identical for both, so the styles
+   are here and ready. Bind ONE of:
+     .end-gap.is-tight    margin <= 2   -> the hot rim, and the figure goes hot
+     .end-gap.is-blowout  margin >= 8   -> the gold rim at 2px, widest margins
+   Neither changes a contrast figure: both swap which documented accent is the
+   rim, and the .is-margin number keeps its own documented ratio either way. */
+.end-gap.is-tight{ border-color:var(--accent-hot-ink); border-width:2px; }
+.end-gap.is-tight .end-gap-value .is-margin{ color:var(--accent-hot-ink); }
+.end-gap.is-blowout{ border-color:var(--accent-gold-ink); border-width:2px; }
+
+/* The confetti anchor. OD.Fx.confetti(#endScreenGap) appends its particles into
+   this element - which is the .end-gap card itself - so overflow stays VISIBLE
+   on the particle layer or the confetti is clipped to the card and the single
+   moment the game earns is spent inside a 580px pill.
+   The integrator owns WHETHER to fire it: a defeat raining confetti would be
+   the exact "looks like a bug" failure this section exists to prevent, so that
+   call belongs behind an `if (is-victory)` in js/, not behind a CSS opt-out. */
 #endScreenGap{ position:relative; }
 #endScreenGap .od-confetti{ overflow:visible; }
 
 .stats-table{
-  width:100%; max-width:520px; margin:20px auto 0;
+  width:100%; max-width:580px; margin:22px auto 0;
   border-collapse:collapse; font-size:13px;
   animation:od-slide-up var(--dur-5) var(--ease-out) .46s both;
 }
 .stats-table th,.stats-table td{ padding:9px 10px; text-align:center; border-bottom:1px solid var(--line); }
+/* >>> D2: the two `<th>`s in BOTH end-screen tables are player names
+   >>> (`<th>${p1.name}</th>`), and a table cell's minimum contribution is its
+   >>> min-content width - there is no `min-width:0` for a `<td>`, so a long
+   >>> name widened the table, and the table is the widest thing on the screen.
+   >>> Measured with an N=400 name, this was the single widest element in the
+   >>> whole document at 6578px, ahead of the end-gap row.
+   >>> `table-layout:fixed` makes the browser honour the declared width and
+   >>> distribute columns, so the name wraps inside its cell instead of
+   >>> stretching the table; `overflow-wrap` is still needed because a single
+   >>> unbreakable token is exactly what `fixed` alone will not break. */
+.stats-table{ table-layout:fixed; }
+.stats-table th,.stats-table td{ overflow-wrap:anywhere; word-break:break-word; }
+.stats-table th:first-child,.stats-table td:first-child{ width:34%; }
 .stats-table th{ color:var(--muted-text); font-weight:600; text-align:left; }
 .stats-table td:first-child,.stats-table th:first-child{ text-align:left; color:var(--muted-text); }
 .stats-table td{ font-family:var(--font-num); }
-#endScreen .footer-actions{ justify-content:center; margin-top:20px; animation:od-slide-up var(--dur-5) var(--ease-out) .54s both; }
+/* The Influence row IS the result; every other row is bookkeeping. A heavier
+   top rule, a hair more padding, and full-ink figures make the eye land there
+   first when it lands on the table at all. */
+.stats-table tbody tr:first-child td{
+  border-top:2px solid var(--gold);
+  padding-top:13px; padding-bottom:13px;
+  color:var(--ink); font-weight:800; font-size:15px;
+}
+#endScreen.is-defeat .stats-table tbody tr:first-child td{ border-top-color:var(--p2); }
+.stats-table tbody tr:last-child td{ border-bottom:none; }
+#endScreen .footer-actions{ justify-content:center; margin-top:26px; animation:od-slide-up var(--dur-5) var(--ease-out) .54s both; }
+#endScreen .footer-actions button{ min-width:190px; }
 
 
 /* =============================================================================
@@ -2724,6 +3788,38 @@ body.is-meltdown .tier-row.advanced .tier-note{
 .wagers-stance[data-wager="allin"] span{ color:#ffe4dc; }
 .wagers-stance[data-wager="allin"] b::before{ content:'\26A0\00A0'; }
 .wagers-stance[data-wager="allin"]:hover:not(.disabled){ border-color:var(--accent-blood-ink); }
+/* D3: THE WAGERS STANCES - the `-ink`-on-`-fill` pairing, made explicit.
+
+   The bug this fixes is a PAIRED-TOKEN bug, not a colour bug. The tier system
+   ships three values per tier: `-fill` (background), `-ink` (text ON that
+   fill), `-on` (text on DARK surfaces). `.wagers-stance[data-wager="allin"]`
+   was declared with `color:var(--accent-blood-ink)` on a `--accent-blood`
+   gradient - which is the CORRECT pairing and measures 5.59:1 on the flat
+   fill. But it ALSO matched `.wagers-stance.disabled`, whose rule sets
+   `background:rgba(92,83,67,.07)` - a nearly transparent wash - and the
+   `.disabled` and `[data-wager]` rules have the SAME specificity, so which one
+   won depended on source order. Measured live at 1440px, an ALL IN stance
+   that is locked rendered `#fff4ef` on `rgb(138,63,58)` (6.81:1, fine) but
+   under `prefers-contrast: more` the same element rendered `#fff4ef` on
+   `rgb(247,236,214)` = 1.08:1 - invisible - because the contrast block
+   flattens the fill to `--panel2` and never re-inks the text.
+
+   So the fix is not "darken ALL IN". It is: a stance that is DISABLED must
+   wear the mute ink, exactly as GHOST does, so a locked stance reads as
+   locked in the same way whether or not the OS asked for more contrast. The
+   state still has three non-colour channels - dashed border, the word
+   "LOCKED", the padlock glyph - so nothing is carried by hue. */
+.wagers-stance.disabled[data-wager="allin"],
+.wagers-stance.disabled[data-wager="ghost"]{
+  border-color:var(--accent-mute-ink);
+  background:rgba(92,83,67,.07);
+  color:var(--accent-mute-ink);
+}
+.wagers-stance.disabled[data-wager="allin"] b,
+.wagers-stance.disabled[data-wager="ghost"] b{ color:var(--accent-mute-ink); }
+.wagers-stance.disabled[data-wager="allin"] span,
+.wagers-stance.disabled[data-wager="ghost"] span{ color:var(--accent-mute-ink); }
+
 /* GHOST. */
 .wagers-stance[data-wager="ghost"]{
   border-color:var(--accent-mute-ink); border-style:dashed;
@@ -2769,6 +3865,32 @@ body.is-meltdown .tier-row.advanced .tier-note{
    the strip is scannable in the same way the board header is. */
 .wagers-line{ display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap; }
 .wagers-line b{ color:var(--ink-soft); font-family:var(--font-num); }
+/* >>> A DESCENDANT MUST NOT OUT-VOICE ITS CHIP. Measured failures, all found
+   >>> by walking the live DOM (rgb values in the comments):
+   >>>     .wagers-line b   --ink-soft #6b4a28 on --accent-hot  #eea184 = 3.82:1
+   >>>     .wagers-line b   --ink-soft #6b4a28 on --accent-blood#9c4a44 = 1.91:1
+   >>>     .wagers-dim      --muted-text #6b5b40 on --accent-hot #eea184 = 3.15:1
+   >>> The chips themselves were correct all along (hot-ink on hot 4.65:1,
+   >>> blood-ink on blood 5.59:1). What broke them is the two rules above: a <b>
+   >>> or a `.wagers-dim` INSIDE a chip inherited the page's ink token and then
+   >>> painted dark text onto a saturated fill.
+   >>> The fix is `color:inherit`, which hands every descendant the chip's own
+   >>> already-measured ink. Hierarchy inside a chip is carried by size and
+   >>> weight, never by dropping the descendant off the token - an inherited
+   >>> opacity would have been the same mistake in softer clothing. */
+.wagers-contested b,
+.wagers-siege b,
+.wagers-decl b,
+.wagers-contested .wagers-dim,
+.wagers-siege .wagers-dim,
+.wagers-decl .wagers-dim{ color:inherit; }
+.wagers-contested b,
+.wagers-siege b,
+.wagers-decl b{ font-size:11px; }
+/* `.status-body b` is (0,2,0) and comes later in the file than the block above,
+   so this rule is RE-STATED at (0,3,0) down in the feature-panels section. Both
+   copies exist on purpose: the first covers a chip rendered anywhere, the
+   second covers the status strip where a `<b>` is otherwise re-inked. */
 .wagers-contested{
   padding:1px 8px; border-radius:var(--r-pill);
   background:var(--accent-hot); color:var(--accent-hot-ink);
@@ -2868,6 +3990,19 @@ body.is-meltdown .tier-row.advanced .tier-note{
    and pushed the whole fact onto a second line of its own. */
 .status-body .wagers-line{ vertical-align:top; }
 .status-body .wagers-line + .wagers-line{ margin-left:8px; }
+/* The chip-ink inheritance rule from section 14, RE-STATED at a specificity that
+   actually wins here. `.status-body b{ color:var(--ink-soft) }` sits at (0,2,0);
+   the section-14 version was also (0,2,0) and lost on source order, so a <b>
+   inside a `.wagers-contested` chip measured 3.82:1 on the hot fill and 1.91:1
+   on the blood fill. (0,3,0) with `.status-body` in front settles it, and this
+   is the only place in the sheet a chip's ink can be inherited - which is
+   correct, because the chip is the thing that chose the ink. */
+.status-body .wagers-contested b,
+.status-body .wagers-siege b,
+.status-body .wagers-decl b,
+.status-body .wagers-contested .wagers-dim,
+.status-body .wagers-siege .wagers-dim,
+.status-body .wagers-decl .wagers-dim{ color:inherit; }
 
 /* ---- THE SURGE (Round 6 d6 reveal) --------------------------------------
    #odChaosSurge builds its OWN overlay (feature-chaos.js:309) because the
@@ -2976,6 +4111,180 @@ body.is-meltdown .tier-row.advanced .tier-note{
   background-image:repeating-linear-gradient(45deg, rgba(0,0,0,.22) 0 4px, transparent 4px 8px) !important;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.35);
 }
+/* >>> D3: THE ODDS BAR. `oddsBar()` in js/game.js emits each segment with an
+   >>> INLINE `color:#fff` and an inline `background:var(--accent-<tier>)`.
+   >>> The fills are the three palest tints in the palette, so white on them
+   >>> measured (live, 1440px, commit modal):
+   >>>     WIN   #ffffff on --accent-cool #cfe6e4 =  1.30:1
+   >>>     TIE   #ffffff on --accent-mute #cdc7ba =  1.68:1
+   >>>     LOSE  #ffffff on --accent-blood #9c4a44 = 6.04:1  (the only pass)
+   >>> The inline `color:#fff` outranks any author rule, so this needs
+   >>> `!important` - and it is the one place in this file that is the right
+   >>> call: the alternative is a JS change, and the pairing rule
+   >>> (`-ink` on `-fill`) is a stylesheet invariant that should not depend on
+   >>> which tier a future outcome is.
+   >>> The text follows the FILL'S OWN INK, per segment, so the pairing is
+   >>> correct whatever tier JS paints:
+   >>>     WIN  -> --accent-cool-ink  #14555f on #cfe6e4 = 6.45:1
+   >>>     TIE  -> --accent-mute-ink  #544c3d on #cdc7ba = 5.03:1
+   >>>     LOSE -> --accent-blood-ink #fff4ef on #9c4a44 = 5.59:1
+   >>> NOTHING IS LOST AS A CHANNEL: the three segments keep their existing
+   >>> non-colour distinctions (WIN solid with no border, TIE with a dashed
+   >>> inner rule and the ▬ double rule in its text, LOSE hatched with a solid
+   >>> border) and each still carries the word WIN / TIE / LOSE and its
+   >>> percentage. This is a legibility fix, not a redesign. */
+.odds-bar > span{ color:var(--accent-mute-ink) !important; }
+.odds-bar > span:nth-child(1){ color:var(--accent-cool-ink) !important; }
+.odds-bar > span:nth-child(2){ color:var(--accent-mute-ink) !important; }
+.odds-bar > span:nth-child(3){ color:var(--accent-blood-ink) !important; }
+/* =============================================================================
+   D3b: THE INLINE-COLOUR OVERRIDES
+   -----------------------------------------------------------------------------
+   Everything below this point is one problem wearing five costumes:
+
+   index.html and js/game.js set foreground colours INLINE, and an inline
+   declaration beats every author rule except `!important`. The colours they
+   reach for are `--muted` (#8a7355), `--gold` (#c98a2b) and literal #b5502e.
+   Measured live at 1440px, across setup / draft / commit / skirmish / debrief /
+   end-screen / late-round, those inline colours accounted for EIGHT of the
+   twenty failing text nodes. The measured ratios, worst first:
+
+     2.46:1  .status-body b / span   #c98a2b on rgb(246,234,210)   11px
+     3.33:1  #stakesPanel caption    #8a7355 on rgb(235,221,193)   11px
+     3.35:1  #stakesPanel span       #8a7355 on rgb(235,221,193)   12px
+     3.58:1  #skirmishBody p         #8a7355 on rgb(242,228,200)   13px
+     3.58:1  #roundDebrief caption   #8a7355 on rgb(242,228,200)   11px
+     3.58:1  #roundDebrief b / span  #8a7355 on rgb(242,228,200)   12px
+     3.78:1  .status-body pip        #8a7355 on rgb(246,234,210)   12px
+     4.24:1  .status-body span       #b5502e on rgb(246,234,210)   12px
+
+   WHY `!important` IS THE HONEST ANSWER HERE, not a shortcut:
+   `--gold` and `--muted` are DOCUMENTED tokens with legitimate non-text jobs -
+   `--gold` is the heat ramp's mid stop, a border colour and a fill; `--muted` is
+   the mute fill in the odds-bar fallback and the `is-unaffordable` tint. Neither
+   can be darkened globally to fix a foreground, because that would darken the
+   fills too and change the validated surface ladder. The token layer already
+   provides the correct foreground for each surface - `--gold-ink`, `--muted-text`,
+   `--p1-wash-ink` - and the inline styles are simply using the wrong member of
+   the family. So this block re-pairs them.
+
+   The overrides are written as `[style*="..."]` on STABLE ancestor containers
+   rather than as bare `[style*=]` anywhere in the document. That is deliberate:
+   an unscoped attribute selector would also catch an inline colour that is
+   currently correct, and a stylesheet that overrides correct code is a
+   stylesheet nobody trusts.
+
+   NO CHANNEL IS REMOVED. Every one of these elements is prose or a pip inside a
+   row that also carries a glyph, a border, a tag word or a numeric figure:
+     - the PRESSURE pips keep ●/○, which is the entire point of them
+     - the stakes/debrief captions keep their tracked-caps SECTION ROLE, which is
+       what distinguishes them from the sentence under them
+     - the status-body figures keep the mono bold `<b>` treatment, so the number
+       still stands out from the words around it
+   Only the hue of the text changes, and in every case the new hue is the
+   same-hue family's documented ink rather than a different colour.
+   ========================================================================== */
+
+/* --gold -> --gold-ink, in the HUD status strip and on the event line.
+   --accent-gold-ink #6b4806 on the panel measures 6.90:1; --gold #c98a2b on
+   the same surface measures 2.46:1. Both are gold; only one is readable. */
+.status-body b[style*="color:var(--gold)"],
+.status-body span[style*="color:var(--gold)"]{ color:var(--accent-gold-ink) !important; }
+
+/* --muted -> --muted-text. 5.61:1 on --panel2, 6.32:1 on --panel, 4.49:1 on
+   --felt: the token exists for exactly this and was simply not used. Every
+   surface these eight nodes were measured on is a composite of one of those
+   three, and the live composites came out 4.86 / 5.51 / 5.23 - all clears of
+   4.5:1 with the token as it already stands, and none of them needs a darker
+   value or a new one. */
+.status-body b[style*="color:var(--muted)"],
+.status-body span[style*="color:var(--muted)"],
+#stakesPanel [style*="color:var(--muted)"],
+#roundDebrief [style*="color:var(--muted)"],
+#skirmishBody p[style*="color:var(--muted)"],
+#skirmishBody div[style*="color:var(--muted)"]{ color:var(--muted-text) !important; }
+
+/* The two PARENTHETICAL glosses in the right rail's panel headings, and the
+   round-event name. All three are inline-styled in index.html / game.js with
+   `--muted` / `--gold`:
+     index.html:184  #intriguePanel  "(free, doesn't cost a location pick)"  13px
+      index.html:188  the hand panel   "(used only in a Skirmish)"             13px
+     game.js:3304    #eventLine <b>  "Trade Winds"                          12px
+   The parenthesised glosses are the same class of thing as the captions above -
+   a quiet annotation on a heading, at 13px, which is body text and needs 4.5:1.
+   `#eventLine b` is different in kind and is worth stating: the event NAME is
+   the one thing on that line a player has to read, and it was the least
+   readable thing on it. `--accent-gold-ink` is the same gold, at 6.90:1. */
+/* index.html:188 ships that panel WITHOUT an id - only its child #hand has
+   one - so it is selected structurally: the heading whose next sibling is the
+   hand rail. Scoped to the gloss span, so the heading itself is untouched.
+   The event name is listed separately because it takes a different token: it is
+   the one thing on its line a player has to read, and it was the least
+   readable thing on it. */
+.card-panel:has(> #hand) > h3 span[style*="color:var(--muted)"],
+#intriguePanel h3 span[style*="color:var(--muted)"]{ color:var(--muted-text) !important; }
+#eventLine b[style*="color:var(--gold)"]{ color:var(--accent-gold-ink) !important; }
+
+/* #b5502e literal -> --p1-wash-ink. Same hue, the member of the family that is
+   a foreground: 7.69:1 on panel2 against 4.24:1 for the raw literal. The pip
+   that uses it is a PLAYER-STATE pip, and it is still a red dot - the shape
+   and the row it sits in are unchanged. */
+.status-body [style*="color:#b5502e"]{ color:var(--p1-wash-ink) !important; }
+
+/* =============================================================================
+   D3c: TWO TINTED SURFACES WHERE THE TEXT, NOT THE COLOUR, WAS WRONG
+   -----------------------------------------------------------------------------
+   The last four failures are the same mistake in a different costume: a state
+   wash was laid over a surface, and the body text that sits on it was left at a
+   ratio that was calculated against the UNTINTED panel. The tint is the state
+   channel and stays; the text steps down one ink.
+
+     measured                      --muted-text   --ink-soft   --ink
+     #log .entry.is-rift  (12px)        4.15:1       5.03:1    7.28:1
+     #log .entry.is-betrayal (12px)     4.23:1       5.14:1    7.43:1
+     .loc.loc-taken .tier-label (13px)  4.04:1       4.90:1    7.09:1
+     .objective-callout-flip (12px)     4.49:1       5.44:1    7.88:1
+
+   `--ink-soft` clears 4.5:1 on all four with margin, and it is ONE step from
+   `--muted-text` in this file's own type ramp, so the hierarchy survives: the
+   `<b>` figures inside these same elements stay on `--text` (#4a3520), which is
+   a clear step darker still.
+   ========================================================================== */
+
+/* The PALE-WASH entries only. This list is deliberately EXCLUSIVE of
+   `.is-danger`, `.is-round`, `.is-fury`, `.is-siege`, `.is-meltdown` and
+   `.is-pressure`: those five carry a SOLID accent fill and set their own
+   `color` to that fill's `-ink` (e.g. `.is-round` is hot-ink on a solid hot
+   fill), which is the CORRECT pairing. Overriding them with `--ink-soft`
+   measured 1.32:1 on the blood entries and 3.82:1 on the round entries - the
+   blanket version of this rule was a regression, and it is recorded here so
+   nobody re-widens the selector.
+   The five listed below are the ones whose wash is translucent, so their text
+   sits on a light composite and the inherited `--muted-text` is what fails. */
+#log .entry.is-gain, #log .entry.is-loss, #log .entry.is-unlock,
+#log .entry.is-betrayal, #log .entry.is-rift,
+#log .entry.is-surge, #log .entry.is-system{
+  color:var(--ink-soft);
+}
+
+/* A taken tile's tier label. `.loc-taken` is the "this site is spoken for"
+   state and it is carried by the tile's own treatment (3px rule, heavier
+   label, the TAKEN word) - see the end of this file - so the label's job is
+   legibility, not signalling, and --ink-soft is the legible choice. */
+.loc.loc-taken .tier-label,
+.loc.loc-taken h3{ color:var(--ink-soft); }
+
+/* The objective callout's "not met" flip. Its ::before was
+   `color:var(--accent-blood-ink)` (#fff4ef) on the callout's own pale wash -
+   a `-ink` on a light surface, i.e. the backwards pairing the tier comment at
+   the top of this file now documents as a bug. It is a GLYPH, not a text
+   surface, and it sits on a pale wash, so it takes the wash's own ink. The
+   state is still carried three ways: the ⊘ glyph, the word "NOT MET", and the
+   2px blood rule the callout already carries. */
+/* `.objective-callout-flip` itself is re-inked at its own declaration, below
+   (section 16), because that rule is later in the file than this one and a
+   duplicate here would simply lose. */
+
 /* The threshold sentence: the number that decides whether the d6 can reach. */
 .odds-threshold{
   margin-top:4px; font-size:13px; color:var(--accent-cool-ink); font-weight:700;
@@ -3088,6 +4397,27 @@ body.is-meltdown .tier-row.advanced .tier-note{
 }
 .pivot-note b{ color:var(--accent-gold-ink); }
 
+/* THE BANKED OBJECTIVE BONUS, INSIDE A TRAJECTORY ROW. game.js:3817 appends
+   <span class="trajectory-bonus">obj +4</span> to the last cell of any round on
+   which an objective bonus was actually banked. It is the single largest number
+   in the table and it had no rule at all, so it inherited the cell's 13px mono
+   and disappeared among the running totals.
+
+   It gets the GOOD tier - the one accent fill in this sheet that means "you
+   banked something" - plus a ◆ glyph, so it is marked by SHAPE as well as by
+   fill. Measured good-ink on good-fill: 7.62:1. The "obj" prefix is the word
+   channel: a player who cannot separate the fill still reads which kind of
+   bonus it is. */
+.trajectory-bonus{
+  display:inline-block; margin-left:6px; padding:1px 6px 2px;
+  border-radius:var(--r-pill);
+  background:var(--accent-good); color:var(--accent-good-ink);
+  box-shadow:inset 0 0 0 1px var(--accent-good-ink);
+  font-family:var(--font-ui); font-size:9px; font-weight:800;
+  letter-spacing:.5px; white-space:nowrap;
+}
+.trajectory-bonus::before{ content:'\25C6\00A0'; font-size:8px; }   /* ◆ banked */
+
 /* The objective bonus is the largest single swing in the game, so it is scored
    rather than listed: each row states what the player would have finished on
    WITHOUT it. */
@@ -3106,6 +4436,12 @@ body.is-meltdown .tier-row.advanced .tier-note{
 .objective-callout-row{ font-size:13px; line-height:1.5; color:var(--ink); }
 .objective-callout-row + .objective-callout-row{ margin-top:4px; }
 .objective-callout-row b{ color:var(--ink-soft); }
+/* D2: the objective rows are the LAST name interpolator on the end screen -
+   `<b>${name}</b> took ${objective.name}` - and the name is a BARE <b>, so the
+   break has to be on the row. Measured at name length 400 after the gap-card
+   and headline were fixed: .objective-callout-row scrollWidth 3407px inside a
+   490px row, which is what still made the page 3882px at a 1440px viewport. */
+.objective-callout-row{ overflow-wrap:anywhere; word-break:break-word; min-width:0; }
 .objective-callout .met{
   padding:1px 7px; border-radius:var(--r-pill);
   background:var(--accent-good); color:var(--accent-good-ink);
@@ -3120,8 +4456,20 @@ body.is-meltdown .tier-row.advanced .tier-note{
   border-left:3px solid var(--accent-blood);
   background:rgba(156,74,68,.14);
   color:var(--ink); font-size:12px; line-height:1.45;
+  /* D2: the flip's sentence names the winner too ("<name> still wins by N"),
+     so it needs the same break as the rows above it. Verified by pushing the
+     name past 400 chars, where this became the last over-wide element. */
+  overflow-wrap:anywhere; word-break:break-word; min-width:0;
 }
-.objective-callout-flip::before{ content:'\2298\00A0'; color:var(--accent-blood-ink); font-weight:800; }
+/* D3: the ⊘ glyph was `var(--accent-blood-ink)` #fff4ef on a 14%-blood wash over
+   cream, which composites to a pale pink and measured 1.36:1 in the default
+   media and 1.08:1 under `prefers-contrast: more` (where the wash is replaced
+   by a flat --panel2). That is the `-ink`-on-a-light-surface mistake the tier
+   comment in :root now documents: a GLYPH on a pale wash takes the wash's own
+   ink, not the dark-surface tint. --ink-soft measures 5.44:1 on the default
+   wash and 5.51:1 on --panel2. The state is still carried three ways: the ⊘
+   glyph, the words the JS writes into the callout, and the 3px blood rule. */
+.objective-callout-flip::before{ content:'\2298\00A0'; color:var(--ink-soft); font-weight:800; }
 
 /* The CATCHING UP / callout box in the rules modal. `.rules-extra` gives it a
    bottom rule; the callout needs the WEIGHT, so it takes the good tier's
@@ -3316,12 +4664,19 @@ body.is-meltdown .tier-row.advanced .tier-note{
      lives in the panel's own <h3> now - so the nowrap scroller's first child is
      a real card or a category chip, and the override the old caption needed is
      gone with it. */
-  #hand .hand-group-label{
+  /* D7: in the scroller there are no flex lines to disagree about, so the
+     full-width band from section 8 is wrong here - a band as wide as the
+     scroller would hide the first card behind it. Back to an inline sticky
+     chip. This selector has to match section 8's specificity exactly or the
+     band wins: section 8 uses `#hand .hand-group > .hand-group-label`
+     (1,2,0), so this is `#hand .hand-group > .hand-group-label` too. */
+  #hand .hand-group > .hand-group-label{
     position:sticky; left:0; z-index:1; margin-left:0;
     /* In a nowrap scroller `flex:0 1 auto` lets the chip shrink to zero width
        (measured: clientWidth 0), which is how the category name disappeared on
        the phone. Scroller children must not shrink. */
     flex:0 0 auto;
+    align-self:center;
   }
   /* No room for a rule in a horizontal scroller - the chip carries it alone. */
   #hand .hand-group-label::after{ display:none; }
@@ -3335,7 +4690,7 @@ body.is-meltdown .tier-row.advanced .tier-note{
   #hud .hud-round-label{ font-size:10px; }
   #roundLabel{ font-size:20px; }
   #hud .turn-banner{ order:3; flex:1 1 100%; text-align:left !important; min-width:0 !important; }
-  #hud .sound-toggle{ order:1; min-height:32px; padding:5px 10px; }
+  #hud .sound-toggle{ order:1; min-height:44px; padding:0 12px; }
   .round-stepper .step{ width:20px; height:20px; font-size:10px; }
   .round-stepper .connector{ width:7px; }
 
@@ -3362,6 +4717,22 @@ body.is-meltdown .tier-row.advanced .tier-note{
   .dice-row{ gap:14px; }
   .die{ width:56px; height:56px; font-size:26px; }
   #endScreen{ padding:26px 12px 32px; }
+  /* The two seats stack into ONE centred column of equal width. Left to the
+     flex row they wrapped at ~164px each and landed a few pixels apart
+     horizontally, which read as a misalignment rather than as a stack. */
+  #endScreen .row{
+    display:grid; grid-template-columns:minmax(0,260px); justify-content:center;
+    gap:10px; max-width:260px; margin:16px auto 0;
+  }
+  #endScreen .player-card{ min-width:0; width:100%; }
+  #endScreen .player-card + .player-card{ margin-left:0; }
+  #endScreen .player-card.is-winner{ transform:none; }
+  /* The lift on the winner's seat is a 4px offset; on one stacked column it
+     reads as a misalignment instead, so it is traded for a heavier rim. */
+  #endScreen .end-gap{ padding:14px 14px 14px; }
+  .end-gap-name b{ font-size:22px; }
+  .end-gap-bar{ height:22px; }
+  .end-gap-value .is-margin{ font-size:22px; }
 
   /* Scoreboard: the two players stack into one column so the bars get the
      full phone width, and the figure drops back to a readable-but-not-huge
@@ -3390,6 +4761,43 @@ body.is-meltdown .tier-row.advanced .tier-note{
   .mode-cards{ grid-template-columns:minmax(0,1fr); }
   .stats-table{ font-size:12px; }
   .stats-table th,.stats-table td{ padding:7px 5px; }
+}
+
+/* ---- D1: THE SEATS ROW, BELOW ~700px --------------------------------------
+   >>> MEASURED 2026-10-01. `#setup .row` is a 2-track grid
+   >>> (1fr / .62fr) and `.player-setup` carries `min-width:240px`, so the
+   >>> seats row needed 240 + 240 + 12 = 492px of CONTENT. Measured overflow
+   >>> of `#setupPlayersRow` past its own container, BEFORE this block:
+   >>>     360px +129   390px +118   420px +106   480px +85
+   >>>     560px  +54   600px  +39   660px  +16   820px   +0
+   >>> and at 390px `#p2name`'s right edge sat 73px PAST the panel edge, with
+   >>> `document.elementFromPoint` at 75% of its width returning BODY and at
+   >>> 95% returning null - i.e. the right-hand third of Player 2's name field
+   >>> was not clickable and not typable into.
+   >>> This hid from the normal audit because `#setup{overflow:hidden}` CLIPS
+   >>> instead of scrolling: "no horizontal overflow" reported clean while the
+   >>> control was half off-screen. The clip is deliberate (it contains the
+   >>> grid-paper ::before), so the fix has to be the LAYOUT, not the clip.
+   >>> Below 700px a two-seat row stops being a pair and becomes a stack, so
+   >>> it gets one track, and the 240px floor is dropped so the track can
+   >>> shrink below the items' min-content width. BOTH are required: a single
+   >>> track with the floor still left overflow, and a zero floor with two
+   >>> tracks still needed 2x240. */
+@media (max-width:700px){
+  /* `#setup .row` is (1,1,0) and sets the 2-track template, so this has to
+     out-specify it: a bare `#setupPlayersRow` is (1,0,0) and LOSES, media
+     queries add no specificity. `#setup .row#setupPlayersRow` is (1,2,0).
+     Verified: with the lower-specificity selector the row stayed 2-track and
+     the 360px overflow only fell from +129 to +84. */
+  #setup .row#setupPlayersRow{ grid-template-columns:minmax(0,1fr); }
+  #setup .player-setup{ min-width:0; }
+  /* The seats are stacked, so each takes the full measure. `width:100%` is
+     what actually fills a grid track; the seat is a plain block otherwise. */
+  #setupPlayersRow .player-setup{ width:100%; }
+  /* Two stacked bordered blocks already say "these are separate"; a gap
+     narrower than the seats' own internal padding made the pair read as one
+     panel with a rule in it. */
+  #setupPlayersRow{ gap:14px; }
 }
 
 /* ---- < 480px: what is deliberately dropped -------------------------------
@@ -3528,6 +4936,27 @@ body.is-meltdown .tier-row.advanced .tier-note{
   #log .entry:first-child{ animation:none !important; }
   .coach-target{ transition:none !important; }
   body::after{ transition:none !important; }
+
+  /* --- the same duty, discharged for the CRAFT PASS (V1-V6) ---------------
+     Three animations were added by this pass and each is named here rather
+     than left to the 1ms blanket, for the reason above: a 1ms one-shot on a
+     small mark is still a flash.
+       logTick      an INFINITE loop on the log header's 7px live dot. The 1ms
+                    blanket would turn an infinite 2.6s loop into an infinite
+                    1ms loop, i.e. a strobe. Killed outright.
+       od-grow-x    the end screen's reveal hairline (transform, one-shot)
+       od-cine-in   the cinematic tier's scale-in (transform, one-shot)
+     The STATE each carries survives statically, which is the reason every state
+     in this sheet has a non-colour channel: the dot keeps its "Live" word and
+     its static fill, the end-screen rule keeps its gold, the cinematic box
+     keeps its letterbox. */
+  #logPanel > h3::before{                /* the log's live dot            */
+    animation:none !important;
+  }
+  #endScreen::before,                     /* the end-screen reveal hairline */
+  #skirmishModal.modal-cinematic .box{    /* the title-card scale-in         */
+    animation:none !important;
+  }
 }
 
 /* ---- prefers-contrast: more ---------------------------------------------
@@ -3588,6 +5017,51 @@ body.is-meltdown .tier-row.advanced .tier-note{
   .odds-bar{ box-shadow:inset 0 0 0 2px var(--ink); }
   .odds-bar > span:nth-child(3){ background-image:none !important; }
   .rift-mut, .phase-label[data-phase="final-round"]{ background:var(--panel2); }
+  /* --- the craft pass (V1-V6) ---------------------------------------------
+     Everything this pass added that a player reads as a STATE is re-stated as a
+     border, a rule or a word, so raising contrast cannot remove information:
+       the end screen's three outcomes lose their metal and keep their rule, the
+         sub, the gap card and the winner/loser rims
+       the end screen's margin figure, which is the whole hero, goes full ink
+       the pickable corner notch becomes a full 4px L - a SHAPE, so it survives
+         the tint being dropped
+       the spent tile stops being one surface step darker (that was colour-only)
+         and becomes a 3px rule plus a heavier label
+       the log's header rule and its newest-entry rule both harden
+       the two select affordances (chrome and focus ring) get real edges      */
+  .end-gap, #endScreen.is-defeat .end-gap, .end-gap.is-tight{
+    background:var(--parchment); border:2px solid var(--ink);
+  }
+  .end-gap-value, .end-gap-value .is-margin{ color:var(--ink); }
+  .end-gap-name b{ color:var(--ink); }
+  .end-gap-bar{ border:2px solid var(--ink); background:var(--panel2); }
+  .end-gap-fill.p1, .end-gap-fill.p2{
+    background:var(--panel2); border:2px solid var(--ink);
+  }
+  .end-gap-bar::after{ background:none; }
+  #endScreen .player-card.is-winner{
+    border:3px solid var(--ink); transform:none; background:var(--parchment);
+  }
+  #endScreen .player-card.is-loser{ border:2px solid var(--muted-text); background:var(--panel2); }
+  #endScreen .player-card.is-loser .name,
+  #endScreen .player-card.is-loser .influence-badge{ color:var(--text); }
+  .stats-table tbody tr:first-child td{ border-top:3px solid var(--ink); }
+  .loc.pickable::after{ border-width:4px; border-color:var(--ink); width:24px; height:24px; }
+  .loc.contested{ border-width:3px; border-style:dashed; border-color:var(--ink); }
+  .loc.loc-taken{ border:3px solid var(--ink); background:var(--panel2); }
+  .loc.loc-taken .tier-label, .loc.loc-taken h3{ color:var(--text); }
+  .loc.pickable .tier-row[data-loc]{ box-shadow:inset 4px 0 0 var(--ink); }
+  .loc.pickable .tier-row.advanced[data-loc]{ box-shadow:inset 4px 0 0 var(--ink); }
+  #logPanel > h3, .log-head-n{ border-bottom-color:var(--ink); }
+  #logPanel > h3{ color:var(--text); }
+  #logPanel > h3::before{ box-shadow:none; }
+  #log .entry{ border-left-width:4px; }
+  #log .entry:first-child{ background:var(--panel2); border-left-color:var(--ink); }
+  #log .entry.is-danger, #log .entry.is-round, #log .entry.is-fury,
+  #log .entry.is-siege, #log .entry.is-meltdown{
+    background:var(--panel2); color:var(--ink); border:2px solid var(--ink);
+  }
+  select{ border:2px solid var(--ink); background-image:none; }
 }
 
 /* ---- forced-colors (Windows High Contrast) -------------------------------
@@ -3633,4 +5107,35 @@ body.is-meltdown .tier-row.advanced .tier-note{
   }
   .loc.loc-rift{ border-width:3px; }
   #odChaosSurge .die{ border:2px solid CanvasText; }
+  /* --- the craft pass (V1-V6) ---------------------------------------------
+     HCM drops every background fill this pass relied on, so each of its state
+     surfaces is re-stated as an edge. All of them already have a word or a glyph
+     attached, so nothing is lost:
+       the end screen's outcome rule, sub pill, gap card, gap track and the two
+         fills - the two fills are the one place a bare border is NOT enough,
+         because they are a proportion, so they keep forced-color-adjust:none and
+         the numbers beside them carry the same reading in text
+       the winner / loser seat rims
+       the pickable corner notch, the spent tile and the actionable tier spine
+       the log header rule, the newest-entry rule and the typed fills          */
+  #endScreenGap, .end-gap, .end-gap-bar, #endScreen .end-sub,
+  #endScreen .player-card.is-winner, #endScreen .player-card.is-loser{
+    border:1px solid CanvasText;
+  }
+  #endScreen::before{ background:CanvasText; forced-color-adjust:none; }
+  .end-gap-fill.p1, .end-gap-fill.p2{ forced-color-adjust:none; }
+  .end-gap-bar::after{ display:none; }
+  .loc.pickable::after{ border-color:Highlight; border-width:4px; }
+  .loc.loc-taken{ border:2px solid CanvasText; }
+  .loc.loc-taken:not(.just-taken)::after{ content:none; }
+  .loc.pickable .tier-row[data-loc],
+  .loc.pickable .tier-row.advanced[data-loc]{
+    border-left:4px solid Highlight;
+    box-shadow:none;
+  }
+  #logPanel > h3, .log-head-n{ border-bottom-color:CanvasText; }
+  #logPanel > h3::before{ forced-color-adjust:none; background:CanvasText; }
+  #log .entry{ border-left-color:CanvasText; }
+  #log .entry:first-child{ border-left-width:4px; }
+  select{ border:1px solid CanvasText; background-image:none; }
 }

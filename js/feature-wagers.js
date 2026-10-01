@@ -117,6 +117,13 @@ const SITE_NEEDS = Object.freeze({
 /* ============================================================ small utils */
 
 function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+/* A number rendered as a string, for a value interpolated into markup. Anything
+   that is not a finite number prints as '0' rather than as whatever string
+   arrived - `esc()` is the escaper for TEXT, this is the one for NUMBERS, and
+   the two are not interchangeable: escaping a price that is already a number
+   does nothing, and printing an unvalidated one without coercing it first is
+   how a wire payload becomes an element. */
+function num(v){ const n = Number(v); return isFinite(n) ? String(n) : '0'; }
 function rnd(){ return Math.random(); }
 function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 function rules(){ return (root.OD && root.OD.Rules) || null; }
@@ -126,7 +133,23 @@ function sfx(recipe){
   try{ if(root.OD && root.OD.Sound && typeof root.OD.Sound.play === 'function') root.OD.Sound.play(recipe); }
   catch(_){ /* audio may be disabled or absent in node */ }
 }
-function esc(s){ return String(s == null ? '' : s); }
+/* An HTML escaper, for real. This used to be `String(s == null ? '' : s)` -
+   a null-coalescer wearing an escaper's name - so every `esc(p.name)` in this
+   file was decorative and a player name reached innerHTML as live markup: a
+   name of `<img src=x onerror=...>` materialised as an element. It is called
+   ONLY at interpolation of an untrusted value into a markup string; the markup
+   this file authors itself (`<b>`, `&mdash;`) is passed through untouched, so
+   the log keeps its formatting. Character-for-character the same helper is
+   declared in js/game.js - the two files share one global scope, so declaring
+   it twice would silently hand this file the engine's copy on the next load. */
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 /* ======================================================== engine bridge */
 
@@ -144,11 +167,18 @@ function state(){ const b = bridge(); return b ? b.getState() : null; }
 function players(){ const st = state(); return (st && Array.isArray(st.players)) ? st.players : null; }
 function me(idx){ const p = players(); return p && idx >= 0 && idx < p.length ? p[idx] : null; }
 
+/* The log line is AUTHORED markup - `<b>`, `&mdash;`, `<em>` - and renderLog
+   paints it with innerHTML, so it is passed through exactly as written. This
+   used to wrap the whole line in esc(), which was a no-op while esc() was the
+   null-coalescer it started life as; now that esc() escapes for real, blanket-
+   escaping here would flatten every log line this file has ever written. The
+   untrusted value is the player name, and every call site below already routes
+   it through esc() at interpolation. */
 function elog(html){
   const b = bridge();
-  if(b && typeof b.log === 'function'){ b.log(esc(html)); return; }
+  if(b && typeof b.log === 'function'){ b.log(html); return; }
   const st = state();
-  if(st && Array.isArray(st.logEntries)) st.logEntries.push(esc(html));
+  if(st && Array.isArray(st.logEntries)) st.logEntries.push(html);
 }
 function epopup(idx, text, good){
   const b = bridge();
@@ -737,16 +767,23 @@ function showBuyModal(buyerIdx, info){
     : ((me(sg.sellerIdx) || {}).name || 'the other player');
   const remote = !!(info && info.remote);
   const buyer = me(buyerIdx);
+  /* The remote path renders from the host's `requestBuySite` payload, so
+     `sg.price` and `sg.tier` are WIRE values here even though the host
+     computes them. Coerced to a number before it reaches markup - a price of
+     `<img src=x onerror=...>` off the socket would otherwise become an element
+     in the guest's modal. */
+  const price = Number(sg.price);
+  const priceText = isFinite(price) ? String(Math.round(price)) : '?';
 
   b.showModal('Contested &mdash; Buy the site?', `
     <p><b>${esc(sellerName)}</b> has drafted the contested <b>${esc(sg.locName || locName(sg.locId))}</b>.</p>
-    <p>Pay <b>${sg.price} Credits</b> to take it at the <b>${esc(sg.tier)}</b> tier.</p>
+    <p>Pay <b>${priceText} Credits</b> to take it at the <b>${esc(sg.tier)}</b> tier.</p>
     <p style="color:var(--muted);font-size:13px">The Credits are <b>burned</b> &mdash; the seller is repaid nothing &mdash; and their draft
     gains nothing either way. That sting is what makes baiting legal.</p>
     ${remote ? '' : `<p style="color:var(--muted);font-size:13px">You hold ${esc(buyer ? buyer.credits : 0)} Credits.</p>`}
     <div class="footer-actions">
       <button class="secondary" id="odWagersBuyNo">Let it stand (price rises)</button>
-      <button id="odWagersBuyYes">Buy it for ${sg.price}</button>
+      <button id="odWagersBuyYes">Buy it for ${priceText}</button>
     </div>
   `);
 
@@ -1123,7 +1160,7 @@ function panelHtml(st){
   if(s.siege){
     const seller = me(s.siege.sellerIdx);
     lines.push(`<span class="wagers-line wagers-siege"><b>SIEGE</b> &mdash; ${esc(seller ? seller.name : '')} holds ` +
-      `${esc(locName(s.siege.locId))}, ${esc(locName(s.siege.locId))} on the block for ${s.siege.price} Credits.</span>`);
+      `${esc(locName(s.siege.locId))}, ${esc(locName(s.siege.locId))} on the block for ${esc(num(s.siege.price))} Credits.</span>`);
   }
   const keys = Object.keys(declarations);
   keys.forEach(k=>{
