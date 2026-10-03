@@ -16,10 +16,13 @@
        OD.Rules.projectSkirmish. The number this file exists to print is the
        MAXIMUM REMAINING ERROR in percentage points.
 
-   D2  js/feature-wagers.js settleWagers walked the two COMMITS (side order)
-       and paid `me(i)` (seat order). They agree only when aggressorIdx === 0,
-       so on roughly half of all Skirmishes the payout and the log line went
-       to the wrong human.
+   D2  js/feature-wagers.js. It used to read: "settleWagers walked the
+       two COMMITS (side order) and paid me(i) (seat order)", and four tests
+       pinned the fix. The mechanic it pinned has since been MEASURED and
+       DELETED (All In / Ghost were worth -1.5 and -2.1 Influence per seat, and
+       the bot's use of them cost it 11%). The four tests now pin the cut
+       instead: the API is gone, the state keys have no writer, and the troop
+       clamp that kept a lying guest honest survived the payouts.
 
    D3  js/game.js OBJECTIVES: archivist read `hand.length >= 5` with
        HAND_CAP === 5 and both players dealt a full hand — guaranteed met for
@@ -367,15 +370,30 @@ function closePct(got, expected, label, eps){
 }
 
 /* ==================================================================
-   D2 — the wager seat.
+   D2 - the wager seats. REWRITTEN AFTER THE CUT.
+
+   THIS BLOCK USED TO PIN THE ALL IN / GHOST PAYOUTS. That mechanic was
+   measured over 1,500+ games and DELETED, not rebalanced: a bot that used
+   it scored 11% WORSE than a bot that ignored it (32.62 vs 36.31 mean
+   Influence per seat), because every stance sat below the baseline of a
+   plain commit. Keeping settleWagers alive to satisfy these four tests
+   would have meant keeping the deleted mechanic alive for its own tests,
+   which is exactly how dead mechanics become permanent.
+
+   So the four tests are now the CUT'S regression guard, at the same count:
+   the removed API is genuinely absent, the removed state keys have no
+   writer, the commit payload no longer carries a stance, and the troop
+   clamp that pinTroops used to provide still holds - because THAT half
+   was defence, not payoff, and dropping it alongside the payouts would
+   have reopened the wire hole it closed.
    ================================================================== */
 
-/* A minimal engine: two players with Influence, and a bridge that only does
-   what settleWagers needs. The feature reads its seat index through `me(idx)`,
-   so the whole defect is reproducible with three objects.
+/* A minimal engine: two players, and a bridge that reports the state. The
+   feature reads its seat index through me(idx), so this is all a commit
+   declaration needs.
 
-   `setBridge()` only installs a FALLBACK - `bridge()` prefers the live
-   OD.WagersBridge that game.js published (and this file defines `window`, so
+   setBridge() only installs a FALLBACK - bridge() prefers the live
+   OD.WagersBridge that game.js published (and this file defines window, so
    there is one). So the fake replaces it for the duration of the call and the
    real bridge is put back immediately. */
 const REAL_BRIDGE = globalThis.OD.WagersBridge;
@@ -384,8 +402,8 @@ function seatHarness(){
   const st = {
     round: 2, logEntries: [],
     players: [
-      {name:'Player 1', influence: 5, betrayal: 0, credits: 0, ore: 0, troops: 1, winStreak: 0},
-      {name:'Player 2', influence: 5, betrayal: 0, credits: 0, ore: 0, troops: 1, winStreak: 0},
+      {name:'Player 1', influence: 5, betrayal: 2, credits: 0, ore: 0, troops: 4, winStreak: 0},
+      {name:'Player 2', influence: 5, betrayal: 2, credits: 0, ore: 0, troops: 4, winStreak: 0},
     ],
   };
   globalThis.OD.WagersBridge = {
@@ -397,107 +415,106 @@ function seatHarness(){
   return st;
 }
 function restoreBridge(){ globalThis.OD.WagersBridge = REAL_BRIDGE; }
-/* settleWagers against the fake seats above, then put the real bridge back. */
-function settle(winnerSide, aggressorIdx, aggCommit, defCommit){
-  try{ return Wagers.settleWagers(winnerSide, aggressorIdx, aggCommit, defCommit); }
-  finally{ restoreBridge(); }
+/* applyCommitDeclaration against the fake seats above, then put the real
+   bridge back. This is the EXACT call game.js's collectCommit makes, with the
+   same four arguments. */
+function declare(playerIdx, extra, troops){
+  try{
+    return Wagers.applyCommitDeclaration(playerIdx, extra, {aggCommit:null, defCommit:null}, troops);
+  } finally{ restoreBridge(); }
 }
 process.on('exit', restoreBridge);
 
-test('D2 settleWagers pays the DECLARING seat, for both aggressor seats', () => {
-  const STANCES = ['allin', 'ghost'];
-  const OUTCOMES = [
-    {name:'aggressor wins', winnerSide: 0},
-    {name:'defender wins',  winnerSide: 1},
-    {name:'tie',            winnerSide:-1},
-  ];
-  [0, 1].forEach(aggSeat=>{
-    STANCES.forEach(stance=>{
-      OUTCOMES.forEach(outcome=>{
-        const st = seatHarness();
-        /* Only the DEFENDER declares, which is the case the report
-           reproduced: Player 2 takes the Garrison, the defender goes ALL IN,
-           Player 2 wins, and the -2 was charged to Player 2 anyway. */
-        const declarer = 1 - aggSeat;
-        const other   = aggSeat;
-        const declaringSide = (declarer === aggSeat) ? 0 : 1;   // 0 = agg, 1 = def
-        st.players[declarer].influence = 5;
-        st.players[other].influence   = 5;
-        const aggCommit = {troops: 3, wager: null};
-        const defCommit = {troops: 1, wager: stance};
+/* Every name here was an OD.Wagers.<name> call site in game.js, and every one
+   of those call sites already sat behind a && OD.Wagers.<name> guard - so
+   their absence makes the engine take its own path rather than fall through to
+   something stale. That is the whole claim of the cut, and it is structural,
+   so it is asserted structurally. */
+const CUT_API = [
+  'settleWagers', 'lockStance', 'pinTroops', 'botTroopShare', 'wagerLabel',
+  'ALL_IN_WIN', 'ALL_IN_LOSS', 'GHOST_WIN',
+  'beforePick', 'onBuySite', 'showGuestBuyOffer', 'botWantsToBuy', 'priceFor',
+];
 
-        /* sides[] order is [aggressor, defender] regardless of seat. */
-        settle(outcome.winnerSide, aggSeat, aggCommit, defCommit);
-
-        const p = st.players;
-        const label = `${stance} ${outcome.name}, aggressor seat ${aggSeat}`;
-        const declarerName = p[declarer].name;
-        const otherName = p[other].name;
-
-        if(outcome.winnerSide === declaringSide){
-          /* The declaring side WON. */
-          const gain = stance === 'allin' ? Wagers.ALL_IN_WIN : Wagers.GHOST_WIN;
-          assert.strictEqual(p[declarer].influence, 5 + gain, `${label}: declarer +${gain}`);
-          assert.strictEqual(p[other].influence, 5, `${label}: the non-declarer is paid nothing`);
-        } else if(outcome.winnerSide === -1){
-          assert.strictEqual(p[0].influence, 5, `${label}: a tie pays nobody`);
-          assert.strictEqual(p[1].influence, 5, `${label}: a tie pays nobody`);
-        } else if(stance === 'allin'){
-          assert.strictEqual(p[declarer].influence, 5 - Wagers.ALL_IN_LOSS,
-            `${label}: the DECLARER pays -${Wagers.ALL_IN_LOSS}`);
-          assert.strictEqual(p[other].influence, 5,
-            `${label}: the non-declarer pays nothing`);
-        } else {
-          assert.strictEqual(p[declarer].influence, 5,
-            `${label}: GHOST risks no Influence`);
-          assert.strictEqual(p[other].influence, 5, `${label}: and nobody else does either`);
-        }
-
-        /* Exactly one line, and it names the DECLARER. Pre-fix it named the
-           seat at the same index as the side - the other player. */
-        assert.strictEqual(st.logEntries.length, 1, `${label}: one log line`);
-        assert.ok(st.logEntries[0].indexOf(declarerName) !== -1,
-          `${label}: the log line must name the declarer (${declarerName}), got: ${st.logEntries[0]}`);
-        void otherName;
-      });
-    });
+test('D2 the wager and Siege API is GONE, not merely unused', () => {
+  CUT_API.forEach(name=>{
+    assert.strictEqual(Wagers[name], undefined,
+      'OD.Wagers.' + name + ' still exists - the cut was not applied');
   });
 });
 
-test('D2 the reported reproduction: Player 2 holds the Garrison and declares ALL IN, then loses', () => {
-  const st = seatHarness();   // aggressorIdx === 1 (Player 2)
-  st.players[0].influence = 6;
-  st.players[1].influence = 6;
-  const aggCommit = {troops: 4, wager: null};          // Player 2, no wager
-  const defCommit = {troops: 1, wager: 'allin'};       // Player 1 declared ALL IN
+test('D2 the Siege state keys have no writer left anywhere', () => {
+  /* sitePrice, siege and contestedLocId were written only by this feature.
+     With it gone they are not set to null - they are never created, which is
+     what keeps three dead keys out of the JSON relay to the online guest
+     instead of shipping them forever. */
+  const wagers = fs.readFileSync(path.join(ROOT, 'js/feature-wagers.js'), 'utf8');
+  ['sitePrice', 'contestedLocId', 'siege'].forEach(k=>{
+    assert.doesNotMatch(wagers, new RegExp("api\\.set\\('" + k + "'"),
+      k + ' is still seeded onto state');
+    assert.doesNotMatch(wagers, new RegExp('st\\.' + k + '\\s*='),
+      'state.' + k + ' is still assigned');
+  });
 
-  /* Player 2 WINS the Skirmish by 1 (paid by resolveSkirmish itself), then
-     Player 1's ALL IN loses. Pre-fix this charged Player 2 the -2. */
-  settle(0, 1, aggCommit, defCommit);
-  assert.strictEqual(st.players[0].influence, 4, 'Player 1 declared ALL IN and lost: -2');
-  assert.strictEqual(st.players[1].influence, 6, 'Player 2 won and declared nothing: untouched');
+  /* And nothing in the RULES_HTML a player can still read advertises it. */
+  assert.doesNotMatch(Wagers.RULES_HTML, /Siege|CONTESTED|Buy It|buy price/,
+    'the rules copy still sells the contested site');
 });
 
-test('D2 GHOST pays the WINNER the +2 even when the winner is not the aggressor', () => {
-  const st = seatHarness();   // aggressorIdx === 1
-  st.players[0].influence = 5;
-  st.players[1].influence = 5;
-  const aggCommit = {troops: 0, wager: 'ghost'};       // Player 2 went GHOST
-  const defCommit = {troops: 1, wager: null};          // Player 1 declared nothing
-  settle(0, 1, aggCommit, defCommit);     // Player 2 (side 0) wins
-  assert.strictEqual(st.players[1].influence, 5 + Wagers.GHOST_WIN,
-    'the +2 GHOST win belongs to the seat that went GHOST (Player 2)');
-  assert.strictEqual(st.players[0].influence, 5, 'and Player 1 gets nothing');
-});
-
-test('D2 an out-of-range aggressorIdx falls back to seat 0 rather than mis-paying', () => {
+test('D2 the commit payload carries no stance, and a plain commit is bare', () => {
+  /* The ordinary commit: no declaration at all. This is the case the whole
+     commit step reduces to now that the stances are gone, and it must still
+     be exactly that - no token charged, no log line, nothing pinned. */
   const st = seatHarness();
-  st.players[0].influence = 5; st.players[1].influence = 5;
-  /* sides = [aggressor, defender]; the fallback puts the aggressor at seat 0,
-     so the defender's ALL IN belongs to seat 1 and is charged there. */
-  settle(0, 7, {troops:1, wager:null}, {troops:1, wager:'allin'});
-  assert.strictEqual(st.players[1].influence, 3, 'seat 1 declared ALL IN and lost: -2');
-  assert.strictEqual(st.players[0].influence, 5, 'and nobody invented a seat 7 to pay');
+  const d = declare(0, null, 2);
+  assert.ok(d, 'a plain commit still goes through the declaration hook');
+  assert.strictEqual(d.wager, undefined, 'there is no stance on the payload');
+  assert.deepStrictEqual(d.betrayal, {plus:false, reroll:false},
+    'a plain commit declares nothing');
+  assert.strictEqual(d.troops, 2, 'and the slider value passes through');
+  assert.strictEqual(st.players[0].betrayal, 2, 'and no token was charged');
+  assert.strictEqual(st.logEntries.length, 0, 'and it says nothing');
+
+  /* A declared +1: the surviving half of the declaration. */
+  const st2 = seatHarness();
+  const d2 = declare(1, {betrayal:{plus:true, reroll:false}}, 1);
+  assert.strictEqual(d2.wager, undefined, 'still no stance');
+  assert.deepStrictEqual(d2.betrayal, {plus:true, reroll:false});
+  assert.strictEqual(st2.players[1].betrayal, 1, 'exactly one token charged');
+  assert.strictEqual(st2.logEntries.length, 1);
+  assert.ok(st2.logEntries[0].indexOf('Player 2') !== -1,
+    'the log line names the declarer, not the seat at the side index');
+});
+
+test('D2 the troop clamp still holds after pinTroops went away', () => {
+  /* The defence pinTroops provided did NOT go with the payouts. A guest
+     claiming 9999 Troops used to be clamped inside the feature; with the
+     feature's clamp gone this clamp is the only thing between that payload
+     and player.troops -= 9999. Both seats, both directions. */
+  [0, 1].forEach(seat=>{
+    const st = seatHarness();
+    const d = declare(seat, null, 9999);
+    assert.strictEqual(d.troops, st.players[seat].troops,
+      'seat ' + seat + ': the claim is clamped to what the seat holds');
+  });
+
+/* The second declaration onwards: seatHarness() installs the fake and
+     declare() puts the real bridge back, so each call needs its own harness
+     (or it would read game.js's real, un-started state and get null). */
+  seatHarness();
+  assert.strictEqual(declare(0, null, 3).troops, 3, 'an honest count is untouched');
+  seatHarness();
+  assert.strictEqual(declare(0, null, -5).troops, 0, 'a negative claim is floored at 0');
+
+  /* NaN is the one that bites: game.js tests typeof wagerDecl.troops ===
+     'number', and NaN IS a number, so a NaN straight through would reach
+     player.troops -= NaN and poison the seat's pool permanently. */
+  seatHarness();
+  assert.strictEqual(declare(0, {troops: 2}, NaN).troops, 2,
+    'a NaN slider falls back to the payload count, never to NaN');
+  seatHarness();
+  assert.strictEqual(declare(0, {}, NaN).troops, 0,
+    'and with no numeric fallback at all it is 0, still never NaN');
 });
 
 /* ==================================================================

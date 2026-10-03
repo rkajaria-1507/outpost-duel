@@ -1,0 +1,1120 @@
+{
+  "version": 2,
+  "engine": {
+    "scriptOrder": [
+      "ext.js",
+      "audio.js",
+      "fx.js",
+      "rules.js",
+      "feature-wagers.js",
+      "feature-chaos.js",
+      "game.js"
+    ],
+    "rounds": 6,
+    "sites": 9
+  },
+  "config": {
+    "seed": 20260903,
+    "games": 600,
+    "seatGames": 150,
+    "diffGames": 200,
+    "ivGames": 250
+  },
+  "tolerances": {
+    "attribution.reconcileMax": {
+      "abs": 0,
+      "why": "integer arithmetic; a nonzero value is a missing hook, not noise"
+    },
+    "attribution.totalPointsPerGame": {
+      "abs": 0.6,
+      "why": "a mean over 600 games, both seats"
+    },
+    "topSite.id": {
+      "abs": 0,
+      "why": "a string: the dominant site changing is checked exactly, never within a tolerance"
+    },
+    "topSite.sharePct": {
+      "abs": 1.5,
+      "why": "share of a ~38,000-point total, 600 games"
+    },
+    "sites.*.sharePct": {
+      "abs": 1.5,
+      "why": "same denominator as the top site"
+    },
+    "combat.sharePct": {
+      "abs": 1.5,
+      "why": "5 Skirmishes a game, each capped by the Fury rung"
+    },
+    "combat.shareOfSitePct": {
+      "abs": 2,
+      "why": "the same quantity over a different denominator; measured 1.4pp of movement"
+    },
+    "combat.fightsPerGame": {
+      "abs": 0.2,
+      "why": "a count of fights per game, not a proportion"
+    },
+    "objectives.*.ratePct": {
+      "abs": 14,
+      "why": "COARSE. n = 200 player-games per objective, and warlord is a threshold on a variable number of fights, so its own sampling error is the widest of the six: 10.7pp measured between seeds. Use the per-objective Wilson interval in section 5 to judge a threshold change, not this gate."
+    },
+    "difficulty.*.meanInfluencePerSeat": {
+      "abs": 1.5,
+      "why": "200 games; the DIFFERENCE between levels is the signal, not the level"
+    },
+    "difficulty.separationPts": {
+      "abs": 2,
+      "why": "a difference of two 200-game means; measured 0.98pp of movement"
+    },
+    "economy.capDiscardEventsPerGame": {
+      "abs": 0.5,
+      "why": "a Poisson count at ~4.7/game"
+    },
+    "economy.unitsDestroyedPerGame": {
+      "abs": 1.2,
+      "why": "a count, but it moves with the whole draft"
+    },
+    "economy.drawsRefusedPerGame": {
+      "abs": 0.6,
+      "why": "a count per game of draws refused by a full hand"
+    },
+    "systems.*.winnerChangedPct": {
+      "abs": 10,
+      "why": "~240 decided games, and the counterfactual is a different trajectory, not a coin re-flip: measured seed-to-seed movement reaches 13pp at half this n"
+    },
+    "leaders.*.meanInfluence": {
+      "abs": 3,
+      "why": "n = 200 player-games per leader"
+    },
+    "seats.*.meanInfluencePerSeat": {
+      "abs": 1.5,
+      "why": "150 games of human-vs-bot and hotseat"
+    }
+  },
+  "headline": {
+    "attribution.reconcileMax": 0,
+    "attribution.totalPointsPerGame": 63.80833333333333,
+    "topSite.id": "outpost",
+    "topSite.sharePct": 45.70980801880632,
+    "sites.outpost.sharePct": 45.70980801880632,
+    "sites.rift.sharePct": 4.15306255713726,
+    "sites.shrine.sharePct": 2.1966827739323493,
+    "sites.market.sharePct": 0,
+    "sites.quarry.sharePct": 0,
+    "sites.garrison.sharePct": 0,
+    "sites.archive.sharePct": 0,
+    "sites.foundry.sharePct": 0,
+    "sites.bazaar.sharePct": 0,
+    "combat.sharePct": 21.561969439728355,
+    "combat.shareOfSitePct": 41.417891726456276,
+    "combat.fightsPerGame": 4.915,
+    "objectives.warlord.ratePct": 45.893719806763286,
+    "objectives.unscathed.ratePct": 8.64864864864865,
+    "objectives.industrialist.ratePct": 74.50980392156863,
+    "objectives.financier.ratePct": 63.72093023255814,
+    "objectives.prospector.ratePct": 36.41304347826087,
+    "objectives.archivist.ratePct": 8.78048780487805,
+    "difficulty.easy.meanInfluencePerSeat": 28.68,
+    "difficulty.normal.meanInfluencePerSeat": 31.84,
+    "difficulty.hard.meanInfluencePerSeat": 33.55,
+    "difficulty.separationPts": 4.87,
+    "economy.capDiscardEventsPerGame": 4.7316666666666665,
+    "economy.unitsDestroyedPerGame": 34.20166666666667,
+    "economy.drawsRefusedPerGame": 2.4183333333333334,
+    "systems.no-combat.winnerChangedPct": 25.10460251046025,
+    "systems.no-objectives.winnerChangedPct": 8.368200836820083,
+    "systems.no-bounty.winnerChangedPct": 12.133891213389122,
+    "systems.no-collapse.winnerChangedPct": 7.949790794979079,
+    "systems.no-surge.winnerChangedPct": 7.531380753138075,
+    "systems.no-rift-influence.winnerChangedPct": 8.368200836820083,
+    "systems.no-intrigue.winnerChangedPct": 10.0418410041841,
+    "leaders.diplomat.meanInfluence": 33.99,
+    "leaders.engineer.meanInfluence": 32.64,
+    "leaders.gambler.meanInfluence": 31.67,
+    "leaders.merchant.meanInfluence": 30.96,
+    "leaders.scholar.meanInfluence": 31.71,
+    "leaders.warmonger.meanInfluence": 30.66,
+    "seats.human-bot.meanInfluencePerSeat": 35.14,
+    "seats.hotseat.meanInfluencePerSeat": 31.47
+  },
+  "topSiteId": "outpost",
+  "full": {
+    "meta": {
+      "seed": 20260903,
+      "games": 600,
+      "seatGames": 150,
+      "diffGames": 200,
+      "ivGames": 250,
+      "rounds": 6,
+      "sites": 9,
+      "scriptOrder": [
+        "ext.js",
+        "audio.js",
+        "fx.js",
+        "rules.js",
+        "feature-wagers.js",
+        "feature-chaos.js",
+        "game.js"
+      ],
+      "note": "Every figure is measured on js/*.js exactly as index.html loads them. No rule is restated here."
+    },
+    "surface": [
+      {
+        "name": "startGame",
+        "exported": true
+      },
+      {
+        "name": "beginRound",
+        "exported": false
+      },
+      {
+        "name": "applyLocationEffect",
+        "exported": false
+      },
+      {
+        "name": "advanceDraftOrSkirmish",
+        "exported": false
+      },
+      {
+        "name": "endRound",
+        "exported": false
+      },
+      {
+        "name": "collectCommit",
+        "exported": false
+      },
+      {
+        "name": "resolveSkirmish",
+        "exported": false
+      },
+      {
+        "name": "humanPick",
+        "exported": false
+      },
+      {
+        "name": "maybeAutoPick",
+        "exported": false
+      },
+      {
+        "name": "botChoosePick",
+        "exported": false
+      },
+      {
+        "name": "botWantsToAttack",
+        "exported": false
+      },
+      {
+        "name": "botChooseTroops",
+        "exported": false
+      },
+      {
+        "name": "botChooseCard",
+        "exported": false
+      },
+      {
+        "name": "getState",
+        "exported": true
+      }
+    ],
+    "baseline": {
+      "label": "baseline (bot vs bot, normal)",
+      "games": 600,
+      "totalPoints": 38285,
+      "totalInfluence": 38285,
+      "reconcile": {
+        "unattributed": 0,
+        "ok": true
+      },
+      "meanInfluencePerSeat": 31.9,
+      "seatInfluence": [
+        31.76,
+        32.05
+      ],
+      "seatWinRatePct": [
+        47,
+        49.333333333333336
+      ],
+      "drawPct": 3.6666666666666665,
+      "sources": [
+        {
+          "key": "skirmish",
+          "label": "Skirmish (winning margin)",
+          "window": "skirmishResolved",
+          "points": 8255,
+          "gross": 8255,
+          "sharePct": 21.561969439728355,
+          "perGame": 13.758333333333333,
+          "events": 2680,
+          "bySeat": [
+            4145,
+            4110
+          ]
+        },
+        {
+          "key": "rift",
+          "label": "The Rift (9th site)",
+          "window": "locationResolved / rift",
+          "points": 1590,
+          "gross": 1590,
+          "sharePct": 4.15306255713726,
+          "perGame": 2.65,
+          "events": 544,
+          "bySeat": [
+            828,
+            762
+          ]
+        },
+        {
+          "key": "surge",
+          "label": "The Surge (Round 6 dice)",
+          "window": "roundBegin",
+          "points": 4178,
+          "gross": 4178,
+          "sharePct": 10.912890165861304,
+          "perGame": 6.963333333333333,
+          "events": 1200,
+          "bySeat": [
+            2046,
+            2132
+          ]
+        },
+        {
+          "key": "objective",
+          "label": "Objectives",
+          "window": "gameEnd",
+          "points": 1940,
+          "gross": 1940,
+          "sharePct": 5.067258717513386,
+          "perGame": 3.2333333333333334,
+          "events": 485,
+          "bySeat": [
+            1004,
+            936
+          ]
+        },
+        {
+          "key": "collapse",
+          "label": "Collapse / Pressure",
+          "window": "roundEnd -6",
+          "points": 0,
+          "gross": 2416,
+          "sharePct": 0,
+          "perGame": 0,
+          "events": 1208,
+          "bySeat": [
+            -44,
+            44
+          ]
+        },
+        {
+          "key": "bounty",
+          "label": "Bounties",
+          "window": "roundEnd +6",
+          "points": 1851,
+          "gross": 1851,
+          "sharePct": 4.834791693874886,
+          "perGame": 3.085,
+          "events": 714,
+          "bySeat": [
+            955,
+            896
+          ]
+        },
+        {
+          "key": "intrigue",
+          "label": "Intrigue (Coup)",
+          "window": "intriguePlayed",
+          "points": 2130,
+          "gross": 2130,
+          "sharePct": 5.563536633146141,
+          "perGame": 3.55,
+          "events": 710,
+          "bySeat": [
+            1131,
+            999
+          ]
+        },
+        {
+          "key": "site:market",
+          "label": "Market",
+          "window": "locationResolved",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "perGame": 0,
+          "events": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "key": "site:quarry",
+          "label": "Quarry",
+          "window": "locationResolved",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "perGame": 0,
+          "events": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "key": "site:garrison",
+          "label": "Garrison",
+          "window": "locationResolved",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "perGame": 0,
+          "events": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "key": "site:outpost",
+          "label": "Outpost",
+          "window": "locationResolved",
+          "points": 17500,
+          "gross": 17500,
+          "sharePct": 45.70980801880632,
+          "perGame": 29.166666666666668,
+          "events": 3476,
+          "bySeat": [
+            8538,
+            8962
+          ]
+        },
+        {
+          "key": "site:archive",
+          "label": "Archive",
+          "window": "locationResolved",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "perGame": 0,
+          "events": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "key": "site:foundry",
+          "label": "Foundry",
+          "window": "locationResolved",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "perGame": 0,
+          "events": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "key": "site:bazaar",
+          "label": "Bazaar",
+          "window": "locationResolved",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "perGame": 0,
+          "events": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "key": "site:shrine",
+          "label": "Shrine",
+          "window": "locationResolved",
+          "points": 841,
+          "gross": 841,
+          "sharePct": 2.1966827739323493,
+          "perGame": 1.4016666666666666,
+          "events": 530,
+          "bySeat": [
+            450,
+            391
+          ]
+        }
+      ],
+      "unattributedPoints": 0,
+      "sites": [
+        {
+          "id": "outpost",
+          "name": "Outpost",
+          "points": 17500,
+          "gross": 17500,
+          "sharePct": 45.70980801880632,
+          "picks": 3476,
+          "advancedPicks": 2648,
+          "advancedSharePct": 76.1795166858458,
+          "draftFreqPct": 16.09259259259259,
+          "influencePerPick": 5.03452243958573,
+          "bySeat": [
+            8538,
+            8962
+          ]
+        },
+        {
+          "id": "rift",
+          "name": "The Rift (9th site)",
+          "points": 1590,
+          "gross": 1590,
+          "sharePct": 4.15306255713726,
+          "picks": 2074,
+          "advancedPicks": 1916,
+          "advancedSharePct": 92.38187078109932,
+          "draftFreqPct": 9.601851851851851,
+          "influencePerPick": 0.7666345226615237,
+          "bySeat": [
+            828,
+            762
+          ]
+        },
+        {
+          "id": "shrine",
+          "name": "Shrine",
+          "points": 841,
+          "gross": 841,
+          "sharePct": 2.1966827739323493,
+          "picks": 530,
+          "advancedPicks": 350,
+          "advancedSharePct": 66.0377358490566,
+          "draftFreqPct": 2.4537037037037037,
+          "influencePerPick": 1.5867924528301887,
+          "bySeat": [
+            450,
+            391
+          ]
+        },
+        {
+          "id": "market",
+          "name": "Market",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "picks": 2501,
+          "advancedPicks": 1858,
+          "advancedSharePct": 74.29028388644542,
+          "draftFreqPct": 11.578703703703704,
+          "influencePerPick": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "id": "quarry",
+          "name": "Quarry",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "picks": 3291,
+          "advancedPicks": 2572,
+          "advancedSharePct": 78.15253722272865,
+          "draftFreqPct": 15.23611111111111,
+          "influencePerPick": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "id": "garrison",
+          "name": "Garrison",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "picks": 3538,
+          "advancedPicks": 2676,
+          "advancedSharePct": 75.63595251554551,
+          "draftFreqPct": 16.37962962962963,
+          "influencePerPick": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "id": "archive",
+          "name": "Archive",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "picks": 1204,
+          "advancedPicks": 851,
+          "advancedSharePct": 70.68106312292359,
+          "draftFreqPct": 5.574074074074074,
+          "influencePerPick": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "id": "foundry",
+          "name": "Foundry",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "picks": 3093,
+          "advancedPicks": 2404,
+          "advancedSharePct": 77.72389266084707,
+          "draftFreqPct": 14.319444444444445,
+          "influencePerPick": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        },
+        {
+          "id": "bazaar",
+          "name": "Bazaar",
+          "points": 0,
+          "gross": 0,
+          "sharePct": 0,
+          "picks": 1893,
+          "advancedPicks": 1612,
+          "advancedSharePct": 85.15583729529847,
+          "draftFreqPct": 8.76388888888889,
+          "influencePerPick": 0,
+          "bySeat": [
+            0,
+            0
+          ]
+        }
+      ],
+      "topSite": {
+        "id": "outpost",
+        "name": "Outpost",
+        "points": 17500,
+        "gross": 17500,
+        "sharePct": 45.70980801880632,
+        "picks": 3476,
+        "advancedPicks": 2648,
+        "advancedSharePct": 76.1795166858458,
+        "draftFreqPct": 16.09259259259259,
+        "influencePerPick": 5.03452243958573,
+        "bySeat": [
+          8538,
+          8962
+        ]
+      },
+      "totalPicks": 21600,
+      "combat": {
+        "points": 8255,
+        "sharePct": 21.561969439728355,
+        "perGame": 13.758333333333333,
+        "shareOfSitePct": 41.417891726456276,
+        "fights": 2949,
+        "fightsPerGame": 4.915,
+        "ties": 263,
+        "tiesPerGame": 0.43833333333333335,
+        "roundsWithSkirmish": 2949,
+        "marginPoints": 8225,
+        "rallyBonuses": 30,
+        "pointsPerFight": 2.789081044421838,
+        "maxStreakSeen": 6,
+        "gamesWithHotStreakPct": 49,
+        "catchingUp": 206,
+        "catchingUpPerGame": 0.34
+      },
+      "economy": {
+        "capDiscardEvents": 2839,
+        "capDiscardEventsPerGame": 4.7316666666666665,
+        "capDiscardUnits": 20333,
+        "capDiscardUnitsPerGame": 33.888333333333335,
+        "unitsDestroyed": 20521,
+        "unitsDestroyedPerGame": 34.20166666666667,
+        "drawsRefused": 1451,
+        "drawsRefusedPerGame": 2.4183333333333334,
+        "finalPools": [
+          {
+            "credits": 7.2,
+            "ore": 4.4,
+            "troops": 2.4
+          },
+          {
+            "credits": 6.8,
+            "ore": 3.9,
+            "troops": 2.4
+          }
+        ],
+        "advancedPicksPerGame": 14.07,
+        "collapsesPerGame": 1.01
+      },
+      "objectives": [
+        {
+          "id": "warlord",
+          "name": "Warlord",
+          "desc": "Win 3 or more Skirmishes.",
+          "bonus": 4,
+          "met": 95,
+          "n": 207,
+          "ratePct": 45.893719806763286,
+          "wilsonLoPct": 39.24178805428312,
+          "wilsonHiPct": 52.69528698214233
+        },
+        {
+          "id": "unscathed",
+          "name": "Unscathed",
+          "desc": "Fight at least one Skirmish and never lose one.",
+          "bonus": 4,
+          "met": 16,
+          "n": 185,
+          "ratePct": 8.64864864864865,
+          "wilsonLoPct": 5.393527943575618,
+          "wilsonHiPct": 13.586188390113568
+        },
+        {
+          "id": "industrialist",
+          "name": "Industrialist",
+          "desc": "Take the Advanced tier 14 or more times.",
+          "bonus": 4,
+          "met": 152,
+          "n": 204,
+          "ratePct": 74.50980392156863,
+          "wilsonLoPct": 68.1145590821063,
+          "wilsonHiPct": 79.9990043238721
+        },
+        {
+          "id": "financier",
+          "name": "Financier",
+          "desc": "End the game with 7 or more Credits.",
+          "bonus": 4,
+          "met": 137,
+          "n": 215,
+          "ratePct": 63.72093023255814,
+          "wilsonLoPct": 57.10521233733415,
+          "wilsonHiPct": 69.85492686837445
+        },
+        {
+          "id": "prospector",
+          "name": "Prospector",
+          "desc": "End the game with 6 or more Ore.",
+          "bonus": 4,
+          "met": 67,
+          "n": 184,
+          "ratePct": 36.41304347826087,
+          "wilsonLoPct": 29.8039712330803,
+          "wilsonHiPct": 43.57785686037717
+        },
+        {
+          "id": "archivist",
+          "name": "Archivist",
+          "desc": "End the game with 5 or more cards in hand, having played at least 3 cards.",
+          "bonus": 4,
+          "met": 18,
+          "n": 205,
+          "ratePct": 8.78048780487805,
+          "wilsonLoPct": 5.626136035599752,
+          "wilsonHiPct": 13.451289151719248
+        }
+      ],
+      "leaders": [
+        {
+          "id": "diplomat",
+          "n": 188,
+          "meanInfluence": 33.99
+        },
+        {
+          "id": "engineer",
+          "n": 192,
+          "meanInfluence": 32.64
+        },
+        {
+          "id": "gambler",
+          "n": 219,
+          "meanInfluence": 31.67
+        },
+        {
+          "id": "merchant",
+          "n": 222,
+          "meanInfluence": 30.96
+        },
+        {
+          "id": "scholar",
+          "n": 190,
+          "meanInfluence": 31.71
+        },
+        {
+          "id": "warmonger",
+          "n": 189,
+          "meanInfluence": 30.66
+        }
+      ]
+    },
+    "seats": [
+      {
+        "id": "human-bot",
+        "label": "Human vs Bot",
+        "games": 150,
+        "meanInfluencePerSeat": 35.14,
+        "seatInfluence": [
+          34.24,
+          36.04
+        ],
+        "seatWinRatePct": [
+          38,
+          56
+        ],
+        "topSiteSharePct": 32.052741415291216,
+        "combatSharePct": 22.18744071333713,
+        "humanCommitsPerGame": 4.52,
+        "humanDecisionsPerGame": 0.39,
+        "humanPicksPerGame": 18,
+        "quietOffersPerGame": 0.07,
+        "quietBreaksPerGame": 0.03
+      },
+      {
+        "id": "hotseat",
+        "label": "hotseat (two scripted humans)",
+        "games": 150,
+        "meanInfluencePerSeat": 31.47,
+        "seatInfluence": [
+          31.13,
+          31.81
+        ],
+        "seatWinRatePct": [
+          45.333333333333336,
+          46.666666666666664
+        ],
+        "topSiteSharePct": 36.84990996716449,
+        "combatSharePct": 11.799597500264802,
+        "humanCommitsPerGame": 6.32,
+        "humanDecisionsPerGame": 4.03,
+        "humanPicksPerGame": 36,
+        "quietOffersPerGame": 0.43,
+        "quietBreaksPerGame": 0.15
+      }
+    ],
+    "difficulty": [
+      {
+        "id": "easy",
+        "label": "difficulty easy",
+        "games": 200,
+        "meanInfluencePerSeat": 28.68,
+        "seatInfluence": [
+          28.6,
+          28.76
+        ],
+        "seatWinRatePct": [
+          47.5,
+          49.5
+        ],
+        "standardError": 0.29,
+        "topSiteSharePct": 45.72873082287308,
+        "combatSharePct": 17.826011157601116,
+        "advancedPicksPerGame": 13.02,
+        "capDiscardEventsPerGame": 4.835,
+        "objectiveMetRatePct": 29.6
+      },
+      {
+        "id": "normal",
+        "label": "difficulty normal",
+        "games": 200,
+        "meanInfluencePerSeat": 31.84,
+        "seatInfluence": [
+          31.78,
+          31.89
+        ],
+        "seatWinRatePct": [
+          45,
+          49.5
+        ],
+        "standardError": 0.32,
+        "topSiteSharePct": 46.15988691691535,
+        "combatSharePct": 20.99104758913146,
+        "advancedPicksPerGame": 14.04,
+        "capDiscardEventsPerGame": 4.73,
+        "objectiveMetRatePct": 40.2
+      },
+      {
+        "id": "hard",
+        "label": "difficulty hard",
+        "games": 200,
+        "meanInfluencePerSeat": 33.55,
+        "seatInfluence": [
+          32.72,
+          34.38
+        ],
+        "seatWinRatePct": [
+          40,
+          55.5
+        ],
+        "standardError": 0.31,
+        "topSiteSharePct": 45.9457445222835,
+        "combatSharePct": 23.20017886421225,
+        "advancedPicksPerGame": 14.86,
+        "capDiscardEventsPerGame": 4.845,
+        "objectiveMetRatePct": 46.2
+      }
+    ],
+    "difficultySeparation": {
+      "from": "hard",
+      "to": "easy",
+      "pts": 4.87,
+      "se": 0.6,
+      "z": 8.12,
+      "reading": "the three levels separate (|z| >= 2)"
+    },
+    "systems": [
+      {
+        "id": "no-combat",
+        "label": "Skirmish system pays 0 Influence",
+        "deletable": true,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 60,
+        "newlyDecided": 11,
+        "stillUndecided": 0,
+        "winnerChangedPct": 25.10460251046025,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 25.11,
+        "pointsPaid": 12556,
+        "meanMarginLostOnFlip": 2.2
+      },
+      {
+        "id": "no-objectives",
+        "label": "Objectives pay 0 Influence",
+        "deletable": true,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 20,
+        "newlyDecided": 7,
+        "stillUndecided": 4,
+        "winnerChangedPct": 8.368200836820083,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 30.43,
+        "pointsPaid": 15216,
+        "meanMarginLostOnFlip": 1.2
+      },
+      {
+        "id": "no-bounty",
+        "label": "Bounties pay 0 Influence",
+        "deletable": true,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 29,
+        "newlyDecided": 9,
+        "stillUndecided": 2,
+        "winnerChangedPct": 12.133891213389122,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 30.36,
+        "pointsPaid": 15181,
+        "meanMarginLostOnFlip": 0.66
+      },
+      {
+        "id": "no-collapse",
+        "label": "Collapse pays 0 Influence",
+        "deletable": true,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 19,
+        "newlyDecided": 11,
+        "stillUndecided": 0,
+        "winnerChangedPct": 7.949790794979079,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 30.94,
+        "pointsPaid": 15470,
+        "meanMarginLostOnFlip": 1.05
+      },
+      {
+        "id": "no-surge",
+        "label": "The Surge pays 0 Influence",
+        "deletable": true,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 18,
+        "newlyDecided": 10,
+        "stillUndecided": 1,
+        "winnerChangedPct": 7.531380753138075,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 28.45,
+        "pointsPaid": 14223,
+        "meanMarginLostOnFlip": 1
+      },
+      {
+        "id": "no-rift-influence",
+        "label": "The Rift pays 0 Influence",
+        "deletable": true,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 20,
+        "newlyDecided": 5,
+        "stillUndecided": 6,
+        "winnerChangedPct": 8.368200836820083,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 30.57,
+        "pointsPaid": 15285,
+        "meanMarginLostOnFlip": 0.45
+      },
+      {
+        "id": "no-intrigue",
+        "label": "the Coup Intrigue card pays 0 Influence",
+        "deletable": true,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 24,
+        "newlyDecided": 6,
+        "stillUndecided": 5,
+        "winnerChangedPct": 10.0418410041841,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 30.14,
+        "pointsPaid": 15069,
+        "meanMarginLostOnFlip": 0.38
+      },
+      {
+        "id": "ban-outpost",
+        "label": "Outpost removed from the board",
+        "deletable": false,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 106,
+        "newlyDecided": 10,
+        "stillUndecided": 1,
+        "winnerChangedPct": 44.35146443514645,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 19.06,
+        "pointsPaid": 9532,
+        "meanMarginLostOnFlip": 1.68
+      },
+      {
+        "id": "ban-shrine",
+        "label": "Shrine removed from the board",
+        "deletable": false,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 119,
+        "newlyDecided": 11,
+        "stillUndecided": 0,
+        "winnerChangedPct": 49.7907949790795,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 31.57,
+        "pointsPaid": 15785,
+        "meanMarginLostOnFlip": 1.27
+      },
+      {
+        "id": "ban-garrison",
+        "label": "Garrison removed (no Skirmish possible)",
+        "deletable": false,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 127,
+        "newlyDecided": 11,
+        "stillUndecided": 0,
+        "winnerChangedPct": 53.13807531380753,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 26.76,
+        "pointsPaid": 13378,
+        "meanMarginLostOnFlip": 3.35
+      },
+      {
+        "id": "ban-rift",
+        "label": "The Rift never opens",
+        "deletable": false,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 116,
+        "newlyDecided": 10,
+        "stillUndecided": 1,
+        "winnerChangedPct": 48.53556485355649,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 31.19,
+        "pointsPaid": 15593,
+        "meanMarginLostOnFlip": 0.43
+      },
+      {
+        "id": "always-attack",
+        "label": "the aggressor always attacks",
+        "deletable": false,
+        "games": 250,
+        "decided": 239,
+        "winnerChanged": 106,
+        "newlyDecided": 11,
+        "stillUndecided": 0,
+        "winnerChangedPct": 44.35146443514645,
+        "meanInfluencePerSeatBase": 31.9,
+        "meanInfluencePerSeatAlt": 33.44,
+        "pointsPaid": 16721,
+        "meanMarginLostOnFlip": 1.43
+      }
+    ],
+    "interventions": [
+      {
+        "id": "none",
+        "label": "baseline (no intervention)",
+        "deletable": false
+      },
+      {
+        "id": "no-combat",
+        "label": "Skirmish system pays 0 Influence",
+        "deletable": true
+      },
+      {
+        "id": "no-objectives",
+        "label": "Objectives pay 0 Influence",
+        "deletable": true
+      },
+      {
+        "id": "no-bounty",
+        "label": "Bounties pay 0 Influence",
+        "deletable": true
+      },
+      {
+        "id": "no-collapse",
+        "label": "Collapse pays 0 Influence",
+        "deletable": true
+      },
+      {
+        "id": "no-surge",
+        "label": "The Surge pays 0 Influence",
+        "deletable": true
+      },
+      {
+        "id": "no-rift-influence",
+        "label": "The Rift pays 0 Influence",
+        "deletable": true
+      },
+      {
+        "id": "no-intrigue",
+        "label": "the Coup Intrigue card pays 0 Influence",
+        "deletable": true
+      },
+      {
+        "id": "ban-outpost",
+        "label": "Outpost removed from the board",
+        "deletable": false
+      },
+      {
+        "id": "ban-shrine",
+        "label": "Shrine removed from the board",
+        "deletable": false
+      },
+      {
+        "id": "ban-garrison",
+        "label": "Garrison removed (no Skirmish possible)",
+        "deletable": false
+      },
+      {
+        "id": "ban-rift",
+        "label": "The Rift never opens",
+        "deletable": false
+      },
+      {
+        "id": "always-attack",
+        "label": "the aggressor always attacks",
+        "deletable": false
+      }
+    ]
+  }
+}

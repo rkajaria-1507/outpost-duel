@@ -4,7 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "node tools/check-scripts.js && node --test \"test/*.test.js\"",
-    "check:scripts": "node tools/check-scripts.js"
+    "check:scripts": "node tools/check-scripts.js",
+    "balance": "node test/balance.sim.js",
+    "balance:check": "node test/balance.sim.js --check"
   },
   "keywords": [],
   "author": "",
