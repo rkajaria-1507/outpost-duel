@@ -139,9 +139,15 @@ test('cardModParts: Onslaught drops to 1 without 2 Credits', () => {
 });
 
 test('cardModParts: Wildcard is 1 die, +1 for the Gambler leader', () => {
+  /* cardModParts reports the CARD's own dice. The base d6 that both seats
+     always roll is not a card and is not counted here - projectSide adds it,
+     which is why a Wildcard side ends up on TWO dice. `rollMode` says HOW the
+     card's dice fold: 'sum' (one die is the sum of one die) or 'max'. There is
+     no third 'single' shape; the old value described a card-only projection
+     that no longer exists. */
   const plain = Rules.cardModParts('wild', {});
   assert.strictEqual(plain.dice, 1);
-  assert.strictEqual(plain.rollMode, 'single');
+  assert.strictEqual(plain.rollMode, 'sum');
   assert.strictEqual(plain.fixed, 0);
 
   const gambler = Rules.cardModParts('wild', {isGambler: true});
@@ -158,12 +164,19 @@ test('cardModParts: Desperate Gambit is the MAX of 2 dice, not the sum', () => {
   const gambler = Rules.cardModParts('gambit', {isGambler: true});
   assert.strictEqual(gambler.fixed, 1);
 
-  /* The whole point: gambit's expected modifier is 161/36 (4.47), which is
+  /* The whole point: gambit's expected MODIFIER is 161/36 (4.47), which is
      what game.js already lists as CARD_DEFS.gambit.avg. If it were the sum
-     of two dice the answer would be 7. */
+     of two dice the answer would be 7, and if it were the minimum the answer
+     would be 91/36 (2.53).
+
+     The mean of the WHOLE SIDE also carries the base d6 both seats always
+     roll, so the card's contribution is read as `mean - E_D6`. Subtracting
+     the base die rather than dropping it is the point: the projection must
+     never report a Skirmish with no die in it. */
   const p = Rules.projectSide({troops: 0, cardId: 'gambit'});
-  close(p.mean, 161 / 36);
-  assert.notStrictEqual(p.mean, 7);
+  close(p.mean - Rules.E_D6, 161 / 36);
+  assert.notStrictEqual(p.mean - Rules.E_D6, 91 / 36);
+  assert.notStrictEqual(p.mean - Rules.E_D6, 7);
 });
 
 test('cardModParts: unknown card throws instead of silently returning 0', () => {
@@ -172,33 +185,64 @@ test('cardModParts: unknown card throws instead of silently returning 0', () => 
 
 /* ------------------------------------------------------------ projection */
 
-test('projectSide: no card, no dice - a single spike', () => {
+/* >>> DEFECT 1 (the severe one). These tests used to assert that a side with
+   >>> NO card has `dist === [1]`, `min === max === base` and `dice === 0` -
+   >>> i.e. that a Skirmish has no die in it. It does: resolveSkirmish rolls
+   >>> one d6 for both seats every fight. The old assertions pinned that bug,
+   >>> which is how the commit modal's "YOUR ODDS" panel could print WIN 100%
+   >>> and TIE 100% for a 1-Troop-vs-1-Troop fight while the engine went on to
+   >>> roll - worth up to 41.7 points of win probability, on 14 of the 16
+   >>> Tactic cards that supply no dice of their own. They now assert the
+   >>> ground truth: at least one d6, always. */
+test('projectSide: NO card still rolls the base d6 - a side is never a fixed total', () => {
   const p = Rules.projectSide({troops: 3});
-  assert.deepStrictEqual(p.dist, [1]);
-  assert.strictEqual(p.mean, 3);
-  assert.strictEqual(p.min, 3);
-  assert.strictEqual(p.max, 3);
+  assert.strictEqual(Rules.BASE_DICE, 1, 'both seats roll exactly one base die');
+  assert.deepStrictEqual(p.dist, Rules.diceDist(1));
+  assert.strictEqual(p.dice, 1);
+  assert.strictEqual(p.rollMode, 'sum');
+  assert.strictEqual(p.base, 3);
+  assert.strictEqual(p.min, 4, '3 troops + a 1');
+  assert.strictEqual(p.max, 9, '3 troops + a 6');
+  assert.strictEqual(p.mean, 3 + 3.5);
   assert.strictEqual(p.fixedBonus, 0);
-  assert.strictEqual(p.dice, 0);
 });
 
-test('projectSide: Wildcard spans 1..6 around a fixed base', () => {
+test('projectSide: Wildcard is the base d6 PLUS its own, summed - two dice', () => {
   const p = Rules.projectSide({troops: 2, cardId: 'wild'});
   assert.strictEqual(p.base, 2);
-  assert.strictEqual(p.min, 3);
-  assert.strictEqual(p.max, 8);
+  assert.strictEqual(p.min, 4, '2 troops + 1 + 1');
+  assert.strictEqual(p.max, 14, '2 troops + 6 + 6');
   close(sum(p.dist), 1);
-  close(p.mean, 2 + 3.5);
-  assert.strictEqual(p.dist.length, 6);
+  close(p.mean, 2 + 7, 1e-9, 'base d6 + Wildcard d6 = E[2d6] = 7');
+  assert.strictEqual(p.dice, 2, 'card dice are ADDITIONAL to the base die');
+  assert.strictEqual(p.rollMode, 'sum');
+  assert.strictEqual(p.dist.length, 11);
+  /* A sum of two dice has the classic 2d6 peak at 7 and dead weight below 2,
+     neither of which a lone d6 has - so this is not the old card-only
+     six-entry uniform vector. */
+  assert.strictEqual(p.dist.indexOf(Math.max(...p.dist)), 5);
+  close(p.dist[0], 1 / 36, 1e-12, 'double ones');
+  close(p.dist[10], 1 / 36, 1e-12, 'double sixes');
 });
 
-test('projectSide: Gambit uses the max distribution', () => {
+test('projectSide: Gambit is base d6 + max-of-2d6 - THREE dice, a composite', () => {
   const p = Rules.projectSide({troops: 2, cardId: 'gambit'});
-  assert.strictEqual(p.min, 3);
-  assert.strictEqual(p.max, 8);
-  close(p.mean, 2 + 161 / 36);
-  /* identical shape to maxDiceDist(2) */
-  Rules.maxDiceDist(2).forEach((v, i) => close(p.dist[i], v, 1e-12));
+  assert.strictEqual(p.dice, 3, 'one base die plus the two Gambit chooses between');
+  /* A genuine composite is neither 'sum' nor 'max', and saying so is what
+     stops a caller folding it as if it were one of the two. */
+  assert.strictEqual(p.rollMode, null);
+  assert.strictEqual(p.min, 4, '2 troops + 1 + max(1,1)');
+  assert.strictEqual(p.max, 14, '2 troops + 6 + max(6,6)');
+  close(p.mean, 2 + 3.5 + 161 / 36, 1e-9);
+  assert.strictEqual(p.dist.length, 11, 'a 6-entry max folded onto a 6-entry d6');
+  close(sum(p.dist), 1);
+  /* And it really is NEITHER of the two single-group shapes. */
+  const maxOnly = Rules.maxDiceDist(2);
+  const sumOnly = Rules.diceDist(3);
+  assert.ok(!p.dist.every((v, i) => Math.abs(v - (maxOnly[i] || 0)) < 1e-12),
+    'the composite is not a bare max-of-2');
+  assert.ok(!p.dist.every((v, i) => Math.abs(v - (sumOnly[i] || 0)) < 1e-12),
+    'the composite is not a sum of 3');
 });
 
 test('projectSide: Gambler leader adds a fixed +1 to a die card', () => {
@@ -209,19 +253,22 @@ test('projectSide: Gambler leader adds a fixed +1 to a die card', () => {
 });
 
 test('projectSide: fizzle lowers the projection, not just the card', () => {
-  /* Onslaught with 0 Credits resolves as +1, so the whole side is 2 troops
-     + 1 = a flat 3. Pay the 2 Credits and it becomes a flat 6. */
+  /* Onslaught with 0 Credits resolves as +1, so the side is 2 troops + 1 and
+     then the base d6 on top: totals 4..9. Pay the 2 Credits and it becomes
+     2 troops + 4 + d6: totals 7..12. The DIE IS STILL THERE either way - the
+     old version of this test asserted min === max, which was the bug. */
   const broke = Rules.projectSide({troops: 2, cardId: 'onslaught', credits: 0});
   assert.strictEqual(broke.card.fizzled, true);
   assert.strictEqual(broke.fixedBonus, 1);
-  assert.strictEqual(broke.min, 3);
-  assert.strictEqual(broke.max, 3);
-  close(broke.mean, 3);
+  assert.strictEqual(broke.min, 4);
+  assert.strictEqual(broke.max, 9);
+  close(broke.mean, 6.5);
 
   const paid = Rules.projectSide({troops: 2, cardId: 'onslaught', credits: 2});
   assert.strictEqual(paid.card.fizzled, false);
   assert.strictEqual(paid.fixedBonus, 4);
-  assert.strictEqual(paid.max, 6);
+  assert.strictEqual(paid.min, 7);
+  assert.strictEqual(paid.max, 12);
 });
 
 /* ============================== FURY LADDER (G7) ==========================
@@ -267,11 +314,16 @@ test('Fury ladder: Skirmish Fever lifts every rung to a cap of 6', () => {
 });
 
 test('Fury bonus and a card modifier add up, they do not replace one another', () => {
-  /* base = troops + Fury + card, so every component is visible in min/max. */
+  /* base = troops + Fury + card, so every component is independently visible in
+     base; the die then rides on top of that floor, identically. A regression
+     that replaced rather than added would show up as base ===
+     max(troops+fury, troops+card). */
   const p = Rules.projectSide({troops: 2, winStreak: 3, cardId: 'berserker'});
+  assert.strictEqual(p.base, 9);            // 2 troops + Fury 2 + Berserker 5
   assert.strictEqual(p.fixedBonus, 2 + 5);
-  assert.strictEqual(p.min, 2 + 2 + 5);
-  assert.strictEqual(p.max, 2 + 2 + 5);
+  assert.strictEqual(p.min, 10, 'base + the lowest die');
+  assert.strictEqual(p.max, 15, 'base + the highest die');
+  close(p.mean, 9 + 3.5);
 });
 
 /* ============================ CATCHING UP (G7) ============================ */
@@ -336,25 +388,39 @@ test('Catching Up: it can flip a loss into a win and a loss into a tie, which is
    of every reachable outcome, not against a hand-copied number. */
 
 test('headToHead: matches a brute-force enumeration even on a SKEWED distribution', () => {
-  /* 3 troops + Wildcard (1 die, 4..9) vs 2 troops + Desperate Gambit
-     (max of 2d6). 6 * 36 = 216 equally likely outcomes. */
+  /* 3 troops + Wildcard (base d6 + the card's own d6, SUMMED) vs 2 troops +
+     Desperate Gambit (base d6 + max of 2d6). Six faces on my two dice and
+     six * six on theirs: 6 * 6 * 6 * 6 * 6 * 6 = 7,776 equally likely
+     outcomes. The enumeration below is the ENGINE's rule written out by hand -
+     total = d6 + troops + cardMod - nothing else - which is the only
+     definition of "correct" worth testing against.
+
+     This is the same test the file already had, with the enumeration widened:
+     the old version enumerated 216 outcomes on a Wildcard worth ONE die and a
+     Gambit worth two, i.e. it pinned the projection that had no base die in
+     it (defect 1). */
   const mine = Rules.projectSide({troops: 3, cardId: 'wild'});
   const theirs = Rules.projectSide({troops: 2, cardId: 'gambit'});
   const h = Rules.headToHead(mine, theirs, 4);
 
   const faces = d => Array.from({length: 6}, (_, i) => i + 1);
   let w = 0, t = 0, l = 0;
-  faces().forEach(m => faces().forEach(a => faces().forEach(b => {
-    const mineTotal = 3 + m;
-    const theirTotal = 2 + Math.max(a, b);
+  faces().forEach(m1 => faces().forEach(m2 => faces().forEach(g => faces().forEach(g2 => faces().forEach(g3 => {
+    const mineTotal = 3 + m1 + m2;
+    const theirTotal = 2 + g + Math.max(g2, g3);
     if(mineTotal > theirTotal) w++; else if(mineTotal === theirTotal) t++; else l++;
-  })));
+  })))));
+  assert.strictEqual(w + t + l, 7776);
 
-  close(h.winPct, w / 216 * 100, 1e-9, 'win');
-  close(h.tiePct, t / 216 * 100, 1e-9, 'tie');
-  close(h.losePct, l / 216 * 100, 1e-9, 'lose');
-  /* The pre-fix figure was 74.54% - assert we are nowhere near it. */
+  close(h.winPct,  w / 7776 * 100, 1e-9, 'win');
+  close(h.tiePct,  t / 7776 * 100, 1e-9, 'tie');
+  close(h.losePct, l / 7776 * 100, 1e-9, 'lose');
+  /* Two independent traps this must not fall into: the mirrored-convolution
+     answer (74.5% pre-fix) and the die-less projection (which reported 100%
+     here). The true figure is a near coin flip: 44.2%. */
   assert.ok(h.winPct < 50, 'not the mirrored-convolution answer');
+  assert.ok(h.winPct > 30, 'not the die-less answer');
+  assert.strictEqual(w, 3437);
 });
 
 test('headToHead: swapping the two sides swaps the three percentages', () => {
@@ -422,70 +488,126 @@ test('headToHead: identical sides are symmetric', () => {
   const h = Rules.headToHead(side, side, 4);
   close(h.winPct, h.losePct, 1e-9, 'two identical sides win and lose equally often');
   close(h.winPct + h.tiePct + h.losePct, 100, 1e-9);
-  /* Six equally likely faces: 6 of 36 ordered pairs tie, the other 30 split
-     evenly, so tie 1/6 and win = lose = 5/12. Note win is *larger* than tie -
-     a tie is a single point of measure, whereas every non-tie pair is a
-     "difference", so the two are not comparable at 1:1. */
-  close(h.tiePct, 100 / 6, 1e-9);
-  close(h.winPct, 500 / 12, 1e-9);
-  /* Ties pay nothing, but the non-tie pairs do: P(margin === m) is
-     (6-m)/36, so E[min(margin, 4)] = (5 + 8 + 9 + 8 + 4)/36 = 34/36. */
-  close(h.ev, 34 / 36, 1e-9);
+  /* Both sides are 2 troops + 2 summed dice, so there are 36 * 36 = 1,296
+     equally likely ordered outcomes. P(the two 2d6 sums are equal) =
+     sum(count_s^2) / 36^2 = (1+4+9+16+25+36+25+16+9+4+1) / 1296 = 146/1296,
+     and the 1,150 non-tied outcomes split evenly: 575 each way.
+     Note win > tie, as always - a tie is one point of measure whereas every
+     non-tie pair is a "difference", so the two are not comparable at 1:1. */
+  close(h.tiePct, 14600 / 1296, 1e-9);
+  close(h.winPct, 57500 / 1296, 1e-9);
+  /* E[min(margin, 4)] over the same 1,296 pairs = 1526/1296. */
+  close(h.ev, 1526 / 1296, 1e-9);
 });
 
 test('headToHead: hand-checked - 3 troops against 2 troops + a Wildcard', () => {
-  /* theirs = 2 + d6, so mine (a flat 3) can never win. It ties only on a
-     1, and that tie pays nothing. */
+  /* mine = 3 + d6 (totals 4..9, one sixth each); theirs = 2 + two summed dice
+     (totals 4..14, triangular over 36). Enumerated below rather than
+     hand-tallied: the old version of this test enumerated a DIE-LESS enemy,
+     which reported a flat 0% / 16.7% / 83.3% for a fight the engine decides
+     with a roll - the defect this file's sibling tests also pinned. */
   const mine = Rules.projectSide({troops: 3});
   const theirs = Rules.projectSide({troops: 2, cardId: 'wild'});
   const h = Rules.headToHead(mine, theirs, 4);
-  close(h.winPct, 0);
-  close(h.tiePct, 100 / 6, 1e-9);
-  close(h.losePct, 500 / 6, 1e-9);
-  close(h.ev, 0);
-  assert.strictEqual(h.threshold, 7, 'no die can lift a fixed 3 past 2+d6');
+  let w = 0, t = 0, l = 0, ev = 0;
+  const f = [1,2,3,4,5,6];
+  f.forEach(m => f.forEach(a => f.forEach(b => {
+    const margin = (3 + m) - (2 + a + b);
+    if(margin > 0){ w++; ev += Math.min(margin, 4); } else if(margin === 0) t++; else l++;
+  })));
+  assert.strictEqual(w + t + l, 216);
+  assert.strictEqual(w, 35, 'the enumerated win count, so the fractions are pinned');
+  close(h.winPct,  w / 216 * 100, 1e-9);
+  close(h.tiePct,  t / 216 * 100, 1e-9);
+  close(h.losePct, l / 216 * 100, 1e-9);
+  close(h.ev, ev / 216, 1e-9);
+  /* My floor is 3 and their EXPECTED total is 2 + E[2d6] = 9, so a 6 is the
+     first face that reaches it. Quoted as the engine computes it: their mean
+     lands on 8.999999999999998 (the distribution sums to 1 - 2e-16), so
+     `3 + 6 > mean` is literally true and thresholdToBeat answers 6. Note this
+     is the "beat their MEAN" reading of the number, which is optimistic for a
+     side as wide as two summed dice - the win rate here is 16%, not 17% -
+     but that sentence's framing is unchanged by this fix and out of its scope. */
+  assert.strictEqual(h.threshold, 6);
 });
 
-test('headToHead: hand-checked threshold - Wildcard vs Wildcard needs a 4', () => {
-  /* Both sides: 2 troops + Wildcard. base = 2, their mean = 5.5.
-     2 + 4 = 6 > 5.5, so a 4 is the first face that beats their expected
-     total; 2 + 3 = 5 does not. */
-  const mine = Rules.projectSide({troops: 2, cardId: 'wild'});
-  const theirs = Rules.projectSide({troops: 2, cardId: 'wild'});
+test('headToHead: hand-checked threshold - Wildcard vs Wildcard needs a 5', () => {
+  /* Both sides roll two summed dice. Mine: base 6. Theirs: 4 troops + 2 summed
+     dice, expected total 4 + 7 = 11. 6 + 4 = 10 does NOT clear 11; 6 + 5 = 11
+     is not strictly greater either; 6 + 6 = 12 is. So the smallest winning
+     face is 5 - one of the six faces wins outright, which is what
+     thresholdSentence() turns into its "N of 6 faces win outright" count. */
+  const mine = Rules.projectSide({troops: 6, cardId: 'wild'});
+  const theirs = Rules.projectSide({troops: 4, cardId: 'wild'});
   const h = Rules.headToHead(mine, theirs, 4);
-  assert.strictEqual(h.threshold, 4);
-  assert.strictEqual(h.thresholdBest, 7, 'their best case is 8, and 2+6=8 is not strictly greater');
-  close(h.theirMean, 5.5);
-  close(h.theirMax, 8);
+  assert.strictEqual(h.threshold, 5);
+  /* Their BEST possible total is 4 + 6 + 6 = 16. thresholdToBeat only ever
+     contemplates ONE extra die, and 6 + 6 = 12 does not clear 16, so it
+     honestly reports 7 - unchanged behaviour, new projection. */
+  assert.strictEqual(h.thresholdBest, 7);
+  close(h.theirMean, 11);
+  assert.strictEqual(h.theirMax, 16);
 });
 
 test('headToHead: threshold is 0 when I already lead on average', () => {
-  const mine = Rules.projectSide({troops: 6});
-  const theirs = Rules.projectSide({troops: 2, cardId: 'wild'});   // totals 3..8
+  /* base = 6 troops + Fury 3 = 9, and their expected total is
+     1 troop + d6 + max-of-2d6 = 1 + 3.5 + 4.4722 = 8.9722. 9 > 8.9722, so
+     no die is needed to lead on average and thresholdToBeat answers 0. */
+  const mine = Rules.projectSide({troops: 6, winStreak: 4});
+  const theirs = Rules.projectSide({troops: 1, cardId: 'gambit'});
   const h = Rules.headToHead(mine, theirs, 4);
-  assert.strictEqual(h.threshold, 0, 'a flat 6 is already past their expected 5.5');
-  /* 6 beats 3, 4 and 5 - three of their six faces, and ties the fourth. */
-  close(h.winPct, 50);
-  close(h.tiePct, 100 / 6, 1e-9);
+  assert.strictEqual(h.threshold, 0, 'a floor of 9 is already past their expected 8.97');
+  /* Enumerated over my 6 faces against their 6 * 6 * 6 (the base d6 plus the
+     two Gambit chooses between) = 1,296 equally likely outcomes - the only
+     honest way to state a three-dice skew. */
+  let w = 0, t = 0, l = 0;
+  const f = [1,2,3,4,5,6];
+  f.forEach(m => f.forEach(g => f.forEach(g2 => f.forEach(g3 => {
+    const mm = (9 + m) - (1 + g + Math.max(g2, g3));
+    if(mm > 0) w++; else if(mm === 0) t++; else l++;
+  }))));
+  assert.strictEqual(w + t + l, 1296);
+  close(h.winPct,  w / 1296 * 100, 1e-9);
+  close(h.tiePct,  t / 1296 * 100, 1e-9);
+  close(h.losePct, l / 1296 * 100, 1e-9);
 });
 
 test('headToHead: ev respects the Influence cap', () => {
   const mine = Rules.projectSide({troops: 9, cardId: 'berserker'});   // 14 fixed
-  const theirs = Rules.projectSide({troops: 1});                      // 1 fixed
-  /* every outcome wins by >= 12, so ev must equal the cap exactly */
+  const theirs = Rules.projectSide({troops: 1});                      // 1 + d6
+  /* every outcome wins by >= 8, so ev must equal the cap exactly */
   const capped = Rules.headToHead(mine, theirs, 4);
   close(capped.ev, 4);
   close(Rules.headToHead(mine, theirs, 6).ev, 6);
 });
 
 test('headToHead: ev counts real margins below the cap', () => {
-  /* mine = 3 + d6 (totals 4..9, one sixth each), theirs = a flat 1.
-     Margins are 3..8; with a cap of 4 that is 3,4,4,4,4,4 -> 23/6. */
+  /* mine = 3 + two summed dice (totals 5..15), theirs = 1 + d6 (2..7).
+     6 * 6 * 6 = 216 equally likely outcomes, enumerated rather than
+     hand-tallied - a sum of two dice has 11 entries, two of them at 1/36. */
   const mine = Rules.projectSide({troops: 3, cardId: 'wild'});
   const theirs = Rules.projectSide({troops: 1});
+  const evAt = (cap)=>{
+    let ev = 0, n = 0;
+    const f = [1,2,3,4,5,6];
+    f.forEach(a => f.forEach(b => f.forEach(d => {
+      const margin = (3 + a + b) - (1 + d);
+      /* A LOSS pays nothing and a TIE pays nothing: headToHead accumulates
+         ev over winning margins only, and an EV that counted the negative
+         side of the fight would be describing a different game. */
+      if(margin > 0) ev += Math.min(margin, cap);
+      n++;
+    })));
+    assert.strictEqual(n, 216);
+    return ev / 216;
+  };
   const h = Rules.headToHead(mine, theirs, 4);
-  close(h.ev, 23 / 6, 1e-9);
-  close(h.winPct, 100);
+  close(h.ev, evAt(4), 1e-9);
+  close(h.ev, 743 / 216, 1e-9, 'the enumerated figure, pinned');
+  close(Rules.headToHead(mine, theirs, 6).ev, evAt(6), 1e-9);
+  /* The OUTCOME does not depend on the cap: 206 of the 216 pairs win, 6 tie
+     and 4 are a loss. The old die-less "flat 100%" assertion is gone. */
+  assert.strictEqual(h.winPct, 100 * 206 / 216);
 });
 
 test('headToHead: probabilities always total 100', () => {

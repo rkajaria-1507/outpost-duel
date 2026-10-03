@@ -419,26 +419,49 @@ function lockStance(commit, playerIdx){
   }
 }
 
-/* Resolution. winnerIdx is 0 or 1, or -1 for a tie. Nothing here re-decides
-   who won: it only pays out the pledges the engine already settled. */
-function settleWagers(winnerIdx, aggCommit, defCommit){
+/* Resolution. `winnerSide` is 0 or 1, or -1 for a tie - it is a SIDE (0 =
+   aggressor's commit, 1 = defender's commit), NOT a seat. `aggressorIdx` is
+   the SEAT of the aggressor, and it has to be passed in explicitly: deriving
+   the seat from the side index is what used to pay the wrong player.
+
+   THE DEFECT THIS SIGNATURE IS ABOUT. `sides = [aggCommit, defCommit]` is in
+   side order, so `i` in the loop below is a side. It was being fed straight
+   into `me(i)`, which indexes `state.players` by SEAT. The two only agree
+   when `aggressorIdx === 0`, so on roughly half of all Skirmishes the payout
+   went to the wrong human: Player 2 takes the Garrison, declares ALL IN,
+   loses the fight, and pays nothing - while Player 1, who won, is charged the
+   -2 (or, in GHOST, handed the loser's +2). The log line named the wrong
+   player too. Nothing about the pledge is ambiguous; only the index was.
+
+   Nothing here re-decides who won: it only pays out the pledges the engine
+   already settled. */
+function settleWagers(winnerSide, aggressorIdx, aggCommit, defCommit){
   const st = state();
   if(!st) return;
+  const ps = players();
+  /* A seat is only a seat if it is one of the two. Falling back to 0 is the
+     historical behaviour and is exactly right for the only caller that used to
+     exist; a wrong-but-valid seat is the bug being fixed, so it is rejected
+     rather than guessed. */
+  const aggSeat = (typeof aggressorIdx === 'number' && aggressorIdx >= 0 && aggressorIdx < (ps ? ps.length : 0))
+    ? aggressorIdx : 0;
+  const seats = [aggSeat, 1 - aggSeat];
   const sides = [aggCommit, defCommit];
-  for(let i = 0; i < 2; i++){
-    const commit = sides[i];
+  for(let side = 0; side < 2; side++){
+    const commit = sides[side];
     if(!commit || !commit.wager) continue;
+    const i = seats[side];
     const p = me(i);
     if(!p) continue;
     const label = wagerLabel(commit.wager);
 
-    if(winnerIdx === i){
+    if(winnerSide === side){
       const gain = commit.wager === 'allin' ? ALL_IN_WIN : GHOST_WIN;
       p.influence += gain;
       elog(`<b>${esc(p.name)} ${label} and takes the Skirmish</b> &rarr; <b>+${gain} Influence</b>.`);
       epopup(i, `+${gain} Influence (${label})`, true);
       sfx('influence.gain');
-    } else if(winnerIdx === -1){
+    } else if(winnerSide === -1){
       elog(`${esc(p.name)} declared ${label} &mdash; a tie pays nothing. The pledge is simply dead.`);
     } else if(commit.wager === 'allin'){
       const before = Math.max(0, p.influence | 0);
@@ -862,7 +885,17 @@ function resolveQuiet(aggressorIdx){
   const p = me(aggressorIdx);
   if(!p) return;
 
+  let answered = false;
   const decide = (yes)=>{
+    /* >>> D4: ONE answer. This is the same double-fire class as the engine's
+       >>> Commit button (see js/game.js showCommitModal): both answer buttons
+       >>> are one-shot, and the second click arrived after `quietPending` had
+       >>> been cleared and a Skirmish had already been started - so it spent a
+       >>> SECOND Betrayal token and re-entered startSkirmishCommit underneath
+       >>> the first, replacing `skirmishCtx` mid-chain. The latch is the
+       >>> load-bearing guard; the disables below make it visible. */
+    if(answered) return;
+    answered = true;
     quietPending = null;
     if(yes && spendForce(aggressorIdx)){ b.startSkirmishCommit(aggressorIdx, 1 - aggressorIdx); return; }
     elog(`<b>Quiet Round</b> silences the Skirmish this round - no combat, no matter who holds the Garrison.`);
@@ -889,8 +922,10 @@ function resolveQuiet(aggressorIdx){
   `);
   const yes = document.getElementById('odWagersQuietYes');
   const no  = document.getElementById('odWagersQuietNo');
-  if(no) no.onclick = ()=>{ b.hideModal(); decide(false); };
-  if(yes) yes.onclick = ()=>{ b.hideModal(); decide(true); };
+  /* The buttons go dead on the first click as well as latching, so the fix is
+     visible to the player rather than merely silent. */
+  if(no) no.onclick = ()=>{ b.hideModal(); if(no) no.disabled = true; if(yes) yes.disabled = true; decide(false); };
+  if(yes) yes.onclick = ()=>{ b.hideModal(); if(no) no.disabled = true; if(yes) yes.disabled = true; decide(true); };
 }
 
 /* Guest-side rendering of the host's Quiet-Round offer. Answers with the

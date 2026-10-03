@@ -52,7 +52,9 @@ const CARD_MODS = Object.freeze({
   undermine: {mod: 0, opponentMod: -2},
   sabotage:  {mod: 1},
   insight:   {mod: 2},
-  wild:      {mod: null, dice: 1, rollMode: 'single'},
+  /* `dice` / `rollMode` describe the CARD'S OWN dice only. The base d6 both
+     seats always roll is NOT part of a card - see BASE_DICE in projectSide. */
+  wild:      {mod: null, dice: 1, rollMode: 'sum'},
   /* Desperate Gambit keeps the HIGHER of two d6, so its expected modifier
      is E[max of 2d6] = 161/36 = 4.4722, NOT 91/36 = 2.5277 (that is the
      expected MINIMUM, i.e. the "bad roll" case). game.js lists it as
@@ -109,6 +111,56 @@ function maxDiceDist(nDice){
   return out;
 }
 
+/* --------------------------------------------------- composing dice groups */
+
+/* A die group is one of the two shapes above, tagged with the value its index
+   0 carries: a `diceDist(n)` group has offset n (index i is the total i + n), a
+   `maxDiceDist(n)` group has offset 1 (index t is the maximum t + 1). Keeping
+   the offset with the group is what stops the two conventions from being mixed
+   up at the seam. */
+function dieGroup(nDice, mode){
+  const n = Math.max(1, Math.floor(nDice) || 1);
+  return (mode === 'max')
+    ? {dist: maxDiceDist(n), offset: 1, mode: 'max', dice: n}
+    : {dist: diceDist(n),  offset: n, mode: 'sum', dice: n};
+}
+
+/* Sum INDEPENDENT die groups into one distribution, e.g. the base d6 plus a
+   Wildcard's d6 (a sum of 2) or the base d6 plus Desperate Gambit's max-of-2
+   (a three-dice composite). Each group is built by diceDist / maxDiceDist -
+   this only adds them together, which is the same `i + j` accumulation
+   headToHead already performs on two finished distributions.
+
+   Index arithmetic: a group entry at local index k has value k + g.offset, so
+   a pair (i, j) lands at i + j and the combined offset is the SUM of the group
+   offsets. Returns `compose`: 'sum' when every group is a sum (the shape the
+   whole side adds up as), 'max' when a single max group IS the whole side, and
+   null for any genuine composite - which is exactly the 'sum' | 'max' | null
+   shape projectSide reports as `rollMode`. */
+function combineDice(groups){
+  const list = (groups || []).filter(g => g && Array.isArray(g.dist));
+  if(!list.length) return {dist:[1], offset:0, compose:'sum'};
+  let dist = [1], offset = 0, hasMax = false, allSum = true;
+  for(const g of list){
+    const next = new Array(dist.length + g.dist.length - 1);
+    for(let k = 0; k < next.length; k++) next[k] = 0;
+    for(let i = 0; i < dist.length; i++){
+      if(!dist[i]) continue;
+      for(let j = 0; j < g.dist.length; j++){
+        if(!g.dist[j]) continue;
+        next[i + j] += dist[i] * g.dist[j];
+      }
+    }
+    dist = next;
+    offset += g.offset;
+    if(g.mode === 'max') hasMax = true; else allSum = true;
+  }
+  let compose;
+  if(hasMax) compose = (list.length > 1) ? null : 'max';   // composite vs a lone max
+  else compose = allSum ? 'sum' : null;
+  return {dist, offset, compose};
+}
+
 /* ----------------------------------------------------------------- cards */
 
 /* Break a Tactic card's combat modifier into a deterministic part and a
@@ -138,6 +190,8 @@ function cardModParts(cardId, opts){
   const isAggressor = !!o.isAggressor;
   const isGambler = !!o.isGambler;
 
+  /* `dice` here is the CARD's own dice. The base d6 is not a card and is not
+     counted here - projectSide adds it. */
   const out = {
     fixed: 0, dice: 0, fizzle: null, reducesTo: null,
     fizzled: false, rollMode: null, opponentMod: def.opponentMod || 0,
@@ -226,8 +280,30 @@ function catchingUp(aggTotal, defTotal, aggStreak, defStreak){
 
 /* -------------------------------------------------------------- projection */
 
+/* THE BASE DIE. resolveSkirmish() casts one d6 for BOTH seats every single
+   Skirmish - `aggRoll` and `defRoll` - and adds it to the committed total:
+
+     total = d6 + troops + cardMod + fury + betrayal + garrison
+
+   A projection that forgets that die is not a conservative estimate, it is a
+   DIFFERENT GAME: with no die in the distribution `dist` collapses to [1] and
+   the panel reports a deterministic 100% / 0% / 0% while the engine goes on
+   to roll. That was worth up to 41.7 points of win-probability on an ordinary
+   no-card commit (14 of the 16 Tactic cards supply no dice at all), and it is
+   why the commit modal could print "WIN 100%" next to the honest sentence
+   "no single die can get you there".
+
+   Card dice are ADDITIONAL to this one, never a replacement for it:
+     no card           1 die                       -> diceDist(1)
+     Wildcard          base d6 + its own d6, summed -> 2 dice, diceDist(2)
+     Desperate Gambit  base d6 + max of 2d6         -> 3 dice, a composite
+   Anything that wanted to describe "no dice at all" was describing a Skirmish
+   the engine cannot produce. */
+const BASE_DICE = 1;
+
 /* Full outcome distribution for one side of a Skirmish.
-   total = committed troops + Fury bonus + `bonus` + card modifier + dice
+   total = committed troops + Fury bonus + `bonus` + card modifier + BASE_DICE
+   + any dice the card adds
 
    `bonus` is a caller-supplied flat addition for the PUBLIC modifiers that
    are not the card: the Advanced Garrison +1 and a declared Betrayal +1
@@ -253,21 +329,19 @@ function projectSide(spec){
 
   const fixedBonus = fury.bonus + num(s.bonus, 0) + (card ? card.fixed : 0);
   const base = troops + fixedBonus;
-  const dice = card ? card.dice : 0;
 
-  let dist, min, diceMean;
-  if(dice === 1){
-    dist = diceDist(1);      // indices 0..5 are faces 1..6
-    min = 1; diceMean = E_D6;
-  } else if(dice === 2){
-    dist = maxDiceDist(2);   // indices 0..5 are maxima 1..6
-    min = 1; diceMean = E_MAX_2D6;
-  } else {
-    dist = [1];
-    min = 0; diceMean = 0;
-  }
+  /* >>> THE DIE IS NEVER OPTIONAL. The base d6 is always in the distribution
+     and a card's dice ride on top of it. */
+  const groups = [dieGroup(BASE_DICE, 'sum')];
+  if(card && card.dice > 0) groups.push(dieGroup(card.dice, card.rollMode));
+  const rolled = combineDice(groups);
 
+  const dist = rolled.dist;
+  const min = rolled.offset;
   const max = min + dist.length - 1;
+  const diceMean = expect(dist, min);
+  const dice = groups.reduce((n, g) => n + g.dice, 0);
+
   return {
     dist,
     mean: base + diceMean,
@@ -276,9 +350,14 @@ function projectSide(spec){
     fixedBonus,
     /* extras consumed by headToHead */
     base, dice, troops,
+    /* The value the dice contribute on an average roll, and the lowest /
+       highest total they can produce on their own. The log line the engine
+       prints ("rolls 4 + 3 troops + Ambush(2) = 9") and this projection are
+       now answering from the same numbers. */
+    diceMean, diceMin: min, diceMax: max,
     /* The Fury rung this side walked in on: `bonus` is folded into
-       fixedBonus above, and `cap` is the Influence ceiling that applies to
-       the Skirmish this side is about to fight. */
+       fixedBonus above, and `cap` is the Influence ceiling that applies to the
+       Skirmish this side is about to fight. */
     fury,
     winStreak: fury.streak,
     /* DEPRECATED ALIAS, kept on purpose. feature-wagers.js corrects this
@@ -291,7 +370,9 @@ function projectSide(spec){
        alias reports the streak bonus already baked into `base`, which makes
        the patch a genuine no-op instead of a silent double count. */
     momentum: fury.bonus,
-    rollMode: card ? card.rollMode : null,
+    /* 'sum' | 'max' | null - null for a genuine composite (Desperate
+       Gambit), which is neither a plain sum nor a plain max-of-N. */
+    rollMode: rolled.compose,
     card: card || null,
   };
 }
@@ -463,10 +544,12 @@ function thresholdSentence(threshold){
 }
 
 const Rules = Object.freeze({
-  diceDist, maxDiceDist, cardModParts, projectSide, headToHead,
+  diceDist, maxDiceDist, dieGroup, combineDice, cardModParts, projectSide, headToHead,
   projectSkirmish, thresholdSentence,
   /* the Fury ladder + Catching Up, as the single source of truth */
   furyFor, furyCap, catchingUp, CATCHING_UP, FURY_FEVER_CAP,
+  /* the die both seats always roll. NEVER 0 for a live Skirmish. */
+  BASE_DICE,
   CARD_MODS, E_D6, E_MAX_2D6,
 });
 

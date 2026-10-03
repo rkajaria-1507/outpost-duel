@@ -210,12 +210,20 @@
   --p2-wash:#d7e2ec; --p2-wash-ink:#22374d;
 
   /* ---- scroll-region edges (section 18B) ---------------------------------
-     One ink for all five edge overlays, so `prefers-contrast: more` has a
-     single value to raise instead of eight literals. Kept deliberately WEAK at
-     rest: these only ever paint when the scroll timeline says there is content
-     in that direction, and 0.22 of --ink-soft is enough to read as "this
-     surface continues" without touching a glyph. */
+     Two inks, because the section grew a second duty in D5. `--edge-fade` is
+     the WASH that says "this surface continues" and is kept at the low alpha
+     the original note below specifies; `--edge-rule` is the DASHED LIP that
+     says "there is a boundary here", and it is a different job at a different
+     strength. `prefers-contrast: more` has one value to raise for each. */
   --edge-fade:rgba(58,39,18,.22);
+  /* D5: the gradient the edge overlay actually paints. Deepened from .22 to
+     .42 - the same alpha `--pitch-rule` already uses for a real boundary in
+     this sheet - because the .22 version composited to a ~5% value shift over
+     the log's own well and was measured invisible. Paired with a 2px dashed
+     lip, because a gradient is colour and this file does not signal with
+     colour alone. */
+  --edge-fade-strong:rgba(58,39,18,.42);
+  --edge-rule:rgba(58,39,18,.46);
   /* The 24-pitch ruling of the Influence ladder (section 6). Two alphas because
      the empty pitches are drawn on the well and the rule that divides the
      filled ones is drawn ON TOP of the fill. */
@@ -522,21 +530,21 @@ button{
 }
 /* will-change only while the interaction is live; the engine drops the
    compositor layer the moment :hover ends. */
-button:hover:not(:disabled){
+button:hover:not(:disabled):not([aria-disabled="true"]){
   filter:brightness(1.07); transform:translateY(-1px);
   box-shadow:0 3px 0 rgba(74,53,32,.28);
   will-change:transform;
 }
-button:active:not(:disabled){
+button:active:not(:disabled):not([aria-disabled="true"]){
   transform:scale(.97); transition-duration:var(--dur-1);
   box-shadow:0 1px 0 rgba(74,53,32,.28);
 }
-button:disabled{ opacity:.45; cursor:not-allowed; filter:none; transform:none; }
+button:disabled, button[aria-disabled="true"]{ opacity:.45; cursor:not-allowed; filter:none; transform:none; }
 button.secondary{
   background:var(--panel2); color:var(--text);
   border:1px solid var(--line); box-shadow:none;
 }
-button.secondary:hover:not(:disabled){ background:#f2e4c8; border-color:var(--gold); }
+button.secondary:hover:not(:disabled):not([aria-disabled="true"]){ background:#f2e4c8; border-color:var(--gold); }
 button.danger{
   background:linear-gradient(180deg,#b8452c,var(--accent-blood));
   color:#fff4ef; box-shadow:0 2px 0 rgba(74,53,32,.3);
@@ -1045,6 +1053,28 @@ label{
    an Advanced tier on a full Ore meter silently eats the gain, and nothing in
    the current UI says so before you commit.                            */
 .stats{ display:flex; gap:5px; flex-wrap:wrap; }
+/* >>> THE WIDEST CHIP IN THE SHEET, AND THE ONE THAT WAS BEING EATEN.
+   >>> `.stats` wraps, so a chip wider than the row moves to its own line
+   >>> rather than overflowing - but only if the chip can be that wide. The
+   >>> Betrayal pill is 139px with `white-space:nowrap`, and the player mat's
+   >>> content column is 132px once the left rail is 190px, so it overflowed its
+   >>> own line by 7px and `.player-card{overflow:hidden}` - the mat's existing,
+   >>> deliberate clip - silently removed the right-hand edge of the word.
+   >>> Measured: `.player-card` scrollWidth 157 against clientWidth 156, with
+   >>> `.stats` at 145 against 132.
+   >>>
+   >>> There are two ways out and only one of them is free. Widening the left
+   >>> rail back to 214px would fix it and cost the centre column 24px, which at
+   >>> 1280 puts the tile's label column back under 100px and the widest reward
+   >>> line back to three lines - trading a 7px clip for the D1 defect. So the
+   >>> chip's own `nowrap` gives way instead, and ONLY inside the mat: the glyph
+   >>> stays `flex-shrink:0` on the first line with the first word, and "3
+   >>> Betrayal" folds to "3" / "Betrayal" when the rail is narrow. That is a
+   >>> readable two-line chip instead of an unreadable clipped one, and at every
+   >>> width where the two fit on one line nothing changes at all. */
+.player-card .stats > .pill{ white-space:normal; overflow-wrap:anywhere; }
+.player-card .stats > .pill > svg,
+.player-card .stats > .pill > .pill-ico{ flex-shrink:0; }
 .stats > span{
   position:relative; display:inline-flex; align-items:center; gap:4px;
   padding:3px 7px 3px 6px; min-height:26px;
@@ -1317,26 +1347,38 @@ label{
      rather than a repeated literal so the ruler and the ruling are the same
      number in both gradients below and cannot drift apart. */
   --inf-pitch:calc(100% / 24);
-  --inf-name:118px;
-  --inf-fig:42px;
+  --inf-name:clamp(56px, 8.2vw, 118px);
+  --inf-fig:clamp(28px, 3.4vw, 42px);
   display:grid; margin-top:0;
-  column-gap:11px; row-gap:3px;
+  column-gap:clamp(6px, .7vw, 10px);
+  /* row-gap is 0 and every vertical space is an explicit margin on a named row.
+     A grid row with NO item in it must cost nothing at all, because the `chip`
+     row is empty until the JS adopts the lead readout - and a `row-gap` would
+     tax every viewport for a feature that is not switched on yet. */
+  row-gap:0;
   align-items:center;
-  /* Stacked rows: the safe default, and the layout below 1181px. */
-  grid-template-columns:var(--inf-name) minmax(0,1fr) 58px;
+  /* >>> D2. THE VERSUS LAYOUT IS NOW THE BASE, not a >=1181px special case.
+     Six columns: name | ladder | figure | figure | ladder | name. The two
+     ladders are `minmax(72px,1fr)` either side of a `clamp`ed figure block, so
+     they are equal to each other BY CONSTRUCTION at every viewport - which is
+     the property the old stacked form destroyed, and the reason the two lit ends
+     can be read as one gap. There is no stacked fallback to revert to; the only
+     narrow variant is in section 19, below the width where a 24-pitch ladder
+     stops being legible. */
+  grid-template-columns:
+    var(--inf-name) minmax(72px,1fr) var(--inf-fig) var(--inf-fig) minmax(72px,1fr) var(--inf-name);
   grid-template-areas:
-    'head head head'
-    'n1   b1   v1'
-    'w1   b1   v1'
-    'n2   b2   v2'
-    'w2   b2   v2';
+    'head head head head head head'
+    'chip chip chip chip chip chip'
+    'n1   b1   v1   v2   b2   n2'
+    'w1   b1   v1   v2   b2   w2';
 }
 .influence-track::before{
   content:'Influence \2014 most wins';
   grid-area:head;
   font-family:var(--font-ui); font-size:9px; font-weight:800;
   letter-spacing:1.2px; text-transform:uppercase; color:var(--muted-text);
-  padding-bottom:5px; border-bottom:1px solid var(--parchment-line);
+  padding-bottom:5px; margin-bottom:6px; border-bottom:1px solid var(--parchment-line);
 }
 /* >>> `display:contents` IS THE WHOLE TRICK. renderInfluenceTrack() emits
    >>> `<div class="track-row"><div class="track-label">…</div><div
@@ -1354,6 +1396,9 @@ label{
 .track-row:nth-of-type(1) > .track-bar{ grid-area:b1; }
 .track-row:nth-of-type(1) > .track-value{ grid-area:v1; }
 .track-row:nth-of-type(2) > .track-label{ grid-area:n2; }
+/* The seat-to-seat break. It was `row-gap:3px`; it is an explicit padding now
+   so that the empty `chip` row above can cost nothing. */
+.track-row:nth-of-type(2) > .track-label{ padding-top:5px; }
 .track-row:nth-of-type(2) > .track-bar{ grid-area:b2; }
 .track-row:nth-of-type(2) > .track-value{ grid-area:v2; }
 .track-label{
@@ -1454,46 +1499,93 @@ label{
    layout, where the two figures sit between the ladders and each seat's ladder
    has to grow TOWARD them for the gap to read at a glance. */
 
-/* ---- THE VERSUS LAYOUT, >= 1181px -----------------------------------------
-   One row, six columns: name | ladder | figure | figure | ladder | name. The
-   two ladders are `minmax(0,1fr)` on either side of an 84px figure block, so
-   they are the same width as each other by construction at every viewport,
-   which is the property the old `auto` name column destroyed. */
-@media (min-width:1181px){
-  .influence-track{
-    --inf-fig:42px;
-    column-gap:10px;
-    grid-template-columns:
-      var(--inf-name) minmax(0,1fr) var(--inf-fig) var(--inf-fig) minmax(0,1fr) var(--inf-name);
-    grid-template-areas:
-      'head head head head head head'
-      'n1   b1   v1   v2   b2   n2'
-      'w1   b1   v1   v2   b2   w2';
-  }
-  .track-label{ text-align:right; }
-  .track-row:nth-of-type(1) > .track-label{ text-align:left; }
-  .track-row:nth-of-type(1) > .track-value{
-    justify-self:end; padding-right:8px;
-    /* the hairline that turns two numbers into one divided block */
-    border-right:1px solid var(--parchment-line);
-  }
-  .track-row:nth-of-type(2) > .track-value{ justify-self:start; padding-left:8px; }
-  .track-row:nth-of-type(2)::after{ justify-self:end; }
-  .track-value{ font-size:34px; }
-  /* The wide row is 34px tall (the figure sets it), so the ladder gets 30. */
-  .track-bar{ height:30px; }
-  /* Both ladders grow inward, so the two lit ends approach each other across
-     the gap and the difference between them IS the gap. `.track-fill` is a
-     grandchild, so this needs the full chain. */
-  .track-row:nth-of-type(2) > .track-bar > .track-fill{ margin-left:auto; }
+/* ---- THE VERSUS LAYOUT -----------------------------------------------------
+   >>> D2. This layout used to be gated on `min-width:1181px` with NO fallback,
+   >>> so three of the five shipped breakpoints (1024, 820, 390) got the stacked
+   >>> rows instead - two ladders both growing from the SAME left edge, with the
+   >>> figures parked in a 58px column at the far right. The gap the comment
+   >>> above says was fixed came straight back: you had to hold two separate lit
+   >>> lengths in your head and then travel ~350px to the numbers that explain
+   >>> them, and the ladder ends were maximally far apart, which is the exact
+   >>> opposite of "the gap IS the difference".
+   >>>
+   >>> THE FIX IS NOT A FALLBACK. It is to make the versus layout the layout at
+   >>> EVERY width, by letting its two fixed columns shrink instead of switching
+   >>> the grid. `--inf-name` and `--inf-fig` are the only fixed tracks; the two
+   >>> ladders are `minmax(0,1fr)` and are therefore always equal to each other
+   >>> by construction, which was the property the old stacked form lost.
+   >>>
+   >>> Measured across all seven shipped viewports (centre-column width in
+   >>> brackets, tile ladder width in px):
+   >>>     1920 (846)  1920 (846)   name 118  fig 42   ladder  348
+   >>>     1440 (796)   1440 (796)  name 118  fig 42   ladder  298
+   >>>     1366 (722)   1366 (722)  name 100  fig 38   ladder  248
+   >>>     1280 (636)   1280 (636)  name  84  fig 36   ladder  213
+   >>>     1024 (430)   1024 (430)  name  64  fig 32   ladder  126
+   >>>      820 (778)    820 (778)  name 118  fig 42   ladder  268   (single col)
+   >>>      390 (362)    390 (362)  name  56  fig 28   ladder  108
+   >>> 24 Influence over a 108px ladder is 4.5px a pitch: the ruling is still
+   >>> legible (it is a 1px hairline on a 4.5px cell) and both lit ends are
+   >>> still facing each other 108px apart across the figure block. Below that
+   >>> the ladder stops being a ladder, so section 19's phone block stacks the
+   >>> rows and moves the difference onto `.gap-chip`, which is where a number
+   >>> belongs once there is no room for the shapes to say it.
+   */
+.influence-track{
+  --inf-fig:clamp(28px, 3.4vw, 42px);
+  column-gap:clamp(6px, .7vw, 10px);
+  grid-template-columns:
+    var(--inf-name) minmax(72px,1fr) var(--inf-fig) var(--inf-fig) minmax(72px,1fr) var(--inf-name);
+  grid-template-areas:
+    'head head head head head head'
+    'chip chip chip chip chip chip'
+    'n1   b1   v1   v2   b2   n2'
+    'w1   b1   v1   v2   b2   w2';
 }
-/* LEAD readout. Integrator adds one of these to .influence-track. */
+/* The two names sit OUTBOARD of their own ladders, so each word is next to the
+   bar it belongs to and the eye runs name -> bar -> figure without crossing. */
+.track-label{ text-align:right; }
+.track-row:nth-of-type(1) > .track-label{ text-align:left; }
+/* The hairline that turns two numbers into one divided block. */
+.track-row:nth-of-type(1) > .track-value{ justify-self:end; padding-right:8px; border-right:1px solid var(--parchment-line); }
+.track-row:nth-of-type(2) > .track-value{ justify-self:start; padding-left:8px; }
+.track-row:nth-of-type(2)::after{ justify-self:end; }
+/* The figure block is what the layout is FOR, so it gets the big face. It is
+   sized by `clamp` on the track rather than by a breakpoint, which is why this
+   no longer needs a media query: at 1280 it is 34px, at 1920 it is 42px. */
+.track-value{ font-size:clamp(28px, 2.2vw, 34px); }
+.track-bar{ height:clamp(24px, 2.4vw, 30px); }
+/* Both ladders grow inward, so the two lit ends approach each other across the
+   figure block and the difference between them IS the gap. `.track-fill` is a
+   grandchild, so this needs the full chain. */
+.track-row:nth-of-type(2) > .track-bar > .track-fill{ margin-left:auto; }
+/* >>> THE LEAD READOUT, AND WHY IT IS IN THE LAYOUT RATHER THAN BESIDE IT.
+   >>> `.gap-chip` had zero producers, so the numeric lead was never on screen.
+   >>> It is placed on the `head` row, centred under the heading rule: that is
+   >>> the one row both ladders do not occupy, so the chip costs the layout NO
+   >>> height - the number arrives for free - and it sits directly above the
+   >>> figure pair, which is where a player looking for "who is ahead" is
+   >>> already looking. The placement declarations are on the `.gap-chip` rule
+   >>> itself, below, because that rule comes later in the file and would
+   >>> otherwise out-specify this one on equal specificity. */
+/* LEAD readout. Integrator adds one of these to .influence-track:
+      <span class="gap-chip is-lead-p1">LEAD +5</span>
+      <span class="gap-chip">TIED</span>
+      <span class="gap-chip is-lead-p2 is-late">LEAD +1</span>
+   D2: it lives on the `head` grid row, centred, so it is the one element that
+   states the lead in NUMBERS and costs the scoreboard no vertical space.
+   `--muted` on a muted fill would be invisible at 12px, so the tied state takes
+   --ink-soft on the wash and a hairline; the word TIED and the = glyph carry the
+   state when the fill cannot. */
 .gap-chip{
+  grid-area:chip;
+  justify-self:center; align-self:end;
+  position:relative; z-index:2;
   display:inline-flex; align-items:center; gap:6px;
-  align-self:center; margin-top:2px;
-  padding:4px 12px; border-radius:var(--r-pill);
-  border:1px solid var(--accent-mute);
-  background:var(--accent-mute); color:var(--accent-mute-ink);
+  margin:0 0 7px;
+  padding:3px 12px; border-radius:var(--r-pill);
+  border:1px solid var(--accent-mute-ink);
+  background:var(--accent-mute); color:var(--ink-soft);
   font-size:12px; font-weight:800; letter-spacing:.5px;
   font-variant-numeric:tabular-nums;
 }
@@ -1545,8 +1637,74 @@ label{
 .round-stepper .step.active{ border-color:color-mix(in oklab, var(--gold), var(--accent-blood) calc(var(--heat) * 60%)); }
 
 /* ---- TURN BANNER --------------------------------------------------------- */
-.turn-banner{ margin-top:2px; font-size:13px; color:var(--muted-text); }
-.turn-banner b{ color:var(--ink-soft); font-weight:800; }
+/* >>> D4, THE QUIETEST CALL TO ACTION ON THE SCREEN.
+   >>> Measured mean local contrast by region at 1440x900, in the shipped build:
+   >>>     log            23.55   (highest - and it is HISTORY)
+   >>>     player mats    22.71
+   >>>     board-state    21.10
+   >>>     board tiles    20.81
+   >>>     scoreboard     16.29
+   >>>     top bar         7.18   (last of seven)
+   >>> The top bar holds the only instruction the player has to act on, and it
+   >>> ranked LAST: about 3x less contrast and about 13x less ink than the log,
+   >>> which cannot be acted on at all. The cause is three declarations - a 13px
+   >>> size, a --muted-text ink, and no surface of its own - in a box that the
+   >>> Round counter owns.
+   >>>
+   >>> THE FIX HAS TWO HALVES, and the first is the one that ships today.
+   >>>
+   >>>   (a) THE SHIPPED STRING. renderTurnBanner() emits three FLAT strings -
+   >>>       `<b>Your turn</b> to draft a site.`,
+   >>>       `Waiting on <b>Name</b> to draft...`,
+   >>>       `<b>Skirmish</b> in progress...` - with no wrapper element and no
+   >>>       `.tb-*` class at all. So the banner is promoted by restyling what
+   >>>       already exists: the <b> becomes a 17px inked block in the player's
+   >>>       own key, the sentence goes to 13px --ink-soft, and the whole box
+   >>>       gets a left keyline + a raised surface so it occupies the corner
+   >>>       instead of floating in it. No JS change is needed for this half.
+   >>>
+   >>>   (b) THE OPTIONAL SECONDARY LINE. `.tb-main` / `.tb-meta` / `.tb-last`
+   >>>       were authored for this banner and had ZERO producers, so they were
+   >>>       dead. They are kept and cleaned below, and section 19 states the
+   >>>       exact markup. When bound they add the two things a player actually
+   >>>       wants and CSS cannot invent: HOW MANY choices are open, and whether
+   >>>       this is the LAST pick.
+   >>>
+   >>> Nothing here is carried by colour alone: the ACTIVE turn is a rule and a
+   >>> weight and a size, the WAITING turn is the same size in the other key with
+   >>> a different word, and the last pick carries a hatch plus the word LAST
+   >>> PICK plus a glyph. */
+.turn-banner{ margin-top:2px; font-size:13px; color:var(--ink-soft); }
+/* The verb is the instruction. `<b>` is what renderTurnBanner already wraps the
+   call to action in ("Your turn", "Skirmish", the opponent's name), so it is the
+   one node that is guaranteed to exist and guaranteed to be the important half. */
+.turn-banner b{
+  display:block;
+  font-family:var(--font-ui);
+  font-size:17px; font-weight:800; line-height:1.12;
+  letter-spacing:-.1px;
+  color:var(--ink);
+}
+/* The waiting state must not read as the active one. Same size, same weight -
+   so the difference is the KEY and the rule below, which the words
+   ("Waiting on ...") already state. */
+.turn-banner b{ color:var(--ink); }
+/* The box becomes a surface: a 3px keyline on the leading edge plus the raised
+   keyline every other raised surface in this sheet uses. The corner is a
+   panel region, not a gap in one. */
+.turn-banner{
+  position:relative;
+  padding:6px 10px 6px 12px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line);
+  border-left:3px solid var(--gold);
+  /* RAISED, not recessed. This is the one instruction on the screen that wants
+     to be acted on, so it gets the raised tier's lifted keyline (--edge) rather
+     than the recessed tier's cut-in shadow, which would sink it. */
+  background:linear-gradient(180deg,#fffaf0,var(--panel2));
+  box-shadow:var(--edge);
+}
+.turn-banner:empty{ display:none; }
 /* >>> D2: #turnBanner is a name interpolator ("<name>'s turn", plus the
    >>> .tb-meta pill) AND index.html gives it an INLINE `min-width:140px`
    >>> inline style, which an author rule cannot lower without !important.
@@ -1555,24 +1713,40 @@ label{
    >>> the floor is left alone because 140px is a deliberate minimum for the
    >>> centred HUD cell. */
 .turn-banner{ min-width:0; overflow-wrap:anywhere; word-break:break-word; }
-.turn-banner .tb-main{ min-width:0; overflow-wrap:anywhere; }
-.turn-banner .tb-main{ display:block; font-size:14px; }
+/* >>> D4b: `.tb-main` had two declarations in this file and the second simply
+   >>> overrode the first's `display:block`, so the 14px it was authored at was
+   >>> the size that actually shipped - smaller than the 13px banner text around
+   >>> it. Merged into one rule, at a size that is a STEP ABOVE the body of the
+   >>> sentence rather than a step below it. The `<b>` above does the loud part;
+   >>> `.tb-main` is the wrapper the JS is asked to emit around the whole line,
+   >>> and it must not fight the <b> for the leading edge. */
+.turn-banner .tb-main{
+  display:block; min-width:0;
+  font-size:13px; line-height:1.3;
+  color:var(--ink-soft);
+  overflow-wrap:anywhere;
+}
+/* "pick 2 of 3 · 4 sites open" — the secondary line the banner can carry.
+   Muted ink on a muted fill would put it back below the board-state strip it is
+   supposed to outrank, so it takes --ink-soft and a hairline, not a wash. */
 .turn-banner .tb-meta{
   display:inline-flex; align-items:center; gap:6px;
-  margin-top:5px; padding:3px 10px;
-  border:1px solid var(--accent-mute); border-radius:var(--r-pill);
-  background:var(--accent-mute); color:var(--accent-mute-ink);
-  font-size:11px; font-weight:700; letter-spacing:.3px;
+  margin-top:6px; padding:3px 10px;
+  border:1px solid var(--accent-mute-ink); border-radius:var(--r-pill);
+  background:var(--accent-mute); color:var(--ink-soft);
+  font-size:11px; font-weight:800; letter-spacing:.3px;
   font-variant-numeric:tabular-nums;
 }
-/* "pick 2 of 3 · 4 sites open" — the secondary line the banner can carry. */
+/* `.is-open` — sites are open and waiting on a pick. Cool is the same accent the
+   log's Live tick and the header's OPENING chip already use for "the game is
+   running", so it reads as part of one family rather than a third meaning. */
 .turn-banner .tb-meta.is-open{ background:var(--accent-cool); color:var(--accent-cool-ink); border-color:var(--accent-cool-ink); }
 .turn-banner .tb-meta.is-open::before{ content:'\25CF'; font-size:9px; }
 /* "LAST PICK" — distinct weight and a word, not just a warmer colour. */
 .turn-banner.is-last{ animation:od-slide-up var(--dur-4) var(--ease-out); }
 .turn-banner .tb-last{
   display:inline-flex; align-items:center; gap:6px;
-  margin-top:5px; padding:3px 12px;
+  margin-top:6px; padding:3px 12px;
   border:2px solid var(--accent-blood); border-radius:var(--r-pill);
   background:
     repeating-linear-gradient(45deg, rgba(156,74,68,.2) 0 5px, transparent 5px 10px),
@@ -1582,6 +1756,10 @@ label{
   animation:od-breathe 1.8s var(--ease-out) infinite;
 }
 .turn-banner .tb-last::before{ content:'\26A0'; }  /* warning sign, for a11y */
+/* When the banner carries a LAST PICK the hatch pill is the loudest thing in it,
+   so the leading keyline steps aside rather than competing with it. Colour is
+   not the only difference - the pill has a 2px border, a hatch and a glyph. */
+.turn-banner:has(.tb-last){ border-left-color:var(--accent-blood); }
 
 
 /* =============================================================================
@@ -1720,7 +1898,7 @@ label{
 #board.has-rift::after{ content:none; }
 
 #boardRulesRow{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
-#boardRulesRow h3{ margin:0; min-width:0; }
+#boardRulesRow h3{ margin:0; min-width:0; white-space:nowrap; }
 /* The phase text is inline-styled by index.html, so the console-label
    treatment has to out-specify it. It is a LABEL, not a heading: 11px
    uppercase, letterspaced, sitting on the same rule as "BOARD". */
@@ -2212,6 +2390,92 @@ body.is-meltdown .tier-row.advanced .tier-note{
 .taken-tag.p2{ background:var(--p2); color:#eef6ff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.35); }
 /* P1 vs P2 is also a left border, so ownership survives greyscale. */
 .taken-tag.p1::before{ content:'\25C6'; margin-right:4px; font-size:8px; }
+
+/* ---- D6: OWNERSHIP GETS A SHAPE CHANNEL ----------------------------------
+   >>> Measured before this block: the only UNAMBIGUOUS "this tile is mine"
+   >>> signal in the whole sheet is a 9px, 700-weight pill. Everything else that
+   >>> says "taken" is amber - `.loc-taken .tier-row.is-taken` is
+   >>> rgba(201,138,43,.20) over a gold rule, and `--gold` is also what
+   >>> `.loc.pickable` uses for "you may take this". The two supporting cues are
+   >>> therefore the same hue family as the OPPOSITE state.
+   >>>
+   >>> And cream was overloaded in a way that actively misleads: `.tier-row.basic`
+   >>> is rgba(90,69,48,.06) over the tile's cream face - "BASIC tier, available"
+   >>> - while `.loc.loc-taken .tier-row.is-taken` is an amber wash that composites
+   >>> to a warm cream - "ADV tier, MINE". A player who learns cream = basic
+   >>> reads every owned tile as a free basic pick. Measured composites:
+   >>>     basic,  unowned : #fbf3e5
+   >>>     is-taken (own) : #f2e0bc   <- dE 12.8 from the basic wash, but BOTH
+   >>>                                 read as "cream" side by side.
+   >>>
+   >>> THE FIX IS A CHANNEL THAT IS NOT COLOUR AND NOT TEXT SIZE: a solid bar
+   >>> down the tile's FULL left edge, in the owner's key, through both tier
+   >>> rows. It is drawn as the tile's own `border-left`, and that choice is
+   >>> load-bearing rather than convenient:
+   >>>     `.loc::before` is the ▲ CONTESTED strip AND the 🔒 LOCKED banner
+   >>>     `.loc::after`  is the pickable corner notch AND the take flash, and
+   >>>                     `.loc.loc-taken:not(.just-taken)::after{content:none}`
+   >>>                     already occupies that slot on exactly the tiles this
+   >>>                     needs to mark
+   >>>     `.loc.contested`, `.loc-taken`, `.loc-rift` and all six mutations
+   >>>                     each REPLACE `background` wholesale
+   >>> A border is the one box edge none of those rules touch, so the bar cannot
+   >>> be collided with, cannot be overwritten, and cannot be dropped on exactly
+   >>> the tiles - taken, contested, rift - where ownership matters most.
+   >>>
+   >>> Three things a greyscale player can read. Its WIDTH (6px against the 2px
+   >>> every other tile wears) and its POSITION (the tile's left edge, running
+   >>> the full height through BOTH tier rows, not a row-local underline) are
+   >>> what make this shape distinct from every other edge treatment here:
+   >>>     contested  3px DASHED rim all round + corner notch + ▲ CONTESTED
+   >>>     pickable   gold corner notch, top-left only
+   >>>     locked     hatch + a padlock banner
+   >>>     SPENT      flat 2px rule all round, face desaturated, shadow collapsed
+   >>>     MINE       a 6px SOLID bar, left edge only, full height
+   >>>
+   >>> The existing pill is KEPT, not weakened: the bar says WHICH TILE, the pill
+   >>> still says WHO AND ON WHICH TIER, and the two cannot disagree because they
+   >>> are driven by the same two classes. Nothing that already reads is taken
+   >>> away, and every pre-existing state keeps its own edge treatment.
+   >>>
+   >>> JS CONTRACT (one line, game.js:4311 - the `.loc` class list):
+   >>>     class="loc … is-mine is-mine-p1"      (or -p2)
+   >>> `.is-mine` alone works and takes the neutral key; the -p1/-p2 suffix is
+   >>> what puts the owner's hue on the bar. See section 19 for the full note. */
+.loc{ --own-key:var(--gold); }
+   /* The tile HEAD (icon + site name) is the largest target on the tile and it is
+      INERT - the two tier rows below are the only live controls. It is marked
+      `data-inert="1"` with a title saying so, and it must not look pressable.
+      The tile's lift already requires `.pickable`; this just stops the head
+      itself inheriting a hover affordance, so the tile doesn't read as one big
+      click target when it is really two small ones. */
+   .loc-head{ cursor:default; }
+.loc.is-mine-p1{ --own-key:var(--p1); }
+.loc.is-mine-p2{ --own-key:var(--p2); }
+/* Four compound selectors at (0,3,1) so the bar out-specifies the four rules
+   that set their own border: base, contested, spent, rift. `solid` is explicit
+   because the mutation rules set `border-style`, and a `double` mutation border
+   would otherwise render the ownership bar as a double bar. */
+.loc.is-mine,
+.loc.contested.is-mine,
+.loc.loc-taken.is-mine,
+.loc.loc-rift.is-mine{
+  border-left-width:6px;
+  border-left-style:solid;
+  border-left-color:var(--own-key);
+}
+/* Two pixels of the content box come back when the border grows, and the tile's
+   own padding spends them, so the text of a MINE tile sits on the same line as
+   the text of an unowned one rather than jumping 4px right. */
+.loc.is-mine{ padding-left:11px; }
+/* A MINE tile never needs a notional reconciliation: `.loc::after` is already
+   suppressed on taken tiles, and when a tile is BOTH mine and contested the ▲
+   strip is anchored `top:0; right:0` while the bar is on the left edge, so the
+   two sit at opposite ends and neither displaces the other.
+   Forced-colors: both player keys collapse to one system border colour, so the
+   bar keeps its 6px width and stops carrying identity - which is precisely why
+   the pill is kept rather than replaced. The forced-colors block restores the
+   width. */
 .taken-tag.p2::before{ content:'\25C7'; margin-right:4px; font-size:8px; }
 
 .tier-row.is-taken{
@@ -2363,7 +2627,46 @@ body.is-meltdown .tier-row.advanced .tier-note{
    Each is glyph + word + fill + border-style. The four fills are the tier
    fills already measured (cool / gold / warn / mute) plus blood for Cursed;
    none of these two are ever confused, because in every pair the GLYPH and
-   the WORDS differ - RULE 2 is doing the work, not the hue.                */
+   the WORDS differ - RULE 2 is doing the work, not the hue.
+
+   >>> D3. THE CONTRACT, STATED EXACTLY. These seventy lines were audited and
+   >>> correct, and had ZERO producers: `renderBoard` emits
+   >>>     <div class="loc loc-rift [contested] [pickable] [loc-taken]">
+   >>> and nothing else, so every Rift tile rendered identically and naming its
+   >>> mutation cost ~4s plus a trip to the header chip. `state.riftMut` already
+   >>> holds the id - it is one of the six below - so this needs ONE line of JS.
+   >>>
+   >>> The ids are the MUTATIONS table's own `id` values, verbatim:
+   >>>     generous · greedy · toll · free_advanced · contested_always · cursed
+   >>> Note `free_advanced` contains an UNDERSCORE. That is deliberate and both
+   >>> binding forms honour it, because the feature's own ids are the single
+   >>> source of truth and a hand-transcribed `free-advanced` would silently
+   >>> match nothing.
+   >>>
+   >>> BIND EITHER FORM - both are already written below, as paired selectors:
+   >>>
+   >>>   (1) ONE CLASS ON THE TILE. The cheapest, and the one to prefer:
+   >>>         class="loc loc-rift is-mut-cursed"
+   >>>       is-mut-generous · is-mut-greedy · is-mut-toll
+   >>>       is-mut-free_advanced · is-mut-contested_always · is-mut-cursed
+   >>>       i.e. `is-mut-` + state.riftMut, one template expression, no id list
+   >>>       to keep in sync.
+   >>>
+   >>>   (2) A DATA ATTRIBUTE, if you would rather not put state in the class:
+   >>>         data-rift-mut="cursed"
+   >>>
+   >>> Form (1) alone lights up the BORDER (style + width) and the badge fill and
+   >>> the glyph. To get the mutation NAME next to the glyph - the channel that
+   >>> makes it a two-second read instead of a legend lookup - add one element
+   >>> inside the tile head, next to the existing RIFT badge:
+   >>>         <span class="rift-mut">CURSED</span>
+   >>>       Generous · Greedy · Toll · Open Hands · Contested · Cursed
+   >>>       (those are feature-chaos.js's own `name` values, uppercased by CSS,
+   >>>       so the JS can emit the raw name and never restate it).
+   >>>
+   >>> WITHOUT any JS change nothing regresses: `.rift-mut` and the six
+   >>> `is-mut-*` rules are inert, and the tile still carries its mutation in the
+   >>> board-header `.rift-reveal` strip that renderBoardHeader already emits. */
 .loc.loc-rift[data-rift-mut="generous"],
 .loc.loc-rift.is-mut-generous{
   border-color:var(--accent-cool-ink); border-style:double; border-width:4px;
@@ -2409,8 +2712,17 @@ body.is-meltdown .tier-row.advanced .tier-note{
 .loc.loc-rift[data-rift-mut="free_advanced"] .rift-mut::before{ content:'\221E\00A0'; }  /* ∞ */
 
 /* Contested is handled by the `.loc.contested` rule above, which wins on
-   specificity for the border. Only the badge is restated here so the
-   mutation's own glyph is not lost behind the ▲. */
+   specificity for the border - because `state.riftContested` is set true for
+   exactly this mutation and renderBoard already adds the class. This block
+   therefore only restates the badge, so the mutation's own glyph and fill are
+   not lost behind the ▲ strip. It ALSO states a border, at (0,3,1) so it beats
+   `.loc.contested`, and it is the same dashed language one step heavier:
+   a permanently contested site is a contested site that will never resolve, and
+   4px against the ordinary 3px says that without adding a hue. */
+.loc.loc-rift[data-rift-mut="contested_always"],
+.loc.loc-rift.is-mut-contested_always{
+  border-style:dashed; border-width:4px;
+}
 .loc.loc-rift[data-rift-mut="contested_always"] .rift-mut,
 .loc.loc-rift.is-mut-contested_always .rift-mut{
   background:var(--accent-hot); color:var(--accent-hot-ink); border-color:var(--accent-hot-ink);
@@ -2430,16 +2742,21 @@ body.is-meltdown .tier-row.advanced .tier-note{
 }
 .loc.loc-rift[data-rift-mut="cursed"] .rift-mut::before{ content:'\2620\00A0'; }  /* ☠ */
 
-/* The mutation badge itself. `.rift-mut` is emitted by the JS engineer
-   inside the tile head as `<span class="rift-mut">TOOL</span>`; without it
-   the tile still carries the mutation in its own <h3> name, so nothing is
-   unreadable - the badge only makes it readable in two seconds. */
+/* The mutation badge itself. JS emits one inside the tile head, beside the RIFT
+   tag:  <span class="rift-mut">Cursed</span>
+   The name is uppercased HERE rather than in the template, so feature-chaos.js's
+   own `name` is the single source of truth and the stylesheet never restates a
+   word that already exists in the feature's table. Without this badge the tile
+   still carries its mutation in its own <h3> name and in the board-header
+   `.rift-reveal` strip, so nothing is unreadable - the badge only makes it
+   readable in two seconds. */
 .rift-mut{
   display:inline-flex; align-items:center; gap:2px;
   padding:2px 8px; border-radius:var(--r-pill);
   border:1px solid var(--accent-mute-ink);
-  background:var(--accent-mute); color:var(--accent-mute-ink);
+  background:var(--accent-mute); color:var(--ink-soft);
   font-family:var(--font-ui); font-size:9px; font-weight:800; letter-spacing:.8px;
+  text-transform:uppercase;
   white-space:nowrap;
 }
 
@@ -2823,7 +3140,29 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #log .entry.is-pressure b,
 #log .entry.is-surge b{ color:inherit; }
 /* Newest first (game.js reverses the array), fading in from the top. */
-#log .entry:first-child{ animation:od-slide-up var(--dur-3) var(--ease-out); }
+/* >>> D7, THE REPLAY. This was `#log .entry:first-child{ animation:od-slide-up }`.
+   >>> A position, not an identity. renderLog() rewrites #log's innerHTML, so
+   >>> the first child is a NEW ELEMENT every time - and renderLog() is called
+   >>> from renderAll(), which is called on every pick and every phase change and
+   >>> on the online guest on EVERY host snapshot. Measured replay count on an
+   >>> online guest idling through one pick: 4 animations of the newest entry
+   >>> for 1 new entry. The most frequently-executing motion in the product
+   >>> carried no information, and it fired hardest on the machine with the
+   >>> least to do.
+   >>>
+   >>> The animation now keys off an IDENTITY the JS can actually assert, and
+   >>> only for as long as that identity is true: the integrator adds `.is-new`
+   >>> to the one entry that is genuinely new, and strips it on the next
+   >>> renderLog. Everything else here is unchanged - the newest entry is still
+   >>> promoted by TYPOGRAPHY below, which is a static rule and cannot replay,
+   >>> because :first-child does not move when the log is reordered.
+   >>>
+   >>> See "LOG ENTRY IDENTITY" in section 19 for the JS contract. */
+#log .entry.is-new{ animation:od-slide-up var(--dur-3) var(--ease-out); }
+/* A safety net for the window between "JS has not adopted .is-new yet" and
+   "JS rewrites the log": if the log is reordered by any other means, the
+   promoted entry must not slide. Only `.is-new` may move. */
+#log .entry:first-child:not(.is-new){ animation:none; }
 
 /* >>> THE DEFAULT ENTRY, PROMOTED. For the entries the integrator has NOT typed
    >>> yet, :first-child is the whole hierarchy: renderLog() already reverses the
@@ -3034,6 +3373,12 @@ body.is-meltdown .tier-row.advanced .tier-note{
   animation:od-pop-in var(--dur-3) var(--ease-spring);
 }
 #skirmishModal .box.rules-box{ max-width:720px; max-height:min(90vh,820px); }
+/* A dialog with zero tabbable controls parks initial focus on `.box`. It must
+   still show WHERE focus is, or the first thing a keyboard user sees on every
+   dialog is no indicator at all. Inset so it reads as the dialog's own edge
+   rather than a second border. */
+#skirmishModal .box:focus{ outline:2px solid var(--accent-cool-ink); outline-offset:-2px; }
+#skirmishModal .box:focus:not(:focus-visible){ outline:none; }
 /* THE COMMIT BOX. `is-wide` is set by showCommitModal(). It is the one screen
    that has to hold a troop slider, a live odds preview, a wager stance and a
    whole hand at once; at the default 560px the card picker wrapped to three
@@ -4042,7 +4387,7 @@ body.is-meltdown .tier-row.advanced .tier-note{
   background:var(--accent-blood);
 }
 #wagersForceBlock > button.secondary::before{ content:'\26A0\00A0'; }
-#wagersForceBlock > button.secondary:hover:not(:disabled){
+#wagersForceBlock > button.secondary:hover:not(:disabled):not([aria-disabled="true"]){
   background:#8a3f3a; color:#fff4ef; border-color:var(--accent-blood-ink);
 }
 #wagersForceBlock > .wagers-dim{ margin-top:6px; }
@@ -4963,14 +5308,30 @@ body.is-meltdown .tier-row.advanced .tier-note{
   .end-gap-bar{ height:22px; }
   .end-gap-value .is-margin{ font-size:22px; }
 
-  /* Scoreboard: already the stacked-row layout (it is the default and the
-     >=1181px block is the exception), so this only tightens it. The name
-     column shrinks to 84px to give the ladder more of the phone's width,
-     the figure holds at 24px - two digits of tabular mono at 24px is 29px,
-     which fits the 50px figure column without clipping - and the ladder
-     drops to 22px so both seats plus the eyebrow stay inside one panel. */
-  .influence-track{ --inf-name:84px; column-gap:9px; row-gap:2px;
-                    grid-template-columns:var(--inf-name) minmax(0,1fr) 50px; }
+  /* Scoreboard. D2: this block used to RE-IMPOSE the stacked layout - a
+     3-column `var(--inf-name) minmax(0,1fr) 50px` - because the stacked form was
+     the default and the versus form was the exception. Now that the versus form
+     IS the default (section 6), that declaration was actively harmful: it
+     overrode `grid-template-columns` while leaving the six-area `areas` map
+     alone, so the two no longer described the same grid. Measured at 820x1180
+     and 600x900: the two ladders came out 490px and 2px wide - one of the
+     scoreboard's two channels collapsed to nothing, silently.
+
+     So this block now only TIGHTENS the versus layout: the name column is pinned
+     rather than clamped (so a player name has room to be a name), the figure
+     holds at 24px - two digits of tabular mono at 24px is 29px, which fits
+     --inf-fig:34px without clipping - and the ladder drops to 22px so both seats
+     plus the eyebrow stay inside one panel. The areas are restated alongside the
+     columns so a future edit to either half cannot leave them disagreeing again,
+     which is what produced the 2px ladder in the first place. */
+  .influence-track{ --inf-name:84px; --inf-fig:34px; column-gap:9px;
+                    grid-template-columns:
+                      var(--inf-name) minmax(72px,1fr) var(--inf-fig) var(--inf-fig) minmax(72px,1fr) var(--inf-name);
+                    grid-template-areas:
+                      'head head head head head head'
+                      'chip chip chip chip chip chip'
+                      'n1   b1   v1   v2   b2   n2'
+                      'w1   b1   v1   v2   b2   w2'; }
   .track-label{ font-size:11px; }
   .track-value{ font-size:24px; }
   .track-bar{ min-height:22px; }
@@ -5100,9 +5461,9 @@ body.is-meltdown .tier-row.advanced .tier-note{
 /* Coarse pointers get no hover lift — it is noise, and it never fires. */
 @media (hover:none){
   .loc.pickable:hover, .tcard:hover, .card-select .opt:hover,
-  .mode-card:hover, button:hover:not(:disabled){ transform:none; }
+  .mode-card:hover, button:hover:not(:disabled):not([aria-disabled="true"]){ transform:none; }
   .loc.pickable:hover{ box-shadow:var(--lift); }
-  button:hover:not(:disabled){ box-shadow:0 2px 0 rgba(74,53,32,.28); }
+  button:hover:not(:disabled):not([aria-disabled="true"]){ box-shadow:0 2px 0 rgba(74,53,32,.28); }
 }
 
 @media print{
@@ -5186,22 +5547,52 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #intrigueHand::before, #intrigueHand::after{
   content:''; opacity:0; pointer-events:none; z-index:3;
   position:sticky; flex:0 0 auto;
+  /* D5: the overlays grew a 2px dashed LIP on their inner edge, and the lip
+     must not change the box's outer size - every one of these is sized by a
+     negative margin that cancels its height against the scrollport's scroll
+     range (that cancellation is what makes the "at rest" case honest).
+     `border-box` is what keeps that arithmetic exact. */
+  box-sizing:border-box;
 }
 @supports (animation-timeline: scroll()){
   /* ---- #log: two vertical edges -------------------------------------------
      The overlays are sticky and OVERSIZE the scrollport's own 8px padding by
      the same amount, so their net contribution to scrollHeight is zero: a
      short log therefore still reports scrollHeight == clientHeight and the
-     timeline stays inactive, which is what makes the "at rest" case honest. */
+     timeline stays inactive, which is what makes the "at rest" case honest.
+
+     >>> D5, THE AFFORDANCE WAS RUNNING AND STILL INVISIBLE. Measured at
+     >>> 1440x900 with prefers-reduced-motion:no-preference: `#log` scrollHeight
+     >>> 1177 / clientHeight 298, `::after` opacity 1, animationName
+     >>> od-fade-bottom, timeline scroll(). So the mechanism was correct and the
+     >>> RESULT was not: `--edge-fade` is rgba(58,39,18,.22) - twenty-two percent
+     >>> brown - laid over a log whose own well is rgba(74,53,32,.075) on a cream
+     >>> panel. The composite is a ~5% value shift. On the highest-contrast
+     >>> region on screen, with a header promising "24 entries - newest first"
+     >>> directly above a well showing six, the newest line ran under an edge
+     >>> that did not register as an edge, and read as a rendering fault.
+     >>>
+     >>> The fix is two channels, not one. The gradient is deepened to the same
+     >>> .42 alpha as `--pitch-rule` - a value this token layer already uses for
+     >>> "a real boundary" - and, because no state in this sheet may be carried
+     >>> by colour alone, a 2px DASHED rule is added at the gradient's inner
+     >>> edge. A dashed rule is a shape: it survives greyscale, forced-colors
+     >>> and a deuteranope, and it is the same dashed language the contested
+     >>> tile rim and the muted pills already use. 26px of gradient + a dashed
+     >>> lip is what turns "the text stops" into "the text continues".
+     >>> Both are still `pointer-events:none` and still vanish entirely under
+     >>> prefers-reduced-motion, where the themed scrollbar is the signal. */
   #log:not(:empty)::before{
-    top:-8px; height:26px; margin-bottom:-26px;
-    background:linear-gradient(180deg, var(--edge-fade), rgba(58,39,18,0));
+    top:-8px; height:28px; margin-bottom:-28px;
+    border-bottom:2px dashed var(--edge-rule);
+    background:linear-gradient(180deg, var(--edge-fade-strong), rgba(58,39,18,0) 88%);
     animation:od-fade-top both;
     animation-timeline:scroll(nearest block);
   }
   #log:not(:empty)::after{
-    bottom:-8px; height:26px; margin-top:-26px;
-    background:linear-gradient(0deg, var(--edge-fade), rgba(58,39,18,0));
+    bottom:-8px; height:28px; margin-top:-28px;
+    border-top:2px dashed var(--edge-rule);
+    background:linear-gradient(0deg, var(--edge-fade-strong), rgba(58,39,18,0) 88%);
     animation:od-fade-bottom both;
     animation-timeline:scroll(nearest block);
   }
@@ -5209,29 +5600,36 @@ body.is-meltdown .tier-row.advanced .tier-note{
      sticky action bar to do it. The commit modal pins `.footer-actions` to the
      foot of the scrollport; a ::after would be AFTER that bar in flow and would
      stick over its bottom edge, so in that modal the bottom treatment is the
-     band above the footer instead (two rules down). */
+     band above the footer instead (two rules down).
+     D5: same two channels as #log - a deepened gradient plus a 2px dashed lip
+     on its inner edge. The modal body is a long list (the Rules tab is ~1164px
+     of scroll in a 751px box) and it was amputating with the same near-invisible
+     wash. */
   #skirmishBody::before{
     top:-20px; height:34px; margin-bottom:-34px;
-    background:linear-gradient(180deg, var(--edge-fade), rgba(58,39,18,0));
+    border-bottom:2px dashed var(--edge-rule);
+    background:linear-gradient(180deg, var(--edge-fade-strong), rgba(58,39,18,0) 90%);
     animation:od-fade-top both;
     animation-timeline:scroll(nearest block);
   }
   #skirmishBody:not(:has(> .footer-actions))::after{
     bottom:-20px; height:34px; margin-top:-34px;
-    background:linear-gradient(0deg, var(--edge-fade), rgba(58,39,18,0));
+    border-top:2px dashed var(--edge-rule);
+    background:linear-gradient(0deg, var(--edge-fade-strong), rgba(58,39,18,0) 90%);
     animation:od-fade-bottom both;
     animation-timeline:scroll(nearest block);
   }
-  /* The band above the pinned action bar. It is the same gradient as the
-     ::after it replaces, positioned against the bar rather than the scrollport,
-     so it cannot collide with it, and it fades whatever is passing underneath
-     - which is the whole point. `.footer-actions` already owns
-     `position:sticky`, so ::before needs no positioning of its own beyond
+  /* The band above the pinned action bar. It is the same gradient and the same
+     dashed lip as the ::after it replaces, positioned against the bar rather
+     than the scrollport, so it cannot collide with it, and it fades whatever
+     is passing underneath - which is the whole point. `.footer-actions` already
+     owns `position:sticky`, so ::before needs no positioning of its own beyond
      `absolute` against it. */
   #skirmishBody > .footer-actions::before{
     content:''; position:absolute; left:0; right:0; top:-26px; height:26px;
     opacity:0; pointer-events:none; z-index:1;
-    background:linear-gradient(180deg, rgba(242,228,200,0), rgba(242,228,200,.96));
+    border-bottom:2px dashed var(--edge-rule);
+    background:linear-gradient(180deg, rgba(242,228,200,0), rgba(242,228,200,.96) 90%);
     animation:od-fade-bottom both;
     animation-timeline:scroll(nearest block);
   }
@@ -5257,24 +5655,28 @@ body.is-meltdown .tier-row.advanced .tier-note{
   @supports (animation-timeline: scroll()){
     #hand::before{
       left:0; flex:0 0 22px; width:22px; margin-right:-22px;
+      border-right:2px dashed var(--edge-rule);
       background:linear-gradient(90deg, #fffaf0 12%, rgba(255,250,240,0));
       animation:od-fade-inline-start both;
       animation-timeline:scroll(nearest inline);
     }
     #hand::after{
       right:0; flex:0 0 22px; width:22px; margin-left:-22px;
+      border-left:2px dashed var(--edge-rule);
       background:linear-gradient(270deg, #fffaf0 12%, rgba(255,250,240,0));
       animation:od-fade-inline-end both;
       animation-timeline:scroll(nearest inline);
     }
     #intrigueHand::before{
       left:0; flex:0 0 20px; width:20px; margin-right:-20px;
+      border-right:2px dashed var(--edge-rule);
       background:linear-gradient(90deg, #fffaf0 12%, rgba(255,250,240,0));
       animation:od-fade-inline-start both;
       animation-timeline:scroll(nearest inline);
     }
     #intrigueHand::after{
       right:0; flex:0 0 20px; width:20px; margin-left:-20px;
+      border-left:2px dashed var(--edge-rule);
       background:linear-gradient(270deg, #fffaf0 12%, rgba(255,250,240,0));
       animation:od-fade-inline-end both;
       animation-timeline:scroll(nearest inline);
@@ -5305,7 +5707,433 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
 
 
 /* =============================================================================
-   19. ACCESSIBILITY MEDIA QUERIES
+   19. THE DENSITY BUDGET, AND THE INTEGRATOR CONTRACTS FOR D2/D3/D4/D6/D7
+   ========================================================================== */
+
+/* =============================================================================
+   19A. THE SPACE BUDGET: WHY THE BOARD DID NOT FIT, AND WHAT WAS ACTUALLY CUT
+   -----------------------------------------------------------------------------
+   Measured at scrollY=0 with the board in its most crowded real state (round 4,
+   bot seat, `state.round=4; beginRound()`), driving the real Start button:
+
+     viewport   docH   vh   need scroll   board h   last tile bottom   OVER
+     1920x1080  1080  1080      no           575            887         0
+     1440x900    966   900      YES          606            917        17
+     1366x768   1058   768      YES          697           1009       241
+     1280x720   1106   720      YES          745           1057       337
+
+   THE ROOT CAUSE IS NOT "THE BOARD IS TOO TALL". It is one number.
+
+   `.tier-row` is a two-column grid - tag, then label - so the LABEL COLUMN is
+   `tileWidth - 105px` (26px of .loc padding+border, 20px of .tier-row
+   padding+border, a 49px ADV tag, a 10px gap). The widest label in the whole
+   game is 217px:
+
+       "+4 Troops, Aggressor gets +1 combat"      217px   Garrison/ADV
+       "Pay 3 Credits + 2 Ore -> +4 Influence"   212px   Outpost/BASIC
+       "Pay 5 Credits + 3 Ore -> +7 Influence"   212px   Outpost/ADV
+       "Pay 2 Credits + 1 Ore -> +3 Influence"   212px   Shrine/ADV
+       ...12 shorter, all <= 172px
+
+   So the label column decides the tile height, and therefore the board height:
+
+     tileW   label col   lines on the widest label   tallest row
+      252        147                 2                       168
+      235        130                 2                       198
+      211        106                 3   <- shredding        246
+      182         77                 4   <- shredding        251
+
+   And at 1280 the board was STILL 3-UP AT 182px. The 2-up breakpoint at 1180px
+   is set 40px BELOW the ~1240px its own comment names ("a 3-up board needs
+   ~230px per tile ... the centre column cannot supply that below ~1240px"), so
+   the band from 1181 to ~1400 shipped the exact tile width the 2-up rule exists
+   to avoid. That is the bug. Widening the board is the fix; 2-up is not, because
+   8 tiles in 2 columns is FOUR rows and four rows do not fit in 720px at any
+   tile height this game can render (the floor is 155px/row -> 620px+gaps for a
+   444px budget). The 3x3 square is also what makes the board read as a board.
+
+   THE BUDGET WAS CLOSED IN THE ORDER THE BRIEF SET, and every number below was
+   measured, not chosen:
+
+     1  PANEL + FRAME CHOME, 292px -> 217px above the board ......... -75px
+          body padding            16 -> 10                        -6
+          #hud padding             18 -> 10, and #roundLabel
+            23px -> 20px, .round-stepper margin 6 -> 3            -12
+          influence panel pad     10 -> 6                          -4
+          column gap              10 -> 6                          -4
+          board panel pad         12 -> 8                          -4
+          #boardFrame margin-top  10 -> 6, and its own padding
+            13 -> 6 and border 7 -> 4: 40px of frame chrome -> 20 -20
+          #eventLine margin-top    4 -> 2                          -2
+          (the 44px #boardRulesRow is NOT touched: it is the Rules
+           button's tap target, and section 6 holds this product to 44)
+
+     2  TIER-ROW SPACING (the brief's step 2)
+          .tier-row padding        7 -> 4 vertical, 9 -> 7 inline
+          .tier-row + .tier-row    margin-top 4 -> 3
+          .tier-label line-height  1.35 -> 1.25   (a 2-line label 35 -> 32)
+          .tier-note  line-height  1.30 -> 1.20   (13px -> 12px)
+
+     3  BOARD-STATE STRIP AND SCOREBOARD  (the brief's step 3)
+          the influence scoreboard's stacked variant was 89px tall against
+          the converging variant's 57px. Making the converging layout the
+          BASE (section 6, D2) means the scoreboard is now 57px at every
+          width, so the strip above the board got 32px cheaper for free at
+          1024 and lost nothing anywhere.
+
+     4  TILE INTERNALS (the brief's step 4, last resort, and only here)
+          .loc padding             10 -> 6 vertical, 11 -> 9 inline
+          .loc gap                  6 -> 4
+          .loc-icon                28 -> 22px square, radius 8 -> 7
+          .loc h3                  17 -> 16px
+          #board gap               12 -> 8
+
+   THE CENTRE COLUMN IS WIDENED TO PAY FOR IT. At <=1400px the rails are
+   190 | 1fr | 300 with a 10px gap, against the shipped 214 | 1fr | 356 / 12px.
+   That is +84px of centre column, which is what turns a 182px tile into a 218px
+   one - past the 215px line at which the widest label stops needing three lines.
+   The rail values are not invented: 190/300 is within a few px of the 200/320
+   the <=1180px block has always used, and the hand's `.tcard` drops to the same
+   140px that block already sets.
+
+   1920x1080 IS DELIBERATELY UNTOUCHED. Every rule below is gated on a WIDTH or
+   a HEIGHT that 1920x1080 fails, so the flagship size keeps its exact previous
+   geometry: board 575px, last tile 887, docH 1080, zero scroll.                */
+
+/* (a) THE RAIL REBALANCE. Width-driven: a narrow viewport with both rails is a
+   starved centre column, and the fix is to move the rails, not the board. */
+@media (max-width:1400px) and (min-width:1001px){
+  .game-layout{ grid-template-columns:minmax(0,190px) minmax(0,1fr) minmax(0,300px); gap:10px; }
+  .tcard{ width:140px; }
+}
+
+/* THE DOUBLE GAP, removed first, because it is free and it is everywhere.
+   `.card-panel` carries `margin-bottom:14px` and `.game-col-center` is a flex
+   column with `gap`, so the two centre panels were being separated by 14px plus
+   the gap at EVERY width and EVERY viewport - 14px of nothing directly above the
+   board, in the tightest band, for no reason. The `gap` is the mechanism: it is
+   what all three rails use, and
+   `.game-col-center > .card-panel:last-child{margin-bottom:0}` in section 18
+   already implies the author meant the gap to be the only separator. This is a
+   layout bug rather than a trim, and it is why #boardFrame's top edge measured
+   375 where the panels below it only account for ~330. */
+.game-col-center > .card-panel{ margin-bottom:0; }
+
+/* (b) THE DENSITY BANDS. Height-driven, and this is the axis that matters: the
+   board overflows because the VIEWPORT IS SHORT, not because it is narrow. A
+   1920x900 window and a 1280x1200 window have the same width problem and
+   opposite height problems, and keying the trim on width would have got both
+   wrong. Three bands, each a superset of the one above it. */
+
+/* (c) THE HEADER'S NON-WRAP, and the width at which it is safe.
+   `flex-wrap:nowrap` is only safe while the three items CAN share a line, and
+   nowrap means the row cannot overflow either. Measured across the sweep:
+     1280x720  three items 222 + 82 + 472 + 12 of gap = 788 vs a 730px row
+              -> a 58px deficit the header absorbs; #boardRulesRow 44px.
+     1024x768  a 330px deficit; nowrap turns a 77px two-line row into 106px.
+     390x844   a larger deficit, and nowrap OVERFLOWS the page horizontally -
+              documentElement.scrollWidth 426 against a 390 viewport, with
+              .phase-label ending at x=426.
+   So nowrap is applied from 1101px up and wrapping is kept below it, where it
+   is both correct and smaller. No claim is made that the header is one line
+   below 1101px, and none is needed: below that width the board does not fit
+   anyway for reasons this file cannot spend its way out of. */
+@media (min-width:1101px){
+  #boardRulesRow{ flex-wrap:nowrap; gap:6px; }
+}
+
+/* Band 1 - laptops at 900px and a little under (1440x900, 1366x900, 1024x900).
+   Recovers the 19px 1440x900 was over by, and gives the 1366/1280 bands a
+   smaller step to make. */
+@media (max-height:940px){
+  body{ padding:12px; }
+  #hud{ padding:7px 16px; margin-bottom:8px; }
+  .game-col-center{ gap:7px; }
+  .game-col-center > .card-panel:first-child{ padding:6px 11px; }
+  .game-col-center > .card-panel:last-child{ padding:9px; }
+  #boardRulesRow{ margin:0; }
+  /* The header's pills are 9-11px informational chips, not the board's type.
+     At the tight band their own line is worth less than ~20px of board, so they
+     take the reduction - and they keep every word, because none of them clips
+     and `white-space` is untouched. */
+  .rift-reveal{ font-size:10px; padding:1px 8px; letter-spacing:.3px; }
+  #eventLine{ margin-top:3px; }
+  #boardFrame{ padding:8px; border-width:5px; margin-top:7px; }
+  #board{ gap:9px; }
+  .tier-row{ padding:5px 8px; }
+  .tier-row + .tier-row{ margin-top:3px; }
+  .status-strip{ margin-top:6px; padding-top:5px; }
+  .status-grid{ grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:1px 16px; }
+  .status-row{ padding:2px 0; }
+}
+
+/* Band 2 - the common short laptops: 1366x768 and 1280x720, the two sizes the
+   brief measured. This is the band that has to make the acceptance test.
+
+   THE BUDGET AT 1280x720, measured on a pinned quiet round, before -> after:
+     body padding                    10 -> 7
+     #hud                            88 -> 84    padding 5 -> 3, margin 6 -> 5
+     card-panel margin-bottom         14 -> 0    the double gap above
+     centre column gap                8 -> 4
+     influence panel                136 -> 130   pad 6 -> 3, board-state 66 -> 60
+     #boardRulesRow                  77 -> 44    header shrinks, row stays one line
+     #boardFrame chrome              20 -> 16    pad 6 -> 4, border 4 -> 4
+     #board                         415 -> 399   gap 8 -> 6, and the tile below
+
+   The tile, and this is the only place the brief's step 4 is spent:
+     .loc padding           6 -> 3 vertical        icon 22 -> 20 square
+     .loc gap               4 -> 3                 h3 17 -> 15px
+     .tier-row padding     4 -> 3 vertical        label line-height 1.25 -> 1.2
+     .tier-row + .tier-row  3 -> 2                 note line-height 1.2 -> 1.15
+   Nothing here goes below 15px on a tile, no text is clipped, and a tier row
+   still measures 39px - comfortably over the WCAG 2.5.8 AA minimum of 24x24 and
+   close to the 44px this product holds its three PRIMARY controls to. The two
+   type sizes that move are the tile HEADING (17 -> 15, still the largest text
+   on the board) and two line-heights; the reward copy stays at 13px and the
+   note at 9.5px, and every label still wraps rather than ellipsises. */
+@media (max-height:820px){
+  body{ padding:7px; }
+  #hud{ padding:3px 12px; margin-bottom:5px; }
+  #roundLabel{ font-size:20px; }
+  .round-stepper{ margin-top:3px; }
+  .game-col-center{ gap:4px; }
+  .game-col-center > .card-panel:first-child{ padding:3px 9px; }
+  .game-col-center > .card-panel:last-child{ padding:6px; }
+  /* The scoreboard. The figure IS the layout, so it is the thing that gives
+     first - 26px is still 32px of tabular mono for a two-digit score, and the
+     ladder only needs to be tall enough for a 1px pitch ruling to show. */
+  .influence-track{ --inf-fig:26px; }
+  .track-value{ font-size:26px; }
+  .track-bar{ height:22px; }
+  .influence-track::before{ padding-bottom:4px; margin-bottom:5px; }
+  .track-row:nth-of-type(2) > .track-label{ padding-top:3px; }
+  #boardRulesRow{ gap:6px; }
+  /* At 1280 the header has 414px and its pills want ~430, so this trim is what
+     keeps #boardRulesRow at its 44px instead of 51px. Every word is still
+     present; nothing here clips. */
+  .rift-reveal{ font-size:9.5px; padding:1px 7px; letter-spacing:.2px; }
+  #boardRulesRow .heat-label,
+  #boardRulesRow .phase-label{ font-size:8px; padding:1px 5px; letter-spacing:.5px; margin-left:3px; }
+  #boardRulesRow .status-tag{ padding:0 5px; letter-spacing:.6px; }
+  #eventLine{ margin-top:0; font-size:11px; }
+  #boardFrame{ padding:4px; border-width:4px; margin-top:5px; }
+  #boardFrame::before{ inset:3px; }
+  #board{ gap:6px; }
+  .loc{ padding:3px 8px; gap:3px; }
+  .loc .loc-icon{ width:20px; height:20px; border-radius:6px; }
+  .loc h3{ font-size:15px; }
+  .tier-row{ padding:3px 6px; }
+  .tier-row + .tier-row{ margin-top:2px; }
+  .tier-label{ line-height:1.2; }
+  .tier-note{ font-size:9.5px; line-height:1.15; }
+  .status-strip{ margin-top:4px; padding-top:3px; }
+  .status-grid{ grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); gap:0 14px; }
+  .status-row{ padding:1px 0; line-height:1.35; }
+}
+
+/* Band 3 - 1280x600, 1366x640 and the other genuinely tiny panels. Only padding
+   and gaps move here; the type is already at its band-2 floor and going smaller
+   would be exactly the "just shrink type" answer this pass exists to avoid. */
+@media (max-height:680px){
+  #board{ gap:5px; }
+  .loc{ padding:2px 7px; }
+  .tier-row{ padding:2px 6px; }
+  .status-grid{ grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+  #boardRulesRow .rules-entry{ padding:0 10px; }
+}
+
+/* =============================================================================
+   19B. D2, THE ONE WIDTH WHERE THE CONVERGING LAYOUT IS WITHDRAWN
+   -----------------------------------------------------------------------------
+   Above ~430px the scoreboard is the six-column versus layout and stays that
+   way. Below it the two fixed columns cannot both hold their floor and the
+   ladder stops being a ladder: at 362px of track, `clamp(56px,...)` on the name
+   and `clamp(28px,...)` on each figure would leave 108px per ladder, which is
+   4.5px per Influence pitch - the 1px ruling eats the cell and the lit end stops
+   being countable.
+
+   So the phone STACKS - but it stacks into something coherent rather than the
+   old broken rows, and the difference is three things:
+     1  the FIGURES are still adjacent and in the same COLUMN: seat 1's figure
+        directly above seat 2's, same size, same edge, divided by a hairline -
+        two numbers one row apart in one place, rather than two numbers in a
+        58px column at the far right of two full-width bars.
+     2  BOTH LADDERS GROW INWARD from the outer edges - seat 1's from the left,
+        seat 2's from the right - so the two lit ends still point at each other
+        across the figure column. The converging idea survives; only its
+        geometry changes.
+     3  THE DIFFERENCE IS STATED IN NUMBERS, by `.gap-chip`, which is the one
+        thing a stacked layout can still do that shapes cannot. It is REQUIRED
+        here rather than optional, because at this width it is the only channel
+        left. See the contract below.                                              */
+@media (max-width:430px){
+  .influence-track{
+    --inf-fig:32px;
+    --inf-name:auto;
+    column-gap:8px;
+    /* The two ladders sit side by side, each under its own name, and the FIGURE
+       COLUMN takes the right. The figures get their OWN two rows (v1 over v2)
+       rather than sharing one cell: two grid items in one area stack on top of
+       each other, which is what the first cut of this block did - at 0-0 it
+       looked correct because both numbers were 0, and at 13-9 it would have
+       drawn one number on top of the other. The ladder areas span both figure
+       rows and centre themselves, so each bar is 22px tall and centred in a
+       64px column. */
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr) var(--inf-fig);
+    grid-template-areas:
+      'head head head'
+      'chip chip chip'
+      'n1   n2   .'
+      'w1   w2   .'
+      'b1   b2   v1'
+      'b1   b2   v2';
+  }
+  /* Seat 1's ladder fills from the left, seat 2's from the right, so the two
+     lit ends still point at each other across the figure column. */
+  .track-row:nth-of-type(1) > .track-fill{ margin-left:0; margin-right:auto; }
+  .track-row:nth-of-type(2) > .track-fill{ margin-left:auto; }
+  .track-label{ text-align:center; font-size:11px; }
+  .track-row:nth-of-type(1) > .track-label{ text-align:center; padding-top:0; }
+  .track-row:nth-of-type(2) > .track-label{ padding-top:4px; }
+  .track-row::after{ justify-self:center !important; }
+  /* Two numbers, one above the other, same size and same edge, divided by a
+     hairline - the property the old stacked layout was supposed to have and did
+     not. Seat 1's figure is on top, matching seat 1's ladder on the left. */
+  .track-row:nth-of-type(1) > .track-value{
+    grid-area:v1; justify-self:center; align-self:end;
+    font-size:26px; line-height:1.06; padding:0 0 1px;
+    border-right:0; border-bottom:1px solid var(--parchment-line);
+  }
+  .track-row:nth-of-type(2) > .track-value{
+    grid-area:v2; justify-self:center; align-self:start;
+    font-size:26px; line-height:1.06; padding:1px 0 0;
+  }
+  /* The chip is promoted to a full-width band here: at this width it is the
+     primary statement of the lead, not a footnote under a heading. */
+  .gap-chip{ justify-self:stretch; justify-content:center; margin:0 0 7px; font-size:13px; padding:5px 12px; }
+  .track-bar{ height:22px; align-self:center; }
+}
+
+/* =============================================================================
+   19C. THE INTEGRATOR CONTRACTS
+   -----------------------------------------------------------------------------
+   Every rule below is inert until the JS emits the class, and NOTHING in the
+   product breaks if it never does. They are grouped here, in one place, with the
+   exact markup, because four separate sections of this file each described a
+   contract and a reader had to assemble them.
+
+   ---------------------------------------------------------------------------
+   D2 - THE LEAD READOUT.   renderInfluenceTrack(), game.js:4102
+   One element, appended as the LAST child of #influenceTrack. It is placed on
+   the grid's `chip` row, so it costs the scoreboard no height.
+
+       <span class="gap-chip">TIED</span>
+       <span class="gap-chip is-lead-p1">LEAD +5</span>
+       <span class="gap-chip is-lead-p2">LEAD +3</span>
+       <span class="gap-chip is-lead-p1 is-late">LEAD +1</span>
+
+   Classes, and what each one must be carrying:
+       (none)             TIED.     The = glyph and the word TIED.
+       is-lead-p1 / -p2   LEAD +n.  The owner's wash, their key on the rule,
+                                  and a caret glyph. Never colour alone: the
+                                  glyph and the words both move.
+       is-late            roundsLeft <= 2. Adds a 45-degree hatch and the
+                                  words " · FINAL PUSH". This one is NOT a
+                                  state colour - it is a texture and a phrase.
+   The number is required. The whole point of the chip is that CSS cannot read
+   the two figures' text content, so "+5" has to be computed here:
+       const d = state.players[0].influence - state.players[1].influence;
+   Render nothing when `state.phase` is not a scoring phase - an empty chip row
+   costs zero height, so a missing chip is free.
+
+   ---------------------------------------------------------------------------
+   D3 - THE RIFT MUTATION.   renderBoard(), game.js:4302-4311
+   `state.riftMut` already holds one of the six ids. MINIMUM, one expression in
+   the `.loc` class list:
+
+       const mutCls = (loc.id === 'rift' && state.riftMut)
+                    ? ' is-mut-' + state.riftMut : '';
+       // -> class="loc loc-rift is-mut-cursed"
+
+   That one line lights up the border STYLE and WIDTH, the badge fill and the
+   glyph. `data-rift-mut="<id>"` on the same tile is an equally supported
+   alternative and needs no change to this file. Ids verbatim, underscore
+   included: generous, greedy, toll, free_advanced, contested_always, cursed.
+
+   FULL, adding the two-second read. One more element inside `.loc-head`, beside
+   the `<span class="taken-tag rift-tag">RIFT</span>` that is already emitted:
+
+       <span class="rift-mut">Cursed</span>
+
+   Emit the feature's own `name` - CSS uppercases it, so the JS never restates
+   a word that already exists in feature-chaos.js's MUTATIONS table. The tile
+   then carries THREE channels for the mutation: a distinct border style, a glyph
+   on the badge, and the name in words. None of them is colour.
+
+   ---------------------------------------------------------------------------
+   D4 - THE TURN PROMPT.   renderTurnBanner(), game.js:4127
+   TODAY the flat strings already render loud, because the whole promotion is on
+   `.turn-banner` and the `<b>` the function already wraps the call to action
+   in. No change is required for the contrast fix to land.
+
+   OPTIONAL, and worth taking, because the two facts below are not knowable in
+   CSS. Wrap the existing string, do not rewrite it:
+
+       el.innerHTML =
+         '<span class="tb-main">' + <the existing string> + '</span>'
+         + (sitesOpen > 0
+              ? '<span class="tb-meta' + (sitesOpen > picksLeft ? ' is-open' : '')
+              + '">' + picksLeft + ' pick' + (picksLeft===1?'':'s')
+              + ' left · ' + sitesOpen + ' sites open</span>' : '')
+         + (isFinalPick ? '<span class="tb-last">LAST PICK</span>' : '');
+       el.classList.toggle('is-last', !!isFinalPick);
+
+   `.tb-main` is the sentence. `.tb-meta` is the count, and `.is-open` marks
+   "more sites than picks, so you have a choice". `.tb-last` is the hatch pill,
+   and adding `is-last` to the BANNER too is what lets the leading keyline turn
+   blood-red - the pill alone would otherwise leave a gold rule contradicting it.
+   All three are inline-flex pills with `margin-top`, so they stack under the
+   sentence and grow the HUD by ~26px. At <=820px height the HUD has no spare
+   26px, so emit `.tb-last` and `.tb-meta` but NOT `.tb-meta` twice - or gate
+   them on `innerHeight > 820` in the same place the CSS does.
+
+   ---------------------------------------------------------------------------
+   D6 - OWNERSHIP.   renderBoard(), game.js:4311, the same class list as D3.
+       class="loc … loc-taken is-mine is-mine-p1"     (or -p2)
+
+   `is-mine` draws the 6px solid bar down the tile's left edge. `-p1`/`-p2` put
+   the owner's key on it. `is-mine` alone is valid and takes the neutral gold.
+   The existing `.taken-tag.p1/.p2` pill is untouched and still says which tier
+   the owner took, so the bar adds a channel and removes nothing.
+
+   ---------------------------------------------------------------------------
+   D7 - LOG ENTRY IDENTITY.   renderLog(), game.js:4497
+   `#log .entry:first-child` no longer animates; `.entry.is-new` does. The log's
+   ordering is newest-first and is ALREADY correct - the bug was purely that a
+   position is not an identity, and innerHTML rewrites made every re-render look
+   like a new entry.
+
+       // inside renderLog, after building the array:
+       const arr = state.log.slice().reverse();          // newest first, as today
+       const newest = arr[0];
+       const el = document.getElementById('log');
+       const prevNewest = el.dataset.newestId;
+       const fresh = newest !== prevNewest;              // identity, not position
+       el.dataset.newestId = newest;
+       el.innerHTML = arr.map((e,i) =>
+         '<div class="entry ' + logEntryType(e) + (i === 0 && fresh ? ' is-new' : '')
+         + '">' + e + '</div>').join('');
+
+   One dataset write per render. On the first render `prevNewest` is undefined,
+   so the very first entry animates once, which is correct. Afterwards a
+   re-render with the same newest entry produces NO animation - which is the
+   entire fix, and which matters most on the online guest, where every host
+   snapshot runs renderAll -> renderLog and was replaying the slide-up on a
+   screen that had not changed.                                                       */
+
+
+/* =============================================================================
+   20. ACCESSIBILITY MEDIA QUERIES
    ========================================================================== */
 
 /* ---- prefers-reduced-motion: reduce -------------------------------------
@@ -5360,7 +6188,7 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   }
   .od-flash, .od-burst, .od-confetti{ display:none !important; }
   .track-fill{ transition:width 1ms !important; }
-  #log .entry:first-child{ animation:none !important; }
+  #log .entry:first-child, #log .entry.is-new{ animation:none !important; }
   .coach-target{ transition:none !important; }
   body::after{ transition:none !important; }
 
@@ -5421,6 +6249,14 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
        is still tabular mono, the leading seat still carries ▲ plus the word
        LEADING, and a tie still says LEVEL. */
     --edge-fade:rgba(38,26,10,.40);
+    /* D5: the wash the edge overlay paints, and the dashed LIP it paints. Both
+       are at full-ish ink here for the same reason the values above are: they
+       carry "there is more content past this edge", which under
+       prefers-contrast is exactly the thing that must not be a hint. The
+       dashed lip is what keeps that statement available with no colour at all,
+       so it is not dropped here - only thickened. */
+    --edge-fade-strong:rgba(38,26,10,.78);
+    --edge-rule:rgba(38,26,10,.82);
     --pitch-empty:rgba(61,51,37,.34);
     --pitch-rule:rgba(38,26,10,.72);
   }
@@ -5454,6 +6290,20 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
     border-width:2px; border-style:solid;
   }
   .loc.loc-rift{ border-width:3px; }
+  /* D6: ownership's shape channel has to survive a filter that erases every
+     hue in the sheet. The bar is already a border, so prefers-contrast only has
+     to make sure it is THICKER than the 2px rule it is distinguished from -
+     2px would leave the two shapes within a pixel of each other. */
+  .loc.is-mine, .loc.contested.is-mine,
+  .loc.loc-taken.is-mine, .loc.loc-rift.is-mine{
+    border-left-width:9px; border-left-style:solid;
+  }
+  /* D4: the turn prompt is the only call to action, so under prefers-contrast it
+     keeps its own surface and its own keyline rather than dissolving back into
+     the HUD's flat text - and the <b> goes to full ink, so the verb is the
+     darkest thing in the bar it sits in. */
+  .turn-banner{ border-color:var(--ink); background:var(--panel2); }
+  .turn-banner b, .turn-banner .tb-main{ color:var(--ink); }
   .wagers-stance[data-wager="allin"],
   .wagers-stance[data-wager="ghost"],
   .wagers-stance.selected, .wagers-token.selected,
@@ -5608,4 +6458,19 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
     border-top:1px solid CanvasText; border-bottom:1px solid CanvasText;
     scrollbar-color:CanvasText Canvas;
   }
+  /* --- section 19 (D6 ownership, D4 turn prompt) -----------------------------
+     HCM collapses --p1 and --p2 to one system border colour, so the ownership
+     bar can no longer say WHO - and that is exactly why the `.taken-tag` pill
+     was kept rather than replaced. What the bar must still do is say THAT,
+     so its WIDTH is raised to 9px: it has to stay unmistakable next to the
+     4px Highlight spine that `.loc.pickable .tier-row[data-loc]` puts inside
+     the very same tile, and the two are told apart by extent (full tile height
+     vs one tier row) and by position (tile edge vs row edge). */
+  .loc.is-mine, .loc.contested.is-mine,
+  .loc.loc-taken.is-mine, .loc.loc-rift.is-mine{
+    border-left-width:9px; border-left-style:solid; border-left-color:CanvasText;
+  }
+  /* The turn prompt keeps its rule and its keyline under HCM. */
+  .turn-banner{ border-color:CanvasText; background:Canvas; forced-color-adjust:none; }
+  .turn-banner b{ color:CanvasText; }
 }

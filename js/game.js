@@ -225,11 +225,27 @@ const sfx = {
   lose:       ()=> OD.Sound.play('stinger.loss'),
 };
 
+/* >>> THE SOUND TOGGLES WERE INVISIBLE TO A KEYBOARD AND TO A SCREEN READER.
+   Both are <div class="sound-toggle"> with cursor:pointer: measured role null,
+   tabindex null, on both the setup copy and the in-game copy. Unreachable with
+   Tab, unannounced, and - because the label is the TEXT - a screen reader
+   could not have told "Sound: On" from a heading anyway.
+
+   Upgraded from JS (index.html is not this file's). role="switch" rather than
+   role="button", because a switch is a two-state control and announces
+   "on"/"off" from aria-checked. aria-label is the CONSTANT ("Sound") and the
+   changing "On"/"Off" stays in the text: a name that flips with the value
+   makes the control announce as two different controls. The structural change
+   that would make this markup is reported in the handover. */
 function setSoundUI(){
   [document.getElementById('soundToggle'), document.getElementById('soundToggleGame')].forEach(el=>{
     if(!el) return;
     el.textContent = `Sound: ${soundOn?'On':'Off'}`;
     el.classList.toggle('on', soundOn);
+    el.setAttribute('role', 'switch');
+    el.setAttribute('aria-label', 'Sound');
+    el.setAttribute('aria-checked', soundOn ? 'true' : 'false');
+    el.tabIndex = 0;
   });
 }
 function toggleSound(){
@@ -449,6 +465,14 @@ function makePlayer(name, type){
     intrigueHand:[],
     isAggressor:false, aggressorBonus:0,
     skirmishWins:0, skirmishLosses:0, advancedPicks:0, winStreak:0,
+    /* Tactic cards this player has actually PLAYED in a Skirmish - i.e. cards
+       that left the hand. A plain integer, so it survives the JSON relay.
+       This is the field that separates "holding five cards" from "cycling
+       five cards", and Archivist is gated on it: with HAND_CAP 5 and both
+       players dealt a full hand, a `hand.length >= 5` check is guaranteed true
+       for BOTH players in EVERY game, which is not an objective, it is a free
+       +4 Influence printed on the HUD before the first action. */
+    cardsPlayed:0,
     /* Feature-owned counters. Declared here with explicit defaults so a
        feature never has to write a `?? 3` at every read site. All of them
        are plain JSON: `state` is serialized wholesale for the online relay
@@ -579,9 +603,56 @@ function playIntrigueCard(playerIdx, cardId){
   renderAll();
 }
 
-function humanPlayIntrigue(cardId){
+/* >>> A DOUBLE-CLICK PLAYED THE SAME CARD TWICE (D5).
+   playIntrigueCard() guards with `intrigueHand.indexOf(cardId)` and splices
+   ONE entry out, and the Intrigue deck ships TWO COPIES OF EVERY CARD
+   (INTRIGUE_DECK_TEMPLATE), so `indexOf` still found the second copy and the
+   second click played it. The guard that looks like a duplicate-play guard is
+   a guard against a card you do not hold - it does nothing at all about a card
+   you hold twice.
+
+   The latch is keyed on the CARD, so a deliberate second play of a DIFFERENT
+   card is never blocked, and it is time-boxed, so a deliberate second play of
+   the same card (two copies in hand, which the deck makes possible) is not
+   blocked either. The window is a few hundred milliseconds: long enough to
+   swallow the second click of a real double-click, far too short to touch a
+   decision.
+
+   >>> AND A PER-CARD LATCH ALONE WAS NOT ENOUGH - MEASURED. The first version
+   of this latch swallowed the second click, and the second click still played a
+   second card: playing the first one re-renders #intrigueHand, the row is one
+   card shorter, and the SAME PIXEL is now a different card's button. Measured
+   (Round 4, hand [marketplace, foresight, windfall]): one double-click at one
+   point removed TWO cards and charged 4 Credits. So a fire is also swallowed
+   when it lands within a few pixels of the previous one inside the window -
+   two clicks at the same point are one decision, while two clicks on two cards
+   a card-width apart are two. A keyboard fire has no coordinates, so it falls
+   back to the card key alone and behaves exactly as before.
+
+   Not on `state`, because state is JSON.stringify'd to the online guest on
+   every render; this is a UI latch, and the guest path is covered too because
+   the check sits before the socket branch. */
+const INTRIGUE_LATCH_MS = 400;
+const INTRIGUE_LATCH_SLOP = 24;   // px - about half a card button
+let intrigueLatch = null;          // {card, x, y, t}
+function intrigueLatched(cardId, ev){
+  const now = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+    ? performance.now() : Date.now();
+  const prev = intrigueLatch;
+  const px = (ev && typeof ev.clientX === 'number') ? ev.clientX : null;
+  const py = (ev && typeof ev.clientY === 'number') ? ev.clientY : null;
+  intrigueLatch = { card:cardId, x:px, y:py, t:now };
+  if(!prev) return false;
+  if((now - prev.t) >= INTRIGUE_LATCH_MS) return false;
+  if(prev.card === cardId) return true;
+  if(prev.x === null || px === null) return false;
+  return Math.abs(prev.x - px) <= INTRIGUE_LATCH_SLOP && Math.abs(prev.y - py) <= INTRIGUE_LATCH_SLOP;
+}
+
+function humanPlayIntrigue(cardId, ev){
   const idx = currentPicker();
   if(idx===null || state.phase!=='draft') return;
+  if(intrigueLatched(cardId, ev)) return;
   if(online.enabled){
     if(online.isHost){ if(idx!==0) return; }
     else { wsSend({type:'action', kind:'intrigue', cardId}); return; }
@@ -589,7 +660,13 @@ function humanPlayIntrigue(cardId){
     return;
   }
   if(!canPlayIntrigue(state.players[idx])){
-    log(`<b>${esc(state.players[idx].name)}</b> can't afford that Intrigue card - it costs ${INTRIGUE_PLAY_COST} Credits.`);
+    const who = state.players[idx].name;
+    log(`<b>${esc(who)}</b> can't afford that Intrigue card - it costs ${INTRIGUE_PLAY_COST} Credits.`);
+    /* The refusal now says itself. It used to be reachable only by calling this
+       function from a console: the button was `disabled`, so it could not be
+       clicked and no key could reach it. See renderIntrigueHand(). */
+    srWrite([srFact('intrigueRefuse', `${idx}:${who}:${INTRIGUE_PLAY_COST}`,
+      `Refused: ${who} cannot afford an Intrigue card. It costs ${INTRIGUE_PLAY_COST} Credits.`)]);
     return;
   }
   playIntrigueCard(idx, cardId);
@@ -599,23 +676,90 @@ function humanPlayIntrigue(cardId){
    adds tension (deny the site your opponent needs) without requiring any
    hidden-information plumbing over the network relay.
 
-   `progress(p)` reports live {have, need} for the HUD so a goal reads as
+   `progress(p)` reports live {have, need, unit} for the HUD so a goal reads as
    "2 of 4" instead of a bare met / not-yet. It is a FUNCTION, which is why
    state only ever stores `objectiveId` (see makePlayer) - the whole object
-   can't survive JSON.stringify over the online-play relay. */
+   can't survive JSON.stringify over the online-play relay. `progress` may also
+   return a `note`, printed after the count, for a goal that has more than one
+   clause (Archivist).
+
+   >>> AN OBJECTIVE MUST BE POSSIBLE TO MISS. Two of these used not to be, and
+   >>> both were a free OBJECTIVE_BONUS of Influence handed out on the HUD
+   >>> before the first action:
+     - archivist read `hand.length >= 5`, but HAND_CAP is 5 and BOTH players
+       are dealt exactly HAND_CAP cards at startGame(). The check was
+       `5 >= 5` for both players in every single game, so it read "met (+4)
+       5 of 5" from the opening hand and the player never had a decision to
+       make. Rewritten below as what it was clearly reaching for - a full hand
+       AT THE END, which means the hand has to have been REFILLED, which means
+       cards have to have been played. See ARCHIVIST_PLAYED.
+     - industrialist read `advancedPicks >= 4`, measured met in 100.0% of
+       2,408 simulated games. Advanced is roughly 75% of all picks, so a
+       threshold of 4 against ~13 picks per game was never a target. Retuned
+       against the measured distribution. */
+
+/* Archivist: cards that must have left the hand for the hand to still be full
+   at the end. Without this clause the objective is arithmetic, not play.
+
+   Measured over the same 8,000-game headless simulation: the "full hand at the
+   end" half is true for only 16.1% of players (the hand is refilled almost only
+   by Archive / Council Session / Scout / Insight, and a Skirmish or two every
+   round is eating it), and the joint rates are
+     played >= 1  16.1%      played >= 4   3.8%
+     played >= 2  13.4%      played >= 5   0.9%
+     played >= 3   9.0%  <-- this one.
+   9.0% is the harshest objective in the set alongside Unscathed (8.4%), which
+   is where the difficulty curve should be - and unlike the old `hand >= 5` it
+   is MISSABLE, which is the whole point of an objective. */
+const ARCHIVIST_PLAYED = 3;
+
+/* Industrialist: Advanced picks a player has to take. Advanced is about 75% of
+   every pick the bot makes (botChoosePick values it at 1.6x the Basic tier and
+   it only declines when it cannot pay), so a threshold of 4 against ~13
+   Advanced-or-basic picks a game was never a target - measured met in 100.0%
+   of 2,408 simulated games, and still 100.0% at 8.
+
+   Tuned on the MEASURED distribution, never on a guess. Headless bot-vs-bot
+   simulation of the real engine (fake DOM + a synchronous timer queue, see the
+   module.exports comment at the foot of this file), 8,000 games / 16,000
+   player-games, 0 errors:
+
+     P(advancedPicks >= 10)  99.2%      P(advancedPicks >= 15)  27.6%
+     P(advancedPicks >= 12)  89.3%      P(advancedPicks >= 16)  11.0%
+     P(advancedPicks >= 13)  73.4%      P(advancedPicks >= 17)   3.1%
+     P(advancedPicks >= 14)  51.1%  <-- this one: a coin flip.
+
+   Full distribution: 7:1 8:24 9:101 10:390 11:1189 12:2558 13:3557 14:3767
+   15:2651 16:1264 17:413 18:80 19:5. 14 is also the honest design ask: 14 of
+   the ~18 picks a player gets, taken at Advanced, which is a plan for the
+   whole game rather than a rounding error. */
+const INDUSTRIALIST_NEED = 14;
+
 const OBJECTIVES = [
   {id:'warlord',       name:'Warlord',       desc:'Win 3 or more Skirmishes.',                         bonus:OBJECTIVE_BONUS, check:p=> p.skirmishWins>=3,
    progress:p=> ({have: Math.min(p.skirmishWins, 3), need: 3, unit: 'wins'})},
   {id:'unscathed',     name:'Unscathed',     desc:'Fight at least one Skirmish and never lose one.',    bonus:OBJECTIVE_BONUS, check:p=> (p.skirmishWins+p.skirmishLosses)>0 && p.skirmishLosses===0,
    progress:p=> ({have: ((p.skirmishWins+p.skirmishLosses)>0 && p.skirmishLosses===0) ? 1 : 0, need: 1, unit: 'unbroken'})},
-  {id:'industrialist', name:'Industrialist', desc:'Take the Advanced tier 4 or more times.',            bonus:OBJECTIVE_BONUS, check:p=> p.advancedPicks>=4,
-   progress:p=> ({have: Math.min(p.advancedPicks, 4), need: 4, unit: 'advanced picks'})},
+  {id:'industrialist', name:'Industrialist', desc:`Take the Advanced tier ${INDUSTRIALIST_NEED} or more times.`, bonus:OBJECTIVE_BONUS,
+   check:p=> p.advancedPicks>=INDUSTRIALIST_NEED,
+   progress:p=> ({have: Math.min(p.advancedPicks, INDUSTRIALIST_NEED), need: INDUSTRIALIST_NEED, unit: 'advanced picks'})},
   {id:'financier',     name:'Financier',     desc:'End the game with 7 or more Credits.',               bonus:OBJECTIVE_BONUS, check:p=> p.credits>=7,
    progress:p=> ({have: Math.min(p.credits, 7), need: 7, unit: 'Credits'})},
   {id:'prospector',    name:'Prospector',    desc:'End the game with 6 or more Ore.',                   bonus:OBJECTIVE_BONUS, check:p=> p.ore>=6,
    progress:p=> ({have: Math.min(p.ore, 6), need: 6, unit: 'Ore'})},
-  {id:'archivist',     name:'Archivist',     desc:'End the game with 5 or more cards in hand.',         bonus:OBJECTIVE_BONUS, check:p=> p.hand.length>=5,
-   progress:p=> ({have: Math.min(p.hand.length, 5), need: 5, unit: 'cards in hand'})},
+  /* Both clauses, and `progress` reports the one that is holding the player
+     back rather than always printing the friendlier number. */
+  {id:'archivist',     name:'Archivist',     desc:`End the game with ${HAND_CAP} or more cards in hand, having played at least ${ARCHIVIST_PLAYED} cards.`,
+   bonus:OBJECTIVE_BONUS,
+   check:p=> p.hand.length>=HAND_CAP && p.cardsPlayed>=ARCHIVIST_PLAYED,
+   progress:p=>{
+     const played = Math.min(p.cardsPlayed|0, ARCHIVIST_PLAYED);
+     if(played < ARCHIVIST_PLAYED){
+       return {have: played, need: ARCHIVIST_PLAYED, unit: 'cards played',
+               note: 'and a full hand at the end'};
+     }
+     return {have: Math.min(p.hand.length, HAND_CAP), need: HAND_CAP, unit: 'cards in hand'};
+   }},
 ];
 
 /* Leaders - a random persistent passive ability each player is dealt at game
@@ -889,9 +1033,52 @@ function wsUrl(){
   return `${proto}://${location.host}/ws`;
 }
 
+/* >>> THE FOUR MODE CARDS WERE UNREACHABLE BY KEYBOARD. They are bare <div>s
+      with a click handler and no tabindex, no role and no accessible name, and
+      #gameMode - the only form control behind them - is `class="hidden"`, so a
+      keyboard player had NO way to choose a game mode at all: the measured tab
+      order went #botSpeed -> #p1name -> ... -> #startBtn, and Start Game
+      silently used whatever mode was default. One of four decisions the setup
+      screen exists to ask, unreachable, and invisible: the "Selected" flag
+      said Local while nothing said it was a choice.
+
+      index.html is not this file's to edit, so the group is upgraded from here
+      instead. The structural change that would make this markup is reported in
+      the handover: <div class="mode-cards" role="radiogroup"
+      aria-labelledby="..."> with each card a real radio.
+
+      Standard radiogroup behaviour, which is NOT what four focusable divs with
+      a click handler give you:
+        * ONE stop for the whole group (roving tabindex), so Tab enters and
+          leaves the group in one press instead of parking on four cards;
+        * Arrow keys MOVE and SELECT together - a radiogroup is not a set of
+          independent buttons, so arrowing to a card is choosing it;
+        * Enter/Space activate the focused card;
+        * aria-checked carries which one is chosen, so it is announced rather
+          than only drawn. */
+function syncModeCardsA11y(){
+  const group = document.getElementById('modeCards');
+  const select = document.getElementById('gameMode');
+  if(!group || !select) return;
+  const mode = select.value;
+  if(!group.hasAttribute('aria-label')) group.setAttribute('aria-label', 'How will you play?');
+  group.setAttribute('role', 'radiogroup');
+  const cards = group.querySelectorAll('.mode-card');
+  cards.forEach(card=>{
+    const on = (card.dataset.mode === mode);
+    card.setAttribute('role', 'radio');
+    card.setAttribute('aria-checked', on ? 'true' : 'false');
+    /* Roving tabindex: exactly one card is a tab stop, and it is the SELECTED
+       one - so Tab reaches the group's current answer, and arrowing away from
+       it leaves a stop behind at the new answer. */
+    card.tabIndex = on ? 0 : -1;
+  });
+}
+
 function updateModeUI(){
   const mode = document.getElementById('gameMode').value;
   document.querySelectorAll('.mode-card').forEach(c=> c.classList.toggle('selected', c.dataset.mode===mode));
+  syncModeCardsA11y();
   document.getElementById('onlinePanel').classList.toggle('hidden', mode!=='host' && mode!=='join');
   document.getElementById('hostPanel').classList.toggle('hidden', mode!=='host');
   document.getElementById('joinPanel').classList.toggle('hidden', mode!=='join');
@@ -1340,16 +1527,35 @@ function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, 
     const note = document.getElementById('meltdownHoldNote');
     if(note) note.classList.remove('hidden');
   }
-  document.getElementById('skipAttack').onclick = ()=>{
-    if(state && state.meltdown){ return; }
-    hideModal(); onDecision(false, false);
+  /* >>> D4: same double-fire class as the Commit button, on the decision that
+     >>> STARTS the Skirmish. `onDecision(true)` runs startSkirmishCommit,
+     >>> which re-seeds `skirmishCtx` and starts a commit chain; a second
+     >>> invocation re-seeds it again underneath the first, so the aggressor's
+     >>> commit is discarded and the defender's modal is asked for a commit
+     >>> into a context that no longer matches. One shot, then off. */
+  let decided = false;
+  const decideOnce = (attack, force)=>{
+    if(decided) return;
+    decided = true;
+    const hold = document.getElementById('skipAttack');
+    const atk  = document.getElementById('doAttack');
+    if(hold) hold.disabled = true;
+    if(atk) atk.disabled = true;
+    if(forceBtn) forceBtn.disabled = true;
+    hideModal(); onDecision(attack, force);
   };
-  document.getElementById('doAttack').onclick = ()=>{ hideModal(); onDecision(true, false); };
+  const holdBtn = document.getElementById('skipAttack');
+  const atkBtn  = document.getElementById('doAttack');
+  if(holdBtn) holdBtn.onclick = ()=>{
+    if(state && state.meltdown){ return; }
+    decideOnce(false, false);
+  };
+  if(atkBtn) atkBtn.onclick = ()=> decideOnce(true, false);
   // >>> WAGERS (feature: Betrayal tokens) - the FORCE button is injected by the
   // >>> feature and reports a token spend through the SAME decision handler.
   const forceBtn = document.getElementById('wagersForceAttack');
   if(forceBtn && forceBtn.dataset.token==='1'){
-    forceBtn.onclick = ()=>{ hideModal(); onDecision(true, true); };
+    forceBtn.onclick = ()=> decideOnce(true, true);
   }
 }
 
@@ -1556,6 +1762,11 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
       onChange: (decl)=>{ refreshOdds(); srWagerSentence(decl); },
     });
     srWrite([srWagerLockSentence()]);
+    /* >>> D2: upgrade the five chips the feature just appended, from here,
+       because js/feature-wagers.js is not this file's to edit. One delegated
+       listener on the same mount root as the srWager one below; installed
+       once, re-stamped on every Skirmish. */
+    installWagerChipA11y(document.getElementById('skirmishBody'));
     /* Scoped delegated listener on the chips the feature just appended. It
        runs in the bubble phase on the BODY, i.e. AFTER the feature's own
        onclick has already repainted `.selected`, which is what makes reading
@@ -1591,7 +1802,40 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
 
   refreshOdds();
 
-  document.getElementById('commitBtn').onclick = ()=>{
+  /* >>> D4: DOUBLE-CLICKING COMMIT SUBMITTED THE OPPONENT'S WHOLE COMMIT.
+     Both Commit buttons - the aggressor's and the defender's - are laid out at
+     the SAME PIXEL (measured dx=0, dy=1), because showModal reuses one dialog
+     and only the title changes. A real double-click therefore lands twice on
+     the same spot, and the second click arrived AFTER the first had closed the
+     aggressor's modal and opened the defender's:
+
+        before: "Player 1 - Commit Troops"   troops [4,1]
+        after : "Rolling the Dice"            troops [3,0]
+        *** the defender's commit was submitted: 1 troop, no card, no wager ***
+
+     The defender never saw their own commit screen at all. Nothing about the
+     click handler noticed, because `onSubmit` is the ordinary submit path -
+     the second invocation was a perfectly valid commit for the seat that
+     happened to be asking now.
+
+     Two independent guards, because either alone leaves a hole:
+       1. a one-shot latch, so a second click on the SAME handler is a no-op
+          even if the button is somehow still clickable (and so it holds for
+          the keyboard path too); and
+       2. disabling the button on the first fire, so the second click does not
+          even reach the handler in a real browser.
+     The latch is the load-bearing one; the disable is what makes the fix
+     visible to the player instead of merely silent. */
+  const commitBtn = document.getElementById('commitBtn');
+  let commitFired = false;
+  const fireCommit = ()=>{
+    if(commitFired) return;
+    commitFired = true;
+    if(commitBtn){
+      commitBtn.disabled = true;
+      commitBtn.setAttribute('aria-disabled', 'true');
+      commitBtn.textContent = 'Committed';
+    }
     const troops = Number(slider.value);
     const cardId = selectedCardId;
     // >>> WAGERS (feature: Wagers + Betrayal tokens) - reads the stance +
@@ -1603,6 +1847,7 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
     hideModal();
     onSubmit(troops, cardId, wagersExtra);
   };
+  if(commitBtn) commitBtn.onclick = fireCommit;
 }
 
 /* ------------------------- Setup / round flow ------------------------- */
@@ -2299,6 +2544,20 @@ if(typeof window !== 'undefined'){
   });
 }
 
+/* Every Tactic card that leaves a hand for a Skirmish is a card PLAYED, and
+   that count is what Archivist is gated on. One function for both callers (the
+   bot path and the human path) so the two cannot drift, so the counter cannot
+   be bumped for a card that was never taken, and so the field stays a plain
+   integer that JSON.stringify can carry to the online guest. */
+function takeCommitCard(player, cardIdx){
+  if(!player || !Array.isArray(player.hand)) return null;
+  const i = (typeof cardIdx === 'number') ? cardIdx : -1;
+  if(i < 0 || i >= player.hand.length) return null;
+  const card = player.hand.splice(i, 1)[0];
+  player.cardsPlayed = ((player.cardsPlayed | 0) + 1);
+  return card || null;
+}
+
 function collectCommit(playerIdx, onDone){
   const player = state.players[playerIdx];
   /* resolveSkirmish() nulls skirmishCtx the moment a fight is settled, and a
@@ -2325,7 +2584,7 @@ function collectCommit(playerIdx, onDone){
     // >>> `troops` is then PINNED by botChooseTroops BEFORE the subtraction
     // >>> below runs, which is what makes All In / Ghost real.
     const cardIdx = botChooseCard(player);
-    const card = cardIdx>=0 ? player.hand.splice(cardIdx,1)[0] : null;
+    const card = takeCommitCard(player, cardIdx);
     const wagerStance = (typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.botStance) ? OD.Wagers.botStance(playerIdx, card, player.troops) : null;
     const troops = botChooseTroops(player, playerIdx, wagerStance);
     if(typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.payBotBetrayal) OD.Wagers.payBotBetrayal(playerIdx, wagerStance && wagerStance.betrayal);
@@ -2343,7 +2602,7 @@ function collectCommit(playerIdx, onDone){
 
   const applyCommit = (troops, cardId, extra)=>{
     const idx = cardId ? player.hand.indexOf(cardId) : -1;
-    const card = idx>=0 ? player.hand.splice(idx,1)[0] : null;
+    const card = takeCommitCard(player, idx);
     // >>> WAGERS (feature: Wagers + Betrayal tokens) - the public declaration
     // >>> (stance + tokens paid) is charged HERE, at commit time, so a charge
     // >>> can never be spent twice for one commitment, and it is re-derived
@@ -2560,8 +2819,12 @@ function resolveSkirmish(){
       aggressor.winStreak = 0; defender.winStreak = 0;
       // >>> WAGERS (feature: All In / Ghost) - a tie pays NOTHING to either
       // >>> stance. An All In that ties is simply dead.
+      // >>> `aggressorIdx` is threaded in because settleWagers walks the two
+      // >>> COMMITS (side order: 0 = aggressor, 1 = defender) while it pays
+      // >>> SEATS. Deriving the seat from the side index silently mis-paid
+      // >>> every Skirmish where Player 2 held the Garrison.
       if(typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.settleWagers){
-        OD.Wagers.settleWagers(-1, aggCommit, defCommit);
+        OD.Wagers.settleWagers(-1, aggressorIdx, aggCommit, defCommit);
       }
     } else {
       const aggWins = aggTotal > defTotal;
@@ -2618,8 +2881,11 @@ function resolveSkirmish(){
       // >>> WAGERS (feature: All In / Ghost) - the wagers settle INSIDE the
       // >>> existing win/lose branch: no new resolution pipeline, and the same
       // >>> totals that produced `margin` are the ones being paid on.
+      // >>> `aggWins ? 0 : 1` is the winning SIDE; `aggressorIdx` is the seat
+      // >>> the side order hangs off. Passing the seat explicitly is the whole
+      // >>> point - see settleWagers in js/feature-wagers.js.
       if(typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.settleWagers){
-        OD.Wagers.settleWagers(aggWins ? 0 : 1, aggCommit, defCommit);
+        OD.Wagers.settleWagers(aggWins ? 0 : 1, aggressorIdx, aggCommit, defCommit);
       }
     }
 
@@ -2775,6 +3041,13 @@ function debriefRecordFromState(){
   };
 }
 
+/* >>> THE ROUND A DEBRIEF IS SUMMARISING, or 0 when no debrief is on screen.
+   >>> Read by renderTurnBanner() for the phase label and written by
+   >>> showRoundDebrief()'s open/close pair. Module-level, never on `state`:
+   >>> it describes the DIALOG, not the game, and must not ride the JSON relay
+   >>> to the online guest. */
+let debriefOpenRound = 0;
+
 function showRoundDebrief(rec, nextRound){
   if(!state) return;
   const r = rec || debriefRecordFromState();
@@ -2822,7 +3095,8 @@ function showRoundDebrief(rec, nextRound){
     if(typeof obj.progress === 'function'){
       try{
         const pr = obj.progress(p) || {};
-        if(pr.need > 1) progress = ` <span class="obj-progress">${pr.have} of ${pr.need} ${pr.unit||''}</span>`;
+        if(pr.need > 1) progress = ` <span class="obj-progress">${pr.have} of ${pr.need} ${pr.unit||''}` +
+          `${pr.note ? ` · ${pr.note}` : ''}</span>`;
       }catch(_){ /* a broken progress fn must not blank the debrief */ }
     }
     return `<div style="font-size:12px">${esc(p.name)} &mdash; ${obj.name}: `
@@ -2889,12 +3163,24 @@ function showRoundDebrief(rec, nextRound){
           question - "is the round I am the failsafe FOR still the round the
           game is in" is. A stale timer must never advance the game. */
   const debriefRound = state.round;
+  /* >>> THE DECLARATION THIS FLAG WAS MISSING. renderTurnBanner() reads
+     >>> `debriefOpenRound` to label the phase line "Round N debrief" while the
+     >>> summary is on screen, but the name had never been declared anywhere in
+     >>> the file: `node --check` passed (it is a runtime ReferenceError, not a
+     >>> syntax error) and EVERY renderAll() threw
+     >>> `ReferenceError: debriefOpenRound is not defined` - so the whole board
+     >>> failed to paint on the opening beginRound() and nothing else in the
+     >>> file could be exercised. It is a module-level flag, NOT state: it never
+     >>> crosses the JSON relay, it only names the dialog currently on screen.
+     >>> Set when the debrief opens, cleared the moment it closes. */
+  debriefOpenRound = r.round;
   let advanced = false;
   let failsafe = null;
   const next = ()=>{
     if(advanced) return;
     advanced = true;
     if(failsafe !== null){ clearTimeout(failsafe); failsafe = null; }
+    debriefOpenRound = 0;
     hideModal();
     /* A debrief shown for a game that has ALREADY ended (a bare call from the
        end screen, or a late snapshot) must not start a seventh round: the
@@ -3053,16 +3339,40 @@ const MODAL_FOCUSABLE = [
    Rules modal from a commit modal is the real case - restores to the control
    that opened it rather than to a detached node. */
 let modalReturnFocus = null;
+/* >>> TABBABLE, NOT JUST FOCUSABLE. This predicate is the whole D3 fix.
+   modalFocusables() used to answer "is this element focusable?", and for a
+   group of <button>s that is the wrong question. The Rules tabs are a roving
+   tabindex: all seven are <button role="tab">, so every one of them passed
+   `button` in the selector and the -1 ones were handed to the wrap logic as if
+   they were stops. Consequences, measured:
+       Tab 1: #modalCloseBtn        IN-MODAL=true
+       Tab 2: #rules-tab-objective  IN-MODAL=true
+       Tab 3: BODY                  IN-MODAL=false   <<< ESCAPED
+   items[last] was a tab that can never hold focus, so the forward-wrap branch
+   (`inside===items.length-1`) never fired; the handler returned without
+   preventDefault, and Chrome's own Tab walked past the six tabindex="-1" tabs
+   and out of an aria-modal="true" dialog. A player could then start drafting
+   behind an open Rules dialog.
+
+   So the cycle is normalised to real stops: an element qualifies only if it is
+   focusable AND still in the tab order. An explicit tabindex="-1" takes a
+   button back OUT of the cycle, which is the entire point of a roving group.
+   `.disabled` stays excluded (a disabled form control is focusable-flagged but
+   untabbable), and `aria-disabled` does NOT - an aria-disabled control is
+   deliberately still a stop, because it is the only way its "why not" can be
+   read. The commit modal has no roving group, so its cycle is unchanged. */
+function modalTabbable(el){
+  if(!el || el.disabled) return false;
+  const ti = el.getAttribute('tabindex');
+  if(ti !== null && parseInt(ti, 10) < 0) return false;
+  if(el.getAttribute('aria-hidden') === 'true') return false;
+  /* offsetParent is null for a display:none subtree. */
+  return el.offsetParent !== null;
+}
 function modalFocusables(){
   const box = document.getElementById('skirmishModal').querySelector('.box');
   if(!box) return [];
-  return Array.prototype.filter.call(
-    box.querySelectorAll(MODAL_FOCUSABLE),
-    /* offsetParent is null for display:none subtrees; the explicit
-       `disabled` check covers form controls, which stay focusable-flagged
-       but are not tabbable in every browser. */
-    el => !el.disabled && el.offsetParent !== null
-  );
+  return Array.prototype.filter.call(box.querySelectorAll(MODAL_FOCUSABLE), modalTabbable);
 }
 /* ---- MODAL TITLES ARE PLAIN TEXT -------------------------------------------
    CONTRACT: the `title` argument to showModal() is PLAIN TEXT. It is assigned
@@ -3128,11 +3438,23 @@ function showModal(title, bodyHtml, opts={}){
   document.getElementById('skirmishBody').scrollTop = 0;
   /* Focus lands in the dialog on every open, not only the dismissible ones:
      a Skirmish Decision modal is the ONE place where a keyboard player must
-     not be able to wander into the board underneath. */
+     not be able to wander into the board underneath.
+
+     >>> AND IT LANDS SOMEWHERE VISIBLE (D3). Measured: focus went to `.box`,
+     whose tabindex="-1" matches the stylesheet's bare `:focus{outline:none}`
+     and NOT `:focus-visible` (it was moved by script, not by Tab), so the
+     computed outline was `none` - the first thing a keyboard player saw on
+     every dialog was no indicator at all, and on the Rules dialog the very
+     next Tab moved them somewhere else entirely. A real control carries the
+     existing `:focus-visible` ring, so the first stop in the dialog is now the
+     first TABBABLE thing in it (the Rules close button, the commit slider),
+     with `.box` kept only as the fallback for a dialog that has no controls.
+     The ring still obeys :focus-visible, so a player who opened the dialog
+     with a mouse does not get one. */
   const enter = ()=>{
-    if(dismissible && !modal.classList.contains('hidden')){
-      const closeBtn = document.getElementById('modalCloseBtn');
-      if(closeBtn) closeBtn.focus();
+    const first = modalFocusables()[0];
+    if(first && typeof first.focus === 'function'){
+      try{ first.focus(); return; }catch(_){ /* fall through to the .box pad */ }
     }
     if(box && typeof box.focus === 'function') box.focus();
   };
@@ -3199,15 +3521,44 @@ document.getElementById('skirmishModal').addEventListener('keydown', (e)=>{
   const first = items[0], last = items[items.length-1];
   const active = document.activeElement;
   const inside = items.indexOf(active);
+  /* >>> FOCUS CAN LAND ON SOMETHING THAT IS NOT A STOP, AND STILL BE INSIDE.
+     Two ways: `.box` itself (tabindex="-1", the landing pad) and any element of
+     a roving group that has been arrowed away from (tabindex="-1"). In both
+     cases the browser's own "next tabbable" is computed from a node that is
+     NOT in the cycle, so it leaves the dialog. So when focus is not on a stop
+     we stop delegating and pick the stop ourselves: the first one AFTER the
+     active node in document order, or wrap to the head; backwards, the last
+     one before it, or wrap to the tail. */
+  const afterActive = (node)=>{
+    if(!node || typeof node.compareDocumentPosition !== 'function') return null;
+    for(let i=0;i<items.length;i++){
+      if(items[i].compareDocumentPosition(node) & 4 /* DOCUMENT_POSITION_FOLLOWING */) return items[i];
+    }
+    return null;
+  };
+  const beforeActive = (node)=>{
+    if(!node || typeof node.compareDocumentPosition !== 'function') return null;
+    for(let i=items.length-1;i>=0;i--){
+      if(items[i].compareDocumentPosition(node) & 2 /* DOCUMENT_POSITION_PRECEDING */) return items[i];
+    }
+    return null;
+  };
   let next = null;
-  if(e.shiftKey){
-    /* Shift+Tab off the head wraps to the tail. If focus is NOT on a listed
-       item (it is on .box, say) treat it as "before the first" so a
-       backwards Tab from the dialog chrome lands inside, not behind it. */
+  if(inside === -1){
+    /* Not a stop: forward takes the next stop after it, backward the one
+       before it, and either end of the dialog wraps. This is what keeps a
+       roving tabindex group from being an exit. */
+    if(e.shiftKey) next = beforeActive(active) || last;
+    else next = afterActive(active) || first;
+  } else if(e.shiftKey){
+    /* Shift+Tab off the head wraps to the tail. */
     if(inside<=0) next = last;
-  } else {
-    if(inside===-1 || inside===items.length-1) next = first;
+  } else if(inside===items.length-1){
+    next = first;
   }
+  /* In the middle of the cycle we return without preventDefault and let the
+     browser move: re-implementing ordinary forward motion is how a trap ends
+     up skipping controls or looping on one. */
   if(!next) return;
   e.preventDefault();
   try{ next.focus(); }catch(_){ /* never swallow the Tab entirely */ }
@@ -3486,10 +3837,17 @@ const PHASE_LABEL_TEXT = Object.freeze({
   'critical':    'Collapse imminent',
   'final-round': 'Final round',
 });
-/* Dread at or over the Collapse threshold is 'critical', whatever the round. */
-function phaseKey(){
+/* Dread at or over the Collapse threshold is 'critical', whatever the round.
+   `roundOverride` lets a caller ask about a round OTHER than the one the game is
+   currently in. The round debrief needs exactly that: while the summary for
+   round N is on screen the game is (deliberately) still ON round N, but the
+   "Coming up" line is about round N+1 - and reading phaseKey() there would
+   label the next round with the round that just finished. */
+function phaseKey(roundOverride){
   const s = state;
-  const r = clamp((s && s.round) | 0, 1, TOTAL_ROUNDS);
+  const r = (typeof roundOverride === 'number' && roundOverride > 0)
+    ? clamp(roundOverride|0, 1, TOTAL_ROUNDS)
+    : clamp((s && s.round) | 0, 1, TOTAL_ROUNDS);
   const dread = s ? (s.dread | 0) : 0;
   const atCollapse = (typeof OD !== 'undefined' && OD.Chaos && typeof OD.Chaos.COLLAPSE_AT === 'number')
     ? OD.Chaos.COLLAPSE_AT : 4;
@@ -3606,13 +3964,34 @@ function renderBoardHeader(){
    throw inside renderAll(). */
 const SR_MAX = 120;
 let srLast = '';
+/* >>> TRUNCATION CUT MID-WORD (D4). This used to be
+   `msg.slice(0, SR_MAX - 1).trim() + '\u2026'`, a hard character cut at 119, and
+   a live region with aria-atomic="true" announces the string it is given - so a
+   message that ran over was not merely short, it was MALFORMED: a player heard
+   "...they unlock in Round 2. Sea" and could not tell whether "Sea" was a new
+   fact, half a word, or the start of the tail the ceiling had just eaten. The
+   ellipsis was decoration on a lie.
+   >>> Now the cut is made at the last SPACE inside the budget, so a truncated
+   message ends on a whole word and the tail is honestly declared missing
+   rather than half-spoken. The raw character cut survives ONLY as the fallback
+   for a prefix with no space in it at all (a single unbroken token), where
+   there is no word boundary to cut on. */
+function srTruncate(msg){
+  if(msg.length <= SR_MAX) return msg;
+  const budget = msg.slice(0, SR_MAX - 1);
+  const sp = budget.lastIndexOf(' ');
+  const cut = (sp > 0) ? budget.slice(0, sp) : budget;
+  /* Never end on dangling punctuation - "…, and" reads as a truncated clause
+     even though it is a whole word. */
+  return cut.replace(/[\s,;:.!?\u2014\u2013-]+$/, '') + '\u2026';
+}
 function srWrite(parts){
   const msg = (parts || []).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   if(!msg || msg === srLast) return;
   const el = document.getElementById('srLive');
   if(!el) return;
   srLast = msg;
-  el.textContent = (msg.length > SR_MAX) ? msg.slice(0, SR_MAX - 1).trim() + '\u2026' : msg;
+  el.textContent = srTruncate(msg);
 }
 /* One delta per fact, compared against the value that fact held last time.
    `value` may be anything JSON-comparable as a string; the map is keyed by
@@ -3666,7 +4045,7 @@ function srObjectiveSentence(i){
   if(typeof obj.progress === 'function'){
     try{
       const pr = obj.progress(p) || {};
-      if(pr && pr.need > 1) prog = `, ${pr.have} of ${pr.need} ${pr.unit||''}`;
+      if(pr && pr.need > 1) prog = `, ${pr.have} of ${pr.need} ${pr.unit||''}${pr.note ? ` and ${pr.note}` : ''}`;
     }catch(_){ /* a broken progress fn must not silence the fact it qualifies */ }
   }
   return met
@@ -3705,29 +4084,43 @@ function srWagerDeclaration(){
    deep re-announces the stance and both tokens too, and the message walks past
    the 120-character ceiling carrying the old news. */
 const srWagerSeen = { wager: 'normal', plus: false, reroll: false };
-function srWagerSentence(decl){
+/* The BITS, not the write. >>> D4: these used to be announced through
+   srWagerSentence() -> srWrite() on their own, which meant that a wager click
+   and a Troop-count click - two things a player does together, and which the
+   engine composes into ONE message whenever they happen in the same render -
+   produced TWO writes. #srLive is aria-atomic, so the second write replaces the
+   first: the stance announcement and the "your commitment moved" announcement
+   could never both be heard, and which one survived was an accident of call
+   order. Returning the facts and letting the CALLER compose them means one
+   write, one message, both facts, still under the 120-character ceiling.
+   The sentences are also shorter than the originals ("ALL IN declared: every
+   Troop committed." vs "Wager declared: ALL IN. Every Troop is on the line."),
+   because the old wording spent 53 of 120 characters restating a word the
+   player had just been handed by the chip's own label. */
+function srWagerBits(decl){
   const d = (decl && (decl.wager || (decl.betrayal && (decl.betrayal.plus || decl.betrayal.reroll))))
     ? decl : srWagerDeclaration();
-  if(!d) return;
+  if(!d) return [];
   const w = d.wager || 'normal';
   const bet = d.betrayal || {};
   const bits = [];
   if(w !== srWagerSeen.wager){
     srWagerSeen.wager = w;
-    if(w === 'allin') bits.push('Wager declared: ALL IN. Every Troop is on the line.');
-    else if(w === 'ghost') bits.push('Wager declared: GHOST. No Troop is on the line.');
+    if(w === 'allin') bits.push('ALL IN declared: every Troop committed.');
+    else if(w === 'ghost') bits.push('GHOST declared: no Troop committed.');
     else bits.push('Wager cleared: NORMAL, no pledge.');
   }
   if(!!bet.plus !== srWagerSeen.plus){
     srWagerSeen.plus = !!bet.plus;
-    bits.push(srWagerSeen.plus ? 'Plus one total declared.' : 'Plus one total withdrawn.');
+    bits.push(srWagerSeen.plus ? '+1 total declared.' : '+1 total withdrawn.');
   }
   if(!!bet.reroll !== srWagerSeen.reroll){
     srWagerSeen.reroll = !!bet.reroll;
-    bits.push(srWagerSeen.reroll ? 'Re-roll declared. Your die is cast twice, the second cast stands.' : 'Re-roll withdrawn.');
+    bits.push(srWagerSeen.reroll ? 'Re-roll declared; second cast stands.' : 'Re-roll withdrawn.');
   }
-  srWrite(bits);
+  return bits;
 }
+function srWagerSentence(decl){ srWrite(srWagerBits(decl)); }
 /* The stance block's LOCKED state. The chips are painted `disabled` before
    Round 2, and a disabled chip is not focusable and is skipped by the tab
    order - so without this, "All In and Ghost are not available" is a fact a
@@ -3735,6 +4128,250 @@ function srWagerSentence(decl){
 function srWagerLockSentence(){
   const locked = !!document.querySelector('#wagersStance .wagers-stance[data-wager="allin"].disabled');
   return srFact('wagerLock', String(locked), locked ? 'Wager locked: All In and Ghost unlock in Round 2.' : null);
+}
+
+/* ---- THE WAGER AND TOKEN CHIPS (D2) ------------------------------------
+   js/feature-wagers.js renders NORMAL / ALL IN / GHOST / +1 TOTAL / RE-ROLL
+   as bare <div>s: measured role null and tabindex null on all five, with
+   cursor:pointer. So the two decisions in the entire game that carry a real
+   cost - risk every Troop for +3 Influence, or risk none for +2 - were the
+   two a keyboard player could not take at all, and neither was announced.
+   A player who wanted to gamble had to be told by someone else.
+
+   feature-wagers.js is not this file's to edit, so the upgrade is applied from
+   here, at MOUNT time, through a delegated listener on the commit modal's
+   mount root. #skirmishBody is the right host: it survives showModal()
+   replacing the body's innerHTML, so the listener is installed once and the
+   attributes are re-stamped on every Skirmish.
+
+   The attributes:
+     role="button"    a div with a click handler announces nothing at all;
+     tabindex="0"     so Tab reaches it. Kept at 0 even when LOCKED: the
+                       `.disabled` class is the feature's own visual lock and
+                       removing the chip from the tab order would hide the only
+                       thing that says WHY (see srWagerLockSentence);
+     aria-pressed     these are toggles, not actions, and a chip that looks
+                       selected must not be silent about it;
+     aria-disabled    present-but-unavailable rather than gone;
+     aria-label       the cost and the effect as ONE sentence, which is the
+                       part the chip's two-line visual layout makes hard to read
+                       aloud. The numbers come from the feature's own
+                       constants through wagerPayouts(), never re-typed. */
+const WAGER_CHIP_SELECTOR = '#wagersStance .wagers-stance, #wagersTokens .wagers-token';
+
+function wagerChipLabel(chip){
+  const p = wagerPayouts();
+  const wager = chip.dataset.wager;
+  let label;
+  if(wager === 'allin')       label = `All In: commit every Troop. A win pays +${p.allInWin} Influence, a loss costs ${p.allInLoss}.`;
+  else if(wager === 'ghost')  label = `Ghost: commit no Troops. A win pays +${p.ghostWin} Influence, a loss or a tie costs nothing.`;
+  else if(wager === 'normal') label = 'Normal: no pledge, commit any number of Troops.';
+  else if(chip.dataset.token === 'plus')   label = 'Add 1 Total: spend 1 Betrayal token to add 1 to your committed total, in public before the dice fall.';
+  else if(chip.dataset.token === 'reroll') label = 'Re-roll: spend 1 Betrayal token; your die is cast twice and the second cast stands. Once per Skirmish.';
+  else return '';
+  if(chip.classList.contains('disabled')){
+    label += chip.dataset.wager
+      ? ' Locked: All In and Ghost unlock in Round 2.'
+      : ' Locked: you are holding no Betrayal tokens.';
+  }
+  return label;
+}
+
+function paintWagerChips(root){
+  if(!root || typeof root.querySelectorAll !== 'function') return;
+  const stance = root.querySelector('#wagersStance');
+  const tokens = root.querySelector('#wagersTokens');
+  if(stance){ stance.setAttribute('role','group'); stance.setAttribute('aria-label','Wager'); }
+  if(tokens){ tokens.setAttribute('role','group'); tokens.setAttribute('aria-label','Betrayal tokens'); }
+  root.querySelectorAll(WAGER_CHIP_SELECTOR).forEach(chip=>{
+    chip.setAttribute('role', 'button');
+    chip.setAttribute('tabindex', '0');
+    chip.setAttribute('aria-pressed', chip.classList.contains('selected') ? 'true' : 'false');
+    chip.setAttribute('aria-disabled', chip.classList.contains('disabled') ? 'true' : 'false');
+    const label = wagerChipLabel(chip);
+    if(label) chip.setAttribute('aria-label', label);
+  });
+}
+
+function installWagerChipA11y(host){
+  if(!host) return;
+  /* >>> RE-PAINT ON EVERY MOUNT, LISTEN ONCE. showModal() REPLACES
+     #skirmishBody's innerHTML, so every Skirmish brings five BRAND-NEW chips
+     with none of these attributes on them. Guarding the paint behind the
+     "listeners already installed" flag stamped the first Skirmish's chips and
+     left every Skirmish after it exactly as unlabelled as before - measured:
+     round 1's modal had role="button" on all five and round 3's had role null
+     on all five. The listeners live on the host and survive the innerHTML
+     swap; the attributes live on the chips and do not. */
+  paintWagerChips(host);
+  if(host.__odWagerChips) return;
+  host.__odWagerChips = true;
+  /* Bubble phase on the host, so it runs AFTER the feature's own onclick has
+     repainted `.selected` - which is what makes aria-pressed read the state the
+     player is looking at rather than the one they were in. */
+  host.addEventListener('click', (ev)=>{
+    const chip = (ev.target && ev.target.closest) ? ev.target.closest(WAGER_CHIP_SELECTOR) : null;
+    if(!chip) return;
+    paintWagerChips(host);
+  });
+  host.addEventListener('keydown', (ev)=>{
+    if(ev.key!=='Enter' && ev.key!==' ' && ev.key!=='Spacebar') return;
+    const chip = (ev.target && ev.target.closest) ? ev.target.closest(WAGER_CHIP_SELECTOR) : null;
+    if(!chip) return;
+    /* Space would scroll the commit body; Enter would otherwise activate
+       whatever the browser thinks the form control is. Neither is wanted. */
+    ev.preventDefault();
+    ev.stopPropagation();
+    /* >>> ONE code path. The feature owns the click, so a keyboard press is
+       delivered as a click on the chip rather than as a second, parallel
+       implementation of setWager/setToken. Anything that changes about the
+       chips from here on is picked up by the keyboard for free. */
+    chip.click();
+  });
+}
+
+/* ------------------------- the Surge (D6) -------------------------
+   THE SURGE IS THE LARGEST UNCAPPED SWING IN THE GAME and it used to be
+   announced NOWHERE. Measured: both players roll 1d6 straight to Influence at
+   the top of Round 6; the only trace was a clause in a status chip ("Surge: 5
+   and 5 straight to Influence") and a log line third-from-top in a rail the
+   player is not looking at - worth 10.7% of the final score on average, and
+   pointing the WRONG way in 49% of games (both seats roll the same d6, so the
+   larger roll wins the round and the smaller one never even catches up).
+   A player who cannot see that number cannot plan the last round around it.
+
+   The rolls themselves are feature-owned (js/feature-chaos.js writes
+   state.surgeRolls and draws its own dice overlay). What the engine owns is
+   the two things a feature cannot do: the live region, and a presentation hook
+   that fires on a VALUE CHANGE so a re-render never re-announces it. Both read
+   state.surgeRolls and nothing else, so they work identically on the host and
+   on the online guest - the guest never runs hooks, and its render loop is the
+   only change feed it has. */
+
+/* The identity of the Surge currently on the table. Null until one has rolled.
+   NOT on `state`: this is a presentation flag, and state is JSON.stringify'd to
+   the online guest on every render. */
+let surgeSeen = null;
+/* The wagers feature's own payout constants, read (never re-typed) so a chip's
+   aria-label cannot quote a different number from the rules copy or from
+   settleWagers(). Each falls back to the value the feature ships today, so the
+   label is still correct if the feature is deleted. */
+function wagerPayouts(){
+  const w = (typeof OD !== 'undefined' && OD.Wagers) ? OD.Wagers : null;
+  return {
+    allInWin:  (w && typeof w.ALL_IN_WIN  === 'number') ? w.ALL_IN_WIN  : 3,
+    allInLoss: (w && typeof w.ALL_IN_LOSS === 'number') ? w.ALL_IN_LOSS : 2,
+    ghostWin:  (w && typeof w.GHOST_WIN   === 'number') ? w.GHOST_WIN   : 2,
+  };
+}
+function surgeKey(){
+  const sr = (state && state.surgeRolls) || null;
+  return (sr && Array.isArray(sr.values)) ? `r${sr.round|0}:${sr.values.join(',')}` : '';
+}
+/* "Player 1 +5, Player 2 +3" - the raw result, from the SAME array the engine
+   banked, so the announcement cannot disagree with the score. */
+function surgeTally(){
+  const sr = (state && state.surgeRolls) || null;
+  if(!sr || !Array.isArray(sr.values) || !sr.values.length || !state.players) return '';
+  return sr.values.map((v,i)=>{
+    const p = state.players[i];
+    return `${p ? p.name : `Seat ${i+1}`} +${v|0}`;
+  }).join(', ');
+}
+function srSurgeSentence(){
+  const tally = surgeTally();
+  return tally ? `THE SURGE: ${tally} straight to Influence. Uncapped, no take-backs.` : null;
+}
+/* The visible half. showNotice is the engine's existing inline banner: an
+   aria-live status region, pointer-events:none, self-clearing, and built from a
+   cssText the function owns - so the presentation needs no stylesheet, which
+   matters because css/style.css is not this file's to edit. OD.Fx.shake, which
+   showNotice calls, is itself a no-op under prefers-reduced-motion, so the
+   banner appears without movement when the player has asked for that.
+   Idempotent on the same key, so the six renders that happen while the feature
+   replays its dice animation produce exactly one banner. */
+function presentSurge(){
+  const key = surgeKey();
+  if(!key || key === surgeSeen) return;
+  surgeSeen = key;
+  const tally = surgeTally();
+  if(!tally) return;
+  OD.Sound.play('stat.gain');
+  showNotice(`THE SURGE \u2014 ${tally} straight to Influence`, {id:'odSurgeNotice', ms:5200});
+}
+
+/* --------------------- the commit modal (D4) ---------------------
+   >>> SELECTING A TACTIC CARD ANNOUNCED NOTHING. Measured: aria-pressed
+   >>> toggled, the odds panel repainted live, and #srLive still read
+   >>> "Wager locked: All In and Ghost unlock in Round 2." - the previous
+   >>> message, verbatim - because nothing in the commit modal ever wrote to
+   >>> the live region on a card select or on a Troop change. A player who
+   >>> cannot see the panel was told, on every single interaction, about a
+   >>> rule that had not changed.
+   >>> The three facts below are the ones the panel exists to deliver, and they
+   >>> are read out of the panel's own state (the selected card id, the slider
+   >>> value, and the same runOdds() call the bars are drawn from) so the
+   >>> announcement cannot report a different number from the one on screen.
+   >>> Composed as BITS and written by the caller, for the same reason as
+   >>> srWagerBits(): one write per interaction, all of its facts, no ordering
+   >>> accident. */
+const srCommitSeen = { troops: null, card: null };
+/* The card's effect in the fewest words that still mean something. The full
+   `desc` runs to 70 characters ("+2 combat. You draw 1 Tactic card after the
+   Skirmish, win or lose."), and a card line plus a Troop line plus an odds
+   line has to fit inside 120 - so the announced card is the NAME and the one
+   number the player is actually deciding on, which is the combat modifier. */
+function srCardBits(cardId){
+  const id = cardId || '';
+  if(srCommitSeen.card === id) return [];
+  srCommitSeen.card = id;
+  const def = id ? CARD_DEFS[id] : null;
+  if(!def) return ['Card cleared. No modifier.'];
+  const mod = (def.mod === null || def.mod === undefined)
+    ? 'modifier is a fresh d6 roll'
+    : `+${def.mod} combat`;
+  return [`Card ${def.name}: ${mod}.`];
+}
+/* The live win percentage, computed through the SAME two calls the odds panel
+   makes (defenderOddsHtml / aggressorOddsHtml) with the same specs, so the
+   spoken number is the drawn number. Returns null when a projection is not
+   available yet - the aggressor cannot know the defender's stance, and the
+   defender cannot know the aggressor's Troops until they commit - which is the
+   correct answer, not a missing one. */
+function commitWinPct(playerIdx, troops, cardId){
+  if(!(playerIdx >= 0) || !state || !state.players || !skirmishCtx) return null;
+  const fever = isFeverRound();
+  const t = Math.max(0, troops|0);
+  let p = null;
+  try{
+    if(playerIdx === skirmishCtx.defenderIdx){
+      if(!skirmishCtx.aggCommit) return null;
+      const aggIdx = skirmishCtx.aggressorIdx;
+      const theirs = projectionSpec(aggIdx, skirmishCtx.aggCommit.troops, null, true,
+        garrisonBonusOf(aggIdx) + tokenBonusOf(skirmishCtx.aggCommit));
+      const mine = projectionSpec(playerIdx, t, cardId, false, tokenBonusOf(skirmishCtx.defCommit));
+      p = runOdds(mine, theirs, fever);
+    } else {
+      p = runOdds(
+        projectionSpec(playerIdx, t, cardId, true, garrisonBonusOf(playerIdx)),
+        projectionSpec(1 - playerIdx, 0, null, false, 0), fever);
+    }
+  }catch(_){ return null; }
+  return (p && typeof p.winPct === 'number') ? Math.round(p.winPct*10)/10 : null;
+}
+function srCommitBits(playerIdx, troops, cardId){
+  const out = [];
+  const t = Math.max(0, troops|0);
+  /* Reset on a fresh modal, in showCommitModal, so the first interaction of a
+     new Skirmish speaks instead of being deduped against the last one's. */
+  if(srCommitSeen.troops !== t){
+    srCommitSeen.troops = t;
+    out.push(`Committing ${t} ${t === 1 ? 'Troop' : 'Troops'}.`);
+  }
+  out.push.apply(out, srCardBits(cardId));
+  const pct = commitWinPct(playerIdx, t, cardId);
+  if(pct !== null) out.push(`Win chance ${pct}%.`);
+  return out;
 }
 /* Everything the board currently says, as a list of DELTAS. Called once per
    renderAll(); the order is the order a player would want them read, and it
@@ -3746,6 +4383,14 @@ function srDeltas(){
   const heat = HEAT_LABEL[r] || '';
   const phase = (PHASE_LABEL_TEXT[phaseKey()] || '').replace(/&[a-z]+;/gi, '');
   const md = !!state.meltdown;
+  /* >>> THE SURGE IS FIRST (D6), deliberately. It is the biggest uncapped
+     >>> swing in the game and it happens exactly once, in the last round, at the
+     >>> top of it. Every other fact below it is context; a message that runs
+     >>> past the 120-character ceiling is truncated from the END, so anything
+     >>> listed after a long Surge line is the thing that gets eaten. Order is
+     >>> therefore also priority. */
+  const surgeKeyNow = surgeKey();
+  out.push(srFact('surge', surgeKeyNow, surgeKeyNow ? srSurgeSentence() : null));
   out.push(srFact('meltdown', md, md
     ? 'Meltdown: Advanced is free everywhere and holding the Garrison is compulsory.'
     : (srSeen.meltdown === 'true' ? 'Meltdown has passed.' : null)));
@@ -3791,11 +4436,25 @@ function renderAll(){
   renderLog();
   document.getElementById('roundLabel').textContent = `${state.round} / ${TOTAL_ROUNDS}`;
   const phaseNames = {draw:'Drawing cards…', draft:'Drafting the board', 'skirmish-decide':'Skirmish decision', 'skirmish-commit':'Skirmish in progress', ended:'Game over'};
-  document.getElementById('phaseLabel').textContent = phaseNames[state.phase] ? `— ${phaseNames[state.phase]}` : '';
+  /* >>> WHILE A ROUND DEBRIEF IS OPEN (D5), the phase line names the round the
+     >>> dialog is summarising rather than the phase the round happened to be in
+     >>> when it ended. It used to read "— Drawing cards..." - the NEXT round's
+     >>> phase - because endRound had already incremented state.round before
+     >>> showing the summary, so the HUD behind the dialog described a round
+     >>> that had not started. Now the round is NOT advanced until the player
+     >>> answers the debrief (see endRound / showRoundDebrief), so `state.round`
+     >>> is already correct here; this flag only supplies the one label that
+     >>> state.phase cannot express without inventing a new phase value, which
+     >>> is out of bounds. */
+  const phaseText = debriefOpenRound
+    ? `Round ${debriefOpenRound} debrief`
+    : (phaseNames[state.phase] ? phaseNames[state.phase] : '');
+  document.getElementById('phaseLabel').textContent = phaseText ? `— ${phaseText}` : '';
   const ev = getEvent();
   document.getElementById('eventLine').innerHTML = ev ? `Round Event: <b style="color:var(--gold)">${ev.name}</b> - ${ev.desc}` : '';
   /* The board's colour-coded state, in words, only where it actually moved.
      Last in renderAll so every fact it reads has just been re-rendered. */
+  presentSurge();
   srWrite(srDeltas());
   if(online.enabled && online.isHost) wsSend({type:'state', state});
 }
@@ -3888,7 +4547,8 @@ function objectiveHudLine(p, obj){
   if(typeof obj.progress === 'function'){
     try{
       const pr = obj.progress(p) || {};
-      if(pr.need > 1) progress = ` <span class="obj-progress">${pr.have} of ${pr.need} ${pr.unit||''}</span>`;
+      if(pr.need > 1) progress = ` <span class="obj-progress">${pr.have} of ${pr.need} ${pr.unit||''}` +
+        `${pr.note ? ` · ${pr.note}` : ''}</span>`;
     }catch(_){ /* a broken progress fn must not blank the whole HUD */ }
   }
   return `<div class="objective-line">Objective: <b>${obj.name}</b> - ${obj.desc} ` +
@@ -4013,9 +4673,31 @@ function renderBoard(){
     const contestedCls = (loc.id==='rift' && state.riftContested) ? ' contested' : '';
     const riftTag = (loc.id==='rift') ? '<span class="taken-tag rift-tag">RIFT</span>' : '';
 
+    /* >>> THE TILE'S OWN BODY WAS A DEAD ZONE (D4). Measured: clicking the
+       name/icon block produced 0 DOM changes - no log, no state, no hint. It
+       is the largest target on the tile and it is the first thing every player
+       tries, so the honest-looking dead click was a silent refusal in the
+       middle of the board.
+
+       It is not made into a control here, because "which tier?" is a real
+       question the tile cannot answer for the player, and guessing Basic would
+       silently spend their pick. It is made HONEST instead: a `title` on the
+       head states either what to do (choose a tier below) or why nothing will
+       happen (already taken / not your turn), and `aria-hidden` is deliberately
+       NOT used - the site's name is the tile's heading and hiding it would cost
+       a screen-reader user the only thing the head has to say. The pointer
+       affordance itself is a stylesheet question, reported in the handover:
+       `.loc-head{ cursor:default }` and, ideally, no `:hover` lift on a head
+       that cannot be pressed. */
+    const headTitle = taken
+      ? `${state.players[taken.owner].name} already took this site (${taken.tier==='advanced' ? 'Advanced' : 'Basic'}) — nothing left to pick here.`
+      : (pickable
+          ? 'Choose a tier below: Basic is free, Advanced costs more and pays more.'
+          : 'Not your turn to pick — the tier rows are the only live parts of this tile.');
+
     return `
       <div class="loc${riftCls}${contestedCls}${pickable?' pickable':''}${taken?' loc-taken':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
-        <div class="loc-head">
+        <div class="loc-head" data-inert="1" title="${esc(headTitle)}">
           <div class="loc-icon" style="background:${locIcon.bg}">${icon(locIcon.icon)}</div>
           <h3>${riftTag}${loc.name}</h3>
         </div>
@@ -4050,15 +4732,32 @@ function renderIntrigueHand(){
   el.innerHTML = player.intrigueHand.map(c=>{
     const def = INTRIGUE_DEFS[c];
     const affordable = canPlayIntrigue(player);
+    /* >>> D4: AN UNAFFORDABLE PLAY WAS `disabled`, WHICH MADE THE ENGINE'S OWN
+       REFUSAL UNREACHABLE. `disabled` on a button removes it from the tab
+       order, suppresses the click, and cancels the key activation - so the
+       handler below could never fire, and the one sentence that explains the
+       rule ("can't afford that Intrigue card - it costs 2 Credits") was dead
+       code reachable only from a console. The control is now aria-disabled:
+       still a tab stop, still focusable, still announces why, and still says
+       no. aria-disabled over disabled is the whole point - a control that
+       cannot be explained cannot be focused, and cannot be focused means the
+       reason is never read. */
+    const why = `You cannot afford this Intrigue card \u2014 it costs ${INTRIGUE_PLAY_COST} Credits and you have ${player.credits}.`;
     return `<div class="intrigue-card" data-card="${c}">
       <b>${def.name}</b>
       <div class="intrigue-desc">${def.desc}</div>
-      <button type="button" class="secondary intrigue-play-btn" data-card="${c}"${affordable?'':' disabled'}>Play (${INTRIGUE_PLAY_COST} Credits)</button>
+      <button type="button" class="secondary intrigue-play-btn" data-card="${c}"
+        ${affordable ? 'aria-disabled="false"' : `aria-disabled="true" title="${esc(why)}"`}>Play (${INTRIGUE_PLAY_COST} Credits)</button>
     </div>`;
   }).join('');
+  /* Bound for EVERY card, affordable or not: an unaffordable press has to reach
+     humanPlayIntrigue to be refused out loud (see D4 above). It is a no-op
+     there beyond the refusal, and the latch in it means a double-press still
+     only produces one message. */
   el.querySelectorAll('.intrigue-play-btn').forEach(btn=>{
-    if(btn.hasAttribute('disabled')) return;
-    btn.onclick = ()=> humanPlayIntrigue(btn.dataset.card);
+    /* The event is passed through so the D5 latch can tell a reflexive
+       second click at the same pixel from a deliberate click on another card. */
+    btn.onclick = (ev)=> humanPlayIntrigue(btn.dataset.card, ev);
   });
 }
 
@@ -4580,18 +5279,86 @@ onDom(()=>{
 document.getElementById('startBtn').addEventListener('click', ()=>{ ensureAudioCtx(); sfx.click(); startGame(); });
 document.getElementById('gameMode').addEventListener('change', updateModeUI);
 
+/* ONE way to choose a mode, so the click path and the keyboard path cannot
+   drift. It writes #gameMode and re-runs updateModeUI, which is what paints
+   the Selected flag, reveals the Host/Join/Demo panels and - via
+   syncModeCardsA11y - sets aria-checked and the roving tabindex. */
+function selectMode(card){
+  if(!card || !card.dataset.mode) return;
+  ensureAudioCtx();
+  document.getElementById('gameMode').value = card.dataset.mode;
+  document.querySelectorAll('.mode-card').forEach(c=>c.classList.remove('selected'));
+  card.classList.add('selected');
+  updateModeUI();
+}
 document.querySelectorAll('.mode-card').forEach(card=>{
-  card.addEventListener('click', ()=>{
-    ensureAudioCtx();
-    document.getElementById('gameMode').value = card.dataset.mode;
-    document.querySelectorAll('.mode-card').forEach(c=>c.classList.remove('selected'));
-    card.classList.add('selected');
-    updateModeUI();
-  });
+  card.addEventListener('click', ()=> selectMode(card));
 });
 
-document.getElementById('soundToggle').addEventListener('click', toggleSound);
-document.getElementById('soundToggleGame').addEventListener('click', toggleSound);
+/* >>> KEYBOARD, for the group that had none. One delegated keydown on the
+   container rather than four on the cards: the cards' tabindex values are
+   rewritten by the roving logic on every selection, and a listener that
+   survives that is one less thing that can be silently unbound.
+
+   ArrowRight/ArrowDown and ArrowLeft/ArrowUp both move, because a radiogroup
+   is expected to work with either axis and the cards are laid out as a grid -
+   ArrowUp/Down are the natural keys for the row, ArrowLeft/Right for the
+   column, and a player will use both. Home/End go to the ends. */
+const modeGroup = document.getElementById('modeCards');
+if(modeGroup){
+  /* Selection follows focus, which is the standard: the roving tabindex moves
+     to the new card AND selectMode() makes it the answer, so the two can never
+     disagree - no state where focus is on Demo but Local is still checked. */
+  const cards = ()=> Array.prototype.slice.call(modeGroup.querySelectorAll('.mode-card'));
+  const focusCard = (card)=>{
+    if(!card) return;
+    selectMode(card);
+    if(typeof card.focus === 'function') card.focus();
+  };
+  const step = (from, delta)=>{
+    const list = cards();
+    if(!list.length) return;
+    const i = list.indexOf(from);
+    focusCard(list[(((i < 0 ? 0 : i) + delta) % list.length + list.length) % list.length]);
+  };
+  modeGroup.addEventListener('keydown', (e)=>{
+    if(e.ctrlKey || e.metaKey || e.altKey) return;
+    const card = (e.target && e.target.closest) ? e.target.closest('.mode-card') : null;
+    if(!card) return;
+    const key = e.key;
+    const list = cards();
+    let handled = true;
+    if(key==='Enter' || key===' ' || key==='Spacebar') selectMode(card);
+    else if(key==='ArrowRight' || key==='ArrowDown') step(card, 1);
+    else if(key==='ArrowLeft'  || key==='ArrowUp')   step(card, -1);
+    else if(key==='Home')  focusCard(list[0]);
+    else if(key==='End')   focusCard(list[list.length-1]);
+    else handled = false;
+    if(handled){
+      /* Space would otherwise scroll the setup screen; Enter would otherwise
+         submit the nearest form. */
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+  /* Do the upgrade now rather than relying on a later updateModeUI() call, so
+     the group is announced correctly even if a future edit drops that call. */
+  syncModeCardsA11y();
+}
+
+/* >>> THE SOUND SWITCH. role="switch" + tabindex come from setSoundUI(); all
+   that is left is to make Enter and Space do what a click does. A switch is
+   not a <button>, so the browser synthesises nothing for these keys - without
+   this the control is focusable, announced, and completely inert. */
+[document.getElementById('soundToggle'), document.getElementById('soundToggleGame')].forEach(el=>{
+  if(!el) return;
+  el.addEventListener('click', toggleSound);
+  el.addEventListener('keydown', (e)=>{
+    if(e.key!=='Enter' && e.key!==' ' && e.key!=='Spacebar') return;
+    e.preventDefault();
+    toggleSound();
+  });
+});
 setSoundUI();
 
 window.addEventListener('beforeunload', (e)=>{
@@ -4769,10 +5536,20 @@ updateModeUI();
 
 /* DOM-free surface for test/sites.test.js, and for anything else that needs
    the engine's own board table without a browser. The board is data, and the
-   table a feature has to agree with it lives here and nowhere else. */
+   table a feature has to agree with it lives here and nowhere else.
+
+   The OBJECTIVES block plus `startGame` / `getState` are the SIMULATION
+   surface: a harness installs a fake `document` and a synchronous timer queue
+   AFTER this file has loaded (onDom() has already declined to wire the page),
+   calls startGame() in demo mode - which deals two bots - drains the queue,
+   and reads the final state. That is how the objective met-rates were
+   MEASURED rather than guessed, and it is why the thresholds in OBJECTIVES
+   are numbers with a distribution behind them. */
 if(typeof module !== 'undefined' && module.exports){
   module.exports = {
     LOCATIONS, COST_RESOURCES, TOTAL_ROUNDS, CAPS,
     tierCost, tierIsAlwaysTakeable, canPayCost, takeCost, costPhrase,
+    OBJECTIVES, OBJECTIVE_BONUS, HAND_CAP, ARCHIVIST_PLAYED, INDUSTRIALIST_NEED,
+    startGame, getState: ()=> state,
   };
 }
