@@ -1898,7 +1898,7 @@ label{
 #board.has-rift::after{ content:none; }
 
 #boardRulesRow{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
-#boardRulesRow h3{ margin:0; min-width:0; white-space:nowrap; }
+#boardRulesRow h3{ margin:0; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; }
 /* The phase text is inline-styled by index.html, so the console-label
    treatment has to out-specify it. It is a LABEL, not a heading: 11px
    uppercase, letterspaced, sitting on the same rule as "BOARD". */
