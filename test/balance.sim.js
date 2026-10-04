@@ -2260,7 +2260,9 @@ function parseArgs(argv){
     else if(t === '--no-write'){ a.write = false; }
     else if(t === '--quiet'){ a.quiet = true; }
     else if(t === '--seed'){ a.seed = Number(argv[++i]); }
-    else if(t === '--games'){ a.games = Number(argv[++i]); }
+else if(t === '--games'){ a.games = Number(argv[++i]); }
+    else if(t === '--seat-games'){ a.seatGames = Number(argv[++i]); }
+    else if(t === '--diff-games'){ a.diffGames = Number(argv[++i]); }
     else if(t === '--iv-games'){ a.ivGames = Number(argv[++i]); }
     else if(t === '--help' || t === '-h'){ a.help = true; }
     else throw new Error('balance.sim: unknown argument "' + t + '"');
@@ -2277,7 +2279,9 @@ const USAGE = [
   '  --noise         print the sampling noise floor (same report, second seed)',
   '  --no-write      run the report without touching the baseline file',
   '  --seed N        override the batch seed',
-  '  --games N       override the baseline game count',
+'  --games N       override the baseline game count',
+  '  --seat-games N  override the per-seat-configuration game count',
+  '  --diff-games N  override the per-difficulty game count',
   '  --iv-games N    override the per-intervention game count',
   '',
   'npm run balance  ==  node test/balance.sim.js',

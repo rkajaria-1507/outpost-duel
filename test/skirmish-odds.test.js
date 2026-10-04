@@ -538,6 +538,14 @@ test('D3 archivist REQUIRES cards played - the clause that makes it missable', (
   const archivist = OBJ('archivist');
   assert.strictEqual(Engine.HAND_CAP, 5);
   assert.ok(Engine.ARCHIVIST_PLAYED >= 1, 'a threshold of zero would be no threshold');
+  /* The 2026 rebalance loosened the HAND half from HAND_CAP to HAND_CAP - 1
+     (ARCHIVIST_HAND). Reason, with the number: once the Archive started paying
+     standing instead of drawing into a full hand, it was drafted for Influence
+     rather than for cards and refilled the hand far less often - the objective
+     measured 8.2% met, i.e. worse than ignoring it. One card of slack is the
+     smallest change that keeps it a goal. Exported so this test reads the
+     number the engine actually uses instead of restating it. */
+  assert.strictEqual(Engine.ARCHIVIST_HAND, Engine.HAND_CAP - 1);
 
   /* THE DEFECT. The start-of-game deal is `drawCard(p, HAND_CAP)` for both
      players, so the OLD check `p.hand.length >= 5` was `5 >= 5` on the
@@ -554,13 +562,13 @@ test('D3 archivist REQUIRES cards played - the clause that makes it missable', (
   const churned = {hand:[1,2,3,4,5], cardsPlayed: Engine.ARCHIVIST_PLAYED};
   assert.strictEqual(archivist.check(churned), true,
     'a full hand AFTER playing the cards is the point of the objective');
-  assert.strictEqual(archivist.progress(churned).need, Engine.HAND_CAP);
+  assert.strictEqual(archivist.progress(churned).need, Engine.ARCHIVIST_HAND);
 
   /* One card short of the played clause is not met, however full the hand. */
   assert.strictEqual(archivist.check({hand:[1,2,3,4,5], cardsPlayed: Engine.ARCHIVIST_PLAYED - 1}), false);
 
-  /* A SHORT hand is never enough, however much was played. */
-  const short = {hand:[1,2,3,4], cardsPlayed: 9};
+  /* A hand one short of ARCHIVIST_HAND is never enough, however much was played. */
+  const short = {hand:[1,2,3], cardsPlayed: 9};
   assert.strictEqual(archivist.check(short), false);
 
   /* `progress` has to be honest in BOTH directions: before the played clause
@@ -576,7 +584,7 @@ test('D3 archivist REQUIRES cards played - the clause that makes it missable', (
   /* The description the player reads has to name both clauses. */
   assert.match(archivist.desc, new RegExp(String(Engine.ARCHIVIST_PLAYED)),
     'the desc must state the cards-played requirement');
-  assert.match(archivist.desc, new RegExp(String(Engine.HAND_CAP)),
+  assert.match(archivist.desc, new RegExp(String(Engine.ARCHIVIST_HAND)),
     'the desc must state the hand requirement');
 });
 

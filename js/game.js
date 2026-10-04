@@ -81,35 +81,84 @@ function groupHand(hand){
    >>> applyLocationEffect is driven by tierCost(), and OD.Board (published
    >>> below) hands the same numbers to a feature so no second copy can exist.
    >>> test/sites.test.js is the structural guard on that promise. */
+/* >>> THE TWO CONDITIONAL CLAUSES, and why there are two and not one.
+
+   Every site below pays a RESOURCE and then a small, scaling amount of
+   Influence. Which resource it keys off, and in which DIRECTION, is the whole
+   design, and the first attempt got it wrong in a way the simulator caught:
+
+   * POVERTY (Market / Quarry / Foundry / Bazaar) pays when the resource you
+     need is GONE. Being rich is worth nothing to these tiles; being broke is.
+     That is the brief's "a site that rewards a resource you're short on", and
+     it deliberately does NOT reward hoarding - a player who banks Credits never
+     sees the Market clause fire.
+   * ARMY (Garrison) pays for Troops you already hold, and it is the only tile
+     that does. That is the tile that makes HOLDING BACK worth something: the
+     army you did not spend keeps paying you standing, so spending it in a
+     Skirmish costs you next round's Income. Without it, attacking was strictly
+     free and the Hold Back button was dead.
+
+   >>> WHAT THE MEASUREMENT TAUGHT (kept here because it is easy to regress
+   into). The first pass keyed EVERY clause to a pool being FULL - "Market: +1
+   Influence per 4 Credits you hold" and so on - which reads like a reward for
+   efficiency and is in fact a reward for PASSIVITY. A bot that holds back
+   keeps its Troops AND its Credits, so every one of those clauses paid it, and
+   the difficulty ladder inverted: Easy banked 8.22 Influence a game at the
+   Garrison and 3.90 at the Shrine while Hard banked 1.65 and 0.83 - and Hard's
+   9 points a game of extra Skirmish Influence were more than cancelled. Easy
+   29.73 / Normal 29.97 / Hard 28.62 Influence per seat: the slider ran
+   backwards. Keying the clauses to POVERTY instead removes the passive income
+   and the ladder has somewhere to go again.
+
+   The Advanced PRICES are unchanged on purpose: they are the numbers
+   test/sites.test.js pins and the numbers js/feature-chaos.js prices the Rift's
+   Toll and Open Hands mutations against. Only the yields moved. */
 const LOCATIONS = [
   {id:'market',   name:'Market',
-    basic:{label:'+3 Credits', cost:{}},
-    advanced:{label:'+6 Credits', cost:{ore:1}, note:'pay 1 Ore'}},
+    basic:{label:'+2 Credits, +1 Influence if you have no Credits', cost:{}},
+    advanced:{label:'+4 Credits, +1 Influence if you have no Credits', cost:{ore:1}, note:'pay 1 Ore'}},
   {id:'quarry',   name:'Quarry',
-    basic:{label:'+2 Ore, +1 Troop', cost:{}},
-    advanced:{label:'+4 Ore, +2 Troops', cost:{credits:1}, note:'pay 1 Credit'}},
+    basic:{label:'+2 Ore, +1 Troop, +1 Influence if you have no Troops', cost:{}},
+    advanced:{label:'+3 Ore, +2 Troops, +1 Influence if you have no Troops', cost:{credits:1}, note:'pay 1 Credit'}},
   {id:'garrison', name:'Garrison',
-    basic:{label:'+2 Troops, become Aggressor', cost:{}},
-    advanced:{label:'+4 Troops, Aggressor gets +1 combat', cost:{ore:1}, note:'pay 1 Ore'}},
+    basic:{label:'+2 Troops, +1 Influence per Troop you hold (max 1)', cost:{}},
+    advanced:{label:'+4 Troops, +1 per Troop you hold (max 2), +1 combat', cost:{ore:1}, note:'pay 1 Ore'}},
   {id:'outpost',  name:'Outpost',
-    basic:{label:'Pay 3 Credits + 2 Ore → +4 Influence', cost:{credits:3, ore:2}, note:'can’t pay? +1', consolation:true},
-    advanced:{label:'Pay 5 Credits + 3 Ore → +7 Influence', cost:{credits:5, ore:3}, note:'can’t pay? +2', consolation:true}},
+    basic:{label:'Pay 3 Credits + 2 Ore → +1 Influence', cost:{credits:3, ore:2}, note:'can’t pay? +1', consolation:true},
+    advanced:{label:'Pay 5 Credits + 3 Ore → +3 Influence', cost:{credits:5, ore:3}, note:'can’t pay? +1', consolation:true}},
   {id:'archive',  name:'Archive',
-    basic:{label:'Draw 1 Tactic card', cost:{}, note:'hand must have room'},
-    advanced:{label:'Draw 3 Tactic cards', cost:{credits:1}, note:'pay 1 Credit'}},
+    basic:{label:'Draw 1 Tactic card — hand full? +1 Influence instead', cost:{}},
+    advanced:{label:'Draw 3 Tactic cards — hand full? +1 Influence instead', cost:{credits:1}, note:'pay 1 Credit'}},
   {id:'foundry',  name:'Foundry',
-    basic:{label:'+2 Credits, +1 Ore', cost:{}},
-    advanced:{label:'+4 Credits, +3 Ore', cost:{troops:1}, note:'pay 1 Troop'}},
+    basic:{label:'+1 Credit, +1 Ore, +1 Influence if you have no Ore', cost:{}},
+    advanced:{label:'+3 Credits, +2 Ore, +1 Influence if you have no Ore', cost:{troops:1}, note:'pay 1 Troop'}},
   {id:'bazaar',   name:'Bazaar',
-    basic:{label:'Trade 2 Ore for 3 Credits', cost:{ore:2}, note:'no 2 Ore? +1 Credit', consolation:true},
-    advanced:{label:'Trade 2 Ore for 6 Credits', cost:{ore:2}, note:'no 2 Ore? +2 Credits', consolation:true}},
+    basic:{label:'Trade 2 Ore for 2 Credits', cost:{ore:2}, note:'no 2 Ore? +1 Credit, +1 Influence', consolation:true},
+    advanced:{label:'Trade 2 Ore for 4 Credits', cost:{ore:2}, note:'no 2 Ore? +2 Credits, +1 Influence', consolation:true}},
   {id:'shrine',   name:'Shrine',
     basic:{label:'+1 Influence', cost:{}},
     advanced:{label:'Pay 2 Credits + 1 Ore → +3 Influence', cost:{credits:2, ore:1}, note:'can’t pay? +1', consolation:true}},
 ];
 
+/* POVERTY: the clause the Market / Quarry / Foundry / Bazaar key off. 1
+   Influence when the pool is empty, nothing otherwise. Deliberately not a
+   function of how MUCH you hold - see the block comment above. */
+function povertyInfluence(held){
+  return (typeof held === 'number' && isFinite(held) && held <= 0) ? 1 : 0;
+}
+/* ARMY: what the Garrison pays for the Troops already in the holder's pool.
+   `per` units buy 1 Influence and `max` bounds the clause, so a full hand of
+   Troops cannot pay for itself twice. Returns a non-negative integer. */
+function surplusInfluence(held, per, max){
+  const h = (typeof held === 'number' && isFinite(held)) ? held : 0;
+  const p = (typeof per === 'number' && per > 0) ? per : 0;
+  const m = (typeof max === 'number' && max > 0) ? max : 0;
+  if(h <= 0 || p <= 0 || m <= 0) return 0;
+  return Math.min(m, Math.floor(h / p));
+}
+
 /* `consolation:true` on a tier means "always takeable" - the printed rule
-   reads "Pay 5 Credits + 3 Ore → +7 Influence (else +2)", so a player who
+   reads "Pay 5 Credits + 3 Ore → +3 Influence (else +1)", so a player who
    cannot pay the full price is owed a consolation, not a greyed-out tile.
    Those three tiers carry the flag because filling in their real price would
    otherwise make canAffordExtra() hide a choice the rules promise. Nothing
@@ -184,7 +233,7 @@ const CAPS = {credits:8, ore:6, troops:6};
 /* Every Objective pays the same bonus. Declared up here (rather than inline
    in each entry) so the rules copy in RULES_HTML can quote it and the two
    can never drift apart. */
-const OBJECTIVE_BONUS = 4;
+const OBJECTIVE_BONUS = 2;
 /* How long the end screen waits before looping into the next demo game. Long
    enough to actually read the final tally, and now visible + cancellable. */
 const DEMO_LOOP_SECONDS = 8;
@@ -279,46 +328,55 @@ const RULES_HTML = `
 
     <section class="rules-panel" id="rules-board" role="tabpanel" aria-labelledby="rules-tab-board" hidden>
       <p class="rules-intro">Eight sites. Each has a free <b>Basic</b> tier and a pricier <b>Advanced</b> tier. Two sites sit unused every round — unless the Rift is open, which makes it <b>nine sites and six picks</b>. The Rift is announced at the start of every round from Round 3; its mutations are on the <b>Meltdown</b> tab.</p>
+      <div class="rules-callout">
+        <strong>Most sites also pay a bonus, and the two kinds run in opposite directions.</strong>
+        <b>Poverty</b> (Market, Quarry, Foundry, Bazaar): +1 Influence when the resource that
+        site works in is <b>gone</b> — an empty treasury, no Troops at all, no Ore, or no 2 Ore
+        to trade. Being rich earns nothing here; being broke earns standing.
+        <b>Army</b> (Garrison): +1 Influence per Troop you <b>already hold</b>, up to the tier's
+        cap. This is the one that makes <b>holding back</b> worth taking — the army you do not
+        commit to a Skirmish keeps paying you, so spending it costs you next round.
+      </div>
       <div class="rules-sites">
         <article class="rules-site">
           <h4>Market</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+3 Credits</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Ore → +6 Credits</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Credits, +1 Influence if you have no Credits</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Ore → +4 Credits, +1 Influence if you have no Credits</span></div>
         </article>
         <article class="rules-site">
           <h4>Quarry</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Ore, +1 Troop</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Credit → +4 Ore, +2 Troops</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Ore, +1 Troop, +1 Influence if you have no Troops</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Credit → +3 Ore, +2 Troops, +1 Influence if you have no Troops</span></div>
         </article>
         <article class="rules-site">
           <h4>Garrison</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Troops, become Aggressor</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Ore → +4 Troops, Aggressor +1 Skirmish</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Troops, +1 Influence per Troop you hold (max 1), become Aggressor</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Ore → +4 Troops, +1 Influence per Troop you hold (max 2), Aggressor +1 Skirmish</span></div>
         </article>
         <article class="rules-site">
           <h4>Outpost</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>Pay 3 Credits + 2 Ore → +4 Influence (else +1)</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 5 Credits + 3 Ore → +7 Influence (else +2)</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>Pay 3 Credits + 2 Ore → +1 Influence (else +1)</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 5 Credits + 3 Ore → +3 Influence (else +1)</span></div>
         </article>
         <article class="rules-site">
           <h4>Archive</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>Draw 1 Tactic card</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Credit → draw 3</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>Draw 1 Tactic card — hand full? +1 Influence instead</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Credit → draw 3, or +1 Influence if your hand is full</span></div>
         </article>
         <article class="rules-site">
           <h4>Foundry</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Credits, +1 Ore</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Troop → +4 Credits, +3 Ore</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+1 Credit, +1 Ore, +1 Influence if you have no Ore</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Troop → +3 Credits, +2 Ore, +1 Influence if you have no Ore</span></div>
         </article>
         <article class="rules-site">
           <h4>Bazaar</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>2 Ore → 3 Credits (else +1 Credit)</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>2 Ore → 6 Credits (else +2 Credits)</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>2 Ore → 2 Credits (no 2 Ore? +1 Credit, +1 Influence)</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>2 Ore → 4 Credits (no 2 Ore? +2 Credits, +1 Influence)</span></div>
         </article>
         <article class="rules-site">
           <h4>Shrine</h4>
           <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+1 Influence, free</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 2 Credits + 1 Ore → +3 Influence (else +1)</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 2 Credits + 1 Ore → +2 Influence (else +1)</span></div>
         </article>
       </div>
     </section>
@@ -326,7 +384,7 @@ const RULES_HTML = `
     <section class="rules-panel" id="rules-cards" role="tabpanel" aria-labelledby="rules-tab-cards" hidden>
       <p class="rules-intro">${DECK_SIZE}-card personal deck (one of each). Played <b>face-down only in a Skirmish</b>. Your hand starts <b>full</b> at ${HAND_CAP} and can never hold more than ${HAND_CAP}.</p>
       <div class="rules-callout">
-        <strong>Your hand starts full.</strong> Archive, Foresight, Scout and Insight all draw Tactic cards — and all of them draw <b>zero</b> while your hand is at ${HAND_CAP}. Cards only ever leave your hand when you play one in a Skirmish, so drawing is a <b>rewards-for-spending</b> bonus, not a build-up. If the log says a card “drew 0”, you were at the cap.
+        <strong>Your hand starts full.</strong> Archive, Foresight, Scout and Insight all draw Tactic cards — and all of them draw <b>zero</b> while your hand is at ${HAND_CAP}. Cards only ever leave your hand when you play one in a Skirmish, so drawing is a <b>rewards-for-spending</b> bonus, not a build-up. If the log says a card “drew 0”, you were at the cap. The <b>Archive</b> is the one exception: with a full hand it pays <b>+1 Influence</b> on either tier instead of drawing, so a full hand is a standing pick rather than a dead one.
       </div>
       <div class="rules-card-group">
         <h3 class="rules-h">Aggressive <span class="rules-h-sub">raw power, usually at a cost</span></h3>
@@ -507,7 +565,7 @@ function getObjective(player){
 const INTRIGUE_DEFS = {
   raid:            {name:'Raid',             desc:'Steal up to 2 Credits from your opponent.'},
   requisition:     {name:'Requisition',      desc:'Gain 2 Ore and 1 Credit.'},
-  coup:            {name:'Coup',             desc:'Gain 3 Influence immediately.'},
+  coup:            {name:'Coup',             desc:'Gain 2 Influence immediately.'},
   sabotage_supply: {name:'Sabotage Supply',  desc:"Your opponent loses 1 Troop."},
   foresight:       {name:'Foresight',        desc:'Draw 2 Tactic cards immediately.'},
   windfall:        {name:'Windfall',         desc:'Gain 3 Credits.'},
@@ -542,7 +600,7 @@ function applyIntrigueEffect(playerIdx, cardId){
       log(`${esc(player.name)} plays <b>Requisition</b> -> +2 Ore, +1 Credit.`);
       break;
     case 'coup':
-      player.influence += 3;
+      player.influence += 2;
       log(`${esc(player.name)} plays <b>Coup</b> -> +3 Influence.`);
       break;
     case 'sabotage_supply': {
@@ -701,17 +759,20 @@ function humanPlayIntrigue(cardId, ev){
 /* Archivist: cards that must have left the hand for the hand to still be full
    at the end. Without this clause the objective is arithmetic, not play.
 
-   Measured over the same 8,000-game headless simulation: the "full hand at the
-   end" half is true for only 16.1% of players (the hand is refilled almost only
-   by Archive / Council Session / Scout / Insight, and a Skirmish or two every
-   round is eating it), and the joint rates are
-     played >= 1  16.1%      played >= 4   3.8%
-     played >= 2  13.4%      played >= 5   0.9%
-     played >= 3   9.0%  <-- this one.
-   9.0% is the harshest objective in the set alongside Unscathed (8.4%), which
-   is where the difficulty curve should be - and unlike the old `hand >= 5` it
-   is MISSABLE, which is the whole point of an objective. */
-const ARCHIVIST_PLAYED = 3;
+   Retuned DOWNWARD once more in the 2026 rebalance. The Archive itself changed
+   in that pass: a full hand used to be a DEAD PICK (it drew nothing, 2.4 times
+   a game) and now pays standing instead, which means the Archive is drafted for
+   Influence rather than for cards and refills the hand far less often. Measured
+   after that change, "played >= 3 AND a full hand" read 5.6% - worse than
+   ignoring it. Threshold lowered to 2 played cards, which is the smallest
+   number of cards a player can spend and still refill from. */
+const ARCHIVIST_PLAYED = 2;
+/* The hand half of Archivist. It used to be HAND_CAP - "end with a FULL hand" -
+   which, after the Archive started paying standing instead of drawing into a
+   full hand, reads 8.2% (measured: 250 games / 85 player-games). One card of
+   slack is the smallest change that makes the goal reachable without making it
+   free: a hand of four still has to have been refilled from somewhere. */
+const ARCHIVIST_HAND = HAND_CAP - 1;
 
 /* Industrialist: Advanced picks a player has to take. Advanced is about 75% of
    every pick the bot makes (botChoosePick values it at 1.6x the Basic tier and
@@ -732,33 +793,59 @@ const ARCHIVIST_PLAYED = 3;
    Full distribution: 7:1 8:24 9:101 10:390 11:1189 12:2558 13:3557 14:3767
    15:2651 16:1264 17:413 18:80 19:5. 14 is also the honest design ask: 14 of
    the ~18 picks a player gets, taken at Advanced, which is a plan for the
-   whole game rather than a rounding error. */
-const INDUSTRIALIST_NEED = 14;
+   whole game rather than a rounding error.
+
+   >>> 2026 REBALANCE: raised 14 -> 16. The board got flatter, so Advanced
+   stopped being the scarce thing it was - the measured advanced-pick mean is
+   14.15 of 18 possible, unchanged by the retune, and a threshold of 14 read
+   83.1% met. 16 sits at roughly the middle of the upper tail. */
+const INDUSTRIALIST_NEED = 15;
+
+/* Warlord / Unscathed: the two Skirmish objectives, retuned together.
+   `UNSCATHED_LOSSES` is the whole change. "Fight one and never lose one" over
+   ~5 fights measured 8.6% before the rebalance and 6.7% after it, which is
+   worse than not having the objective at all: at that rate a player should
+   ignore it. One loss of slack is the smallest change that makes a five-fight
+   game winnable - P(2+ wins and at most 1 loss over 5 fights) = 18.8%. */
+const UNSCATHED_LOSSES = 1;
+
+/* Financier / Prospector: the two end-of-game pool objectives. Both thresholds
+   dropped with the yields they measure. The measured final pools moved from
+   ~7.2 Credits / 4.4 Ore to ~4.5 Credits / 2.7 Ore when every site's resource
+   yield was roughly halved (the cap-discard rate fell from 33.9 units a game to
+   8.7, which was the point of T4), so a threshold of 7 Credits became a
+   different objective entirely. Both are now aimed at the new distribution. */
+const FINANCIER_NEED = 6;
+const PROSPECTOR_NEED = 4;
 
 const OBJECTIVES = [
   {id:'warlord',       name:'Warlord',       desc:'Win 3 or more Skirmishes.',                         bonus:OBJECTIVE_BONUS, check:p=> p.skirmishWins>=3,
    progress:p=> ({have: Math.min(p.skirmishWins, 3), need: 3, unit: 'wins'})},
-  {id:'unscathed',     name:'Unscathed',     desc:'Fight at least one Skirmish and never lose one.',    bonus:OBJECTIVE_BONUS, check:p=> (p.skirmishWins+p.skirmishLosses)>0 && p.skirmishLosses===0,
-   progress:p=> ({have: ((p.skirmishWins+p.skirmishLosses)>0 && p.skirmishLosses===0) ? 1 : 0, need: 1, unit: 'unbroken'})},
+  {id:'unscathed',     name:'Unscathed',     desc:`Win at least 2 Skirmishes and lose at most ${UNSCATHED_LOSSES}.`, bonus:OBJECTIVE_BONUS,
+   check:p=> p.skirmishWins>=2 && p.skirmishLosses<=UNSCATHED_LOSSES,
+   progress:p=> {
+     const done = (p.skirmishWins>=2 && p.skirmishLosses<=UNSCATHED_LOSSES) ? 1 : 0;
+     return {have: done, need: 1, unit: '2+ wins, at most ' + UNSCATHED_LOSSES + ' loss'};
+   }},
   {id:'industrialist', name:'Industrialist', desc:`Take the Advanced tier ${INDUSTRIALIST_NEED} or more times.`, bonus:OBJECTIVE_BONUS,
    check:p=> p.advancedPicks>=INDUSTRIALIST_NEED,
    progress:p=> ({have: Math.min(p.advancedPicks, INDUSTRIALIST_NEED), need: INDUSTRIALIST_NEED, unit: 'advanced picks'})},
-  {id:'financier',     name:'Financier',     desc:'End the game with 7 or more Credits.',               bonus:OBJECTIVE_BONUS, check:p=> p.credits>=7,
-   progress:p=> ({have: Math.min(p.credits, 7), need: 7, unit: 'Credits'})},
-  {id:'prospector',    name:'Prospector',    desc:'End the game with 6 or more Ore.',                   bonus:OBJECTIVE_BONUS, check:p=> p.ore>=6,
-   progress:p=> ({have: Math.min(p.ore, 6), need: 6, unit: 'Ore'})},
+  {id:'financier',     name:'Financier',     desc:`End the game with ${FINANCIER_NEED} or more Credits.`, bonus:OBJECTIVE_BONUS, check:p=> p.credits>=FINANCIER_NEED,
+   progress:p=> ({have: Math.min(p.credits, FINANCIER_NEED), need: FINANCIER_NEED, unit: 'Credits'})},
+  {id:'prospector',    name:'Prospector',    desc:`End the game with ${PROSPECTOR_NEED} or more Ore.`, bonus:OBJECTIVE_BONUS, check:p=> p.ore>=PROSPECTOR_NEED,
+   progress:p=> ({have: Math.min(p.ore, PROSPECTOR_NEED), need: PROSPECTOR_NEED, unit: 'Ore'})},
   /* Both clauses, and `progress` reports the one that is holding the player
      back rather than always printing the friendlier number. */
-  {id:'archivist',     name:'Archivist',     desc:`End the game with ${HAND_CAP} or more cards in hand, having played at least ${ARCHIVIST_PLAYED} cards.`,
+  {id:'archivist',     name:'Archivist',     desc:`End the game with ${ARCHIVIST_HAND} or more cards in hand, having played at least ${ARCHIVIST_PLAYED} cards.`,
    bonus:OBJECTIVE_BONUS,
-   check:p=> p.hand.length>=HAND_CAP && p.cardsPlayed>=ARCHIVIST_PLAYED,
+   check:p=> p.hand.length>=ARCHIVIST_HAND && p.cardsPlayed>=ARCHIVIST_PLAYED,
    progress:p=>{
      const played = Math.min(p.cardsPlayed|0, ARCHIVIST_PLAYED);
      if(played < ARCHIVIST_PLAYED){
        return {have: played, need: ARCHIVIST_PLAYED, unit: 'cards played',
                note: 'and a full hand at the end'};
      }
-     return {have: Math.min(p.hand.length, HAND_CAP), need: HAND_CAP, unit: 'cards in hand'};
+     return {have: Math.min(p.hand.length, ARCHIVIST_HAND), need: ARCHIVIST_HAND, unit: 'cards in hand'};
    }},
 ];
 
@@ -2057,25 +2144,34 @@ function advancedUnlocked(){ return state.round >= 2; }
 function intrigueUnlocked(){ return state.round >= 2; }
 function eventsUnlocked(){ return state.round >= 3; }
 
+/* The bot's read of the board. It values the same two clauses the tiles print
+   (povertyInfluence / surplusInfluence, above) rather than a hand-tuned guess,
+   so the bot's draft order cannot drift away from the thing a human reads on
+   the tile. Note what is NOT here any more: a term for "this pool is full",
+   which is what used to make the Easy bot out-draft the Hard one. */
 function baseLocationValue(loc, player){
+  const broke = (n)=> povertyInfluence(n) * 0.7;
   switch(loc.id){
-    /* >>> CHAOS (feature-chaos.js) — the Rift is worth a FLAT 1.8 on
+    /* >>> CHAOS (feature-chaos.js) — the Rift is worth a FLAT 1.15 on
        purpose. The mutation is public, but the bot does not read the
        reveal, so any value tuned per mutation would be a guess dressed up
        as knowledge. Flat is honest: the bot is genuinely uncertain, and a
        human who reads the announcement systematically out-drafts it. */
-    case 'rift': return 1.8;
-    case 'market': return 1.5;
-    case 'quarry': return 1.7;
+    case 'rift': return 1.3;
+    case 'market': return 1.5 + broke(player.credits);
+    case 'quarry': return 1.5 + broke(player.troops);
     case 'garrison': {
       const afterTroops = player.troops + 2;
       const opp = state.players[1-state.players.indexOf(player)];
-      return 1.4 + (afterTroops > opp.troops ? 0.8 : 0.2);
+      /* The Garrison is worth an army, and an army is worth standing while you
+         still have it - so the ARMY clause, plus the Aggressor option. This is
+         what makes HOLD BACK worth taking. */
+      return 1.3 + surplusInfluence(player.troops, 1, 2) * 0.7 + (afterTroops > opp.troops ? 0.6 : 0.2);
     }
-    case 'outpost': return (player.credits>=3 && player.ore>=2) ? 3.2 : 0.6;
-    case 'archive': return 1.2;
-    case 'foundry': return 1.6;
-    case 'bazaar': return player.ore>=2 ? 1.5 : 0.4;
+    case 'outpost': return (player.credits>=5 && player.ore>=3) ? 1.85 : ((player.credits>=3 && player.ore>=2) ? 1.4 : 0.5);
+    case 'archive': return 1.15;
+    case 'foundry': return 1.5 + broke(player.ore);
+    case 'bazaar': return player.ore>=2 ? 1.5 : 1.6;
     case 'shrine': return 1.0;
   }
   return 1;
@@ -2084,7 +2180,7 @@ function baseLocationValue(loc, player){
 function botChoosePick(playerIdx){
   const player = state.players[playerIdx];
   const opts = openLocations();
-  const jitter = {easy:0.9, normal:0.45, hard:0.15}[state.difficulty] ?? 0.45;
+  const jitter = {easy:1.1, normal:0.45, hard:0.12}[state.difficulty] ?? 0.45;
   let best = null, bestScore = -Infinity;
   opts.forEach(loc=>{
     ['basic','advanced'].forEach(tier=>{
@@ -2141,29 +2237,41 @@ function applyLocationEffect(playerIdx, locId, tier){
   switch(locId){
     case 'market': {
       const bonus = leader.id==='merchant' ? 1 : 0;
-      const gain = (tier==='advanced' ? 6 : 3) + bonus;
+      const gain = (tier==='advanced' ? 4 : 2) + bonus;
       if(tier==='advanced') charged = takeCost(player, tierCost('market','advanced'));
+      /* POVERTY: read BEFORE the yield, so it is the empty treasury the Market
+         pays standing for, not the one it has just filled. */
+      const surplus = povertyInfluence(player.credits);
       player.credits += gain;
-      log(`${esc(player.name)} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Merchant)':''}.`);
-      popupText = {text: `+${gain} Credits`, good: true};
+      if(surplus > 0) player.influence += surplus;
+      log(`${esc(player.name)} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Merchant)':''}${surplus>0?`, +${surplus} Influence`:''}.`);
+      popupText = {text: `+${gain} Credits` + (surplus>0 ? `, +${surplus} Influence` : ''), good: true};
       break;
     }
     case 'quarry': {
       const bonus = leader.id==='engineer' ? 1 : 0;
-      const oreGain = (tier==='advanced'?4:2) + bonus, troopGain = tier==='advanced'?2:1;
+      const oreGain = (tier==='advanced'?3:2) + bonus, troopGain = (tier==='advanced'?2:1);
       if(tier==='advanced') charged = takeCost(player, tierCost('quarry','advanced'));
+      const surplus = povertyInfluence(player.troops);
       player.ore += oreGain; player.troops += troopGain;
-      log(`${esc(player.name)} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troops${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}.`);
-      popupText = {text: `+${oreGain} Ore, +${troopGain} Troops`, good: true};
+      if(surplus > 0) player.influence += surplus;
+      log(`${esc(player.name)} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troop${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}${surplus>0?`, +${surplus} Influence`:''}.`);
+      popupText = {text: `+${oreGain} Ore, +${troopGain} Troop` + (surplus>0 ? `, +${surplus} Influence` : ''), good: true};
       break;
     }
     case 'garrison': {
       const bonus = leader.id==='warmonger' ? 1 : 0;
       const troopGain = (tier==='advanced'?4:2) + bonus;
       if(tier==='advanced'){ charged = takeCost(player, tierCost('garrison','advanced')); player.aggressorBonus=1; } else { player.aggressorBonus=0; }
+/* ARMY: the one clause that pays for what the holder ALREADY has. This
+         is the tile that makes HOLDING BACK worth something - the army you
+         did not spend keeps paying you standing, so spending it in a Skirmish
+         is a choice with a price rather than a free action. */
+      const surplus = surplusInfluence(player.troops, 1, tier==='advanced' ? 2 : 1);
       player.troops += troopGain; player.isAggressor = true;
-      log(`${esc(player.name)} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops${bonus?' (+1 Warmonger)':''}. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
-      popupText = {text: `+${troopGain} Troops - Aggressor!`, good: true};
+      if(surplus > 0) player.influence += surplus;
+      log(`${esc(player.name)} rallies the <b>Garrison</b> (${tier}) -> +${troopGain} Troops${bonus?' (+1 Warmonger)':''}${surplus>0?`, +${surplus} Influence`:''}. Aggressor this round${tier==='advanced'?' with +1 Skirmish bonus':''}.`);
+      popupText = {text: `+${troopGain} Troops - Aggressor!` + (surplus>0 ? `, +${surplus} Influence` : ''), good: true};
       break;
     }
     case 'outpost': {
@@ -2171,8 +2279,8 @@ function applyLocationEffect(playerIdx, locId, tier){
       /* The price and the consolation both come from the one table now, so
          the printed sentence and the number debited are the same object. */
       const need = tierCost('outpost', tier);
-      const reward = (tier==='advanced' ? 7 : 4) + bonus;
-      const consolation = (tier==='advanced' ? 2 : 1) + bonus;
+      const reward = (tier==='advanced' ? 3 : 1) + bonus;
+      const consolation = 1 + bonus;
       if(canPayCost(player, need)){
         charged = takeCost(player, need); player.influence+=reward;
         log(`${esc(player.name)} invests in the <b>Outpost</b> (${tier}) -> pays ${need.credits} Credits + ${need.ore} Ore for +${reward} Influence${bonus?' (+1 Diplomat)':''}.`);
@@ -2188,6 +2296,18 @@ function applyLocationEffect(playerIdx, locId, tier){
       const bonus = leader.id==='scholar' ? 1 : 0;
       const draws = (tier==='advanced' ? 3 : 1) + bonus;
       if(tier==='advanced') charged = takeCost(player, tierCost('archive','advanced'));
+      /* A FULL HAND IS A DEAD PICK, and it used to be one: the hand starts at
+         HAND_CAP and only ever empties in a Skirmish, so the Archive drew
+         nothing 2.4 times a game and the pick was wasted. When there is
+         nowhere to put the card, the Archive pays standing instead - the one
+         clause that fires on something other than a resource. */
+      if(player.hand.length >= HAND_CAP){
+        const standing = 1;
+        player.influence += standing;
+        log(`${esc(player.name)} studies the <b>Archive</b> (${tier}) -> their hand is full, so there is nothing to draw: +${standing} Influence.`);
+        popupText = {text: `+${standing} Influence`, good: true};
+        break;
+      }
       const drew = drawCard(player, draws);
       const reason = player.hand.length >= HAND_CAP ? 'hand already at the limit' : 'deck and discard are empty';
       log(`${esc(player.name)} studies the <b>Archive</b> (${tier}) -> ${drawLog(player, draws, drew, reason)}${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Scholar)':''}.`);
@@ -2196,16 +2316,18 @@ function applyLocationEffect(playerIdx, locId, tier){
     }
     case 'foundry': {
       const bonus = leader.id==='engineer' ? 1 : 0;
-      const crGain = tier==='advanced'?4:2, oreGain = (tier==='advanced'?3:1) + bonus;
+      const crGain = tier==='advanced'?3:1, oreGain = (tier==='advanced'?2:1) + bonus;
       if(tier==='advanced') charged = takeCost(player, tierCost('foundry','advanced'));
+      const surplus = povertyInfluence(player.ore);
       player.credits += crGain; player.ore += oreGain;
-      log(`${esc(player.name)} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}.`);
-      popupText = {text: `+${crGain} Credits, +${oreGain} Ore`, good: true};
+      if(surplus > 0) player.influence += surplus;
+      log(`${esc(player.name)} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}${surplus>0?`, +${surplus} Influence`:''}.`);
+      popupText = {text: `+${crGain} Credits, +${oreGain} Ore` + (surplus>0 ? `, +${surplus} Influence` : ''), good: true};
       break;
     }
     case 'bazaar': {
       const bonus = leader.id==='merchant' ? 1 : 0;
-      const crGain = (tier==='advanced'?6:3) + bonus;
+      const crGain = (tier==='advanced'?4:2) + bonus;
       /* A trade, but priced from the same table as every other cost - so the
          Rift's Toll doubles the 2 Ore instead of being unable to see it. */
       const trade = tierCost('bazaar', tier);
@@ -2214,10 +2336,14 @@ function applyLocationEffect(playerIdx, locId, tier){
         log(`${esc(player.name)} trades at the <b>Bazaar</b> (${tier}) -> trades ${trade.ore} Ore for +${crGain} Credits${bonus?' (+1 Merchant)':''}.`);
         popupText = {text: `+${crGain} Credits`, good: true};
       } else {
+        /* The fallback IS the conditional: a player with no Ore to trade has
+           nothing else the Bazaar could give them, so it pays standing for the
+           trade it could not make. */
         const consolation = (tier==='advanced'?2:1) + bonus;
-        player.credits += consolation;
-        log(`${esc(player.name)} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credits${bonus?' (+1 Merchant)':''}.`);
-        popupText = {text: `+${consolation} Credits`, good: true};
+        const standing = 1;
+        player.credits += consolation; player.influence += standing;
+        log(`${esc(player.name)} visits the <b>Bazaar</b> (${tier}) without enough Ore -> consolation +${consolation} Credit${consolation!==1?'s':''} and +${standing} Influence${bonus?' (+1 Merchant)':''}.`);
+        popupText = {text: `+${consolation} Credits, +${standing} Influence`, good: true};
       }
       break;
     }
@@ -2466,12 +2592,23 @@ function promptAggressorDecision(aggressorIdx){
 }
 
 function botWantsToAttack(aggressor, defender){
-  const aggression = {easy:0.5, normal:0.65, hard:0.8}[state.difficulty] ?? 0.65;
+  const aggression = {easy:0.55, normal:0.65, hard:0.85}[state.difficulty] ?? 0.65;
   const advantage = aggressor.troops - defender.troops;
-  // >>> WAGERS (feature: Fury) - every rung of the ladder adds +0.10
-  // >>> aggression, so a Bot on a hot streak presses it instead of coasting.
-  const furyDrive = Math.min(4, Math.max(0, aggressor.winStreak|0)) * 0.10;
-  const chance = clamp(aggression + advantage*0.05 + furyDrive, 0.15, 0.95);
+  /* >>> THE 0.05 WAS THE DEAD OPTION. A committed Troop IS a point of the
+     Skirmish total, so Troop headroom is worth far more than 0.05 of appetite
+     per Troop implied - and the measured consequence was that the bot attacked
+     from behind as readily as from in front. It now reads the gap at 0.11 per
+     Troop, so three Troops of deficit is a real reason to hold and the Hold
+     Back button stops being dead. The floor drops to 0.05 because a player
+     with nothing to lose should still be allowed to swing. */
+  // >>> WAGERS (feature: Fury) - every rung of the ladder adds +0.18
+  // >>> aggression. This is the CATCHING UP valve working FORWARD as well as
+  // >>> back: the valve can only fire when somebody walks into a Skirmish on a
+  // >>> 3+ win streak, so a policy that abandons a hot streak throws the only
+  // >>> anti-snowball rule in the game away. At the old +0.10 the bot coasted
+  // >>> at Fury 2 and Catching Up fired 0.33 times a game.
+  const furyDrive = Math.min(4, Math.max(0, aggressor.winStreak|0)) * 0.25;
+  const chance = clamp(aggression + advantage*0.11 + furyDrive, 0.05, 0.95);
   /* >>> CHAOS (feature-chaos.js) — Dread makes aggression a moving target.
      A LEADING bot presses harder, because every round it stalls feeds the
      Collapse it is about to cash in; a trailing bot six Influence down stops
@@ -2651,10 +2788,46 @@ function botChooseTroops(player, playerIdx, stance){
     const n = OD.Wagers.botTroopShare(playerIdx, player, stance);
     if(typeof n === 'number') return clamp(n, 0, player.troops);
   }
-  const frac = {easy:[0.2,0.6], normal:[0.3,0.75], hard:[0.4,0.9]}[state.difficulty] ?? [0.3,0.75];
+  /* >>> COMMITTING IS THE GAMBLE (T4). The pool is what the two Troop sites
+     and the Intrigue deck leave you; committing a bigger slice of it is the
+     only way a Skirmish total ever reaches the Fury cap, and it is also the
+     only way to spend the army the surplus clauses keep paying you standing
+     for. The fractions are raised so the average bot commits most of what it
+     has - which raises the margin, and with it the share of the score the
+     Skirmish owns, at the cost of leaving nothing behind. */
+  const frac = {easy:[0.25,0.60], normal:[0.50,0.95], hard:[0.70,1.0]}[state.difficulty] ?? [0.50,0.95];
   const [lo,hi] = frac;
-  const pct = lo + Math.random()*(hi-lo);
-  return Math.round(player.troops * pct);
+  /* >>> THE DEFENDER COMMITS WHAT THE ROUND DEMANDS; THE AGGRESSOR COMMITS
+     WHAT THEY BROUGHT. This is the single change that turned the Skirmish from
+     a side-show into the main game.
+
+     Measured, before it: the Skirmish owned 21.6% of the score and zeroing it
+     flipped the winner in 25.1% of decided games. The reason is that both
+     seats committed the SAME slice of the SAME small pool, so the committed
+     Troops cancelled out of the margin and every fight was one die plus a card
+     that also cancelled - which is why a blowout could never happen and a
+     featherweight could never lose either.
+
+     The Garrison's owner always enters the fight holding the Garrison's fresh
+     Troops on top of whatever it hoarded. Committing that whole stack against a
+     defender that commits half of its own is what finally lets the margin reach
+     the Fury cap, and the cap is what makes a big win worth exactly as much as
+     a small one - the brake is doing its job BECAUSE the margin now gets big
+     enough to be caught by it.
+
+     The DEFENDER'S SHARE IS A CONSTANT, not a difficulty-scaled one, and that
+     is load-bearing for the difficulty slider: scaling it by difficulty meant
+     Easy defended best and Hard defended worst, which inverted the whole ladder
+     (measured: hard - easy = -2.01 Influence per seat, z = -4.19, i.e. Easy
+     beat Hard by two points and it was not noise). With the defender fixed at
+     50%, the ladder's only job is how hard the aggressor swings and how well it
+     drafts, which is the right way round. */
+  const share = player.isAggressor
+    ? ({easy:[0.45,0.75], normal:[0.70,1.0], hard:[0.85,1.0]}[state.difficulty] ?? [0.70,1.0])
+    : [0.20,0.20];
+  const [slo,shi] = share;
+  const pct = slo + Math.random()*(shi-slo);
+  return Math.max(0, Math.min(player.troops, Math.round(player.troops * pct)));
 }
 
 function botChooseCard(player){
@@ -5549,7 +5722,7 @@ if(typeof module !== 'undefined' && module.exports){
   module.exports = {
     LOCATIONS, COST_RESOURCES, TOTAL_ROUNDS, CAPS,
     tierCost, tierIsAlwaysTakeable, canPayCost, takeCost, costPhrase,
-    OBJECTIVES, OBJECTIVE_BONUS, HAND_CAP, ARCHIVIST_PLAYED, INDUSTRIALIST_NEED,
+    OBJECTIVES, OBJECTIVE_BONUS, HAND_CAP, ARCHIVIST_PLAYED, ARCHIVIST_HAND, INDUSTRIALIST_NEED,
     startGame, getState: ()=> state,
   };
 }

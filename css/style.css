@@ -21,7 +21,7 @@
     10  Modals (standard / critical / cinematic) + rules modal
     11  End screen
 12  Coach layer
-     13  Wagers: Fury ladder, Betrayal tokens, stances, Siege
+     13  Wagers: Fury ladder, Betrayal tokens
      14  Chaos: the Rift, Meltdown, Pressure, Bounties, the Surge
      15  Commit-step odds preview + cost-clarity states
      16  Round debrief + end-screen analysis
@@ -2033,7 +2033,7 @@ body.is-meltdown .tier-row.advanced .tier-note{
 
      contact       R1  the board is cold, nothing is contested
      probe         R2  Advanced unlocks, wagers unlock
-     escalation    R3  Events start, the Rift opens, Siege begins
+     escalation    R3  Events start, the Rift opens
      events-live   R4  the full kit is running
      pressure      R5  Dread is one tick from the first Collapse
      critical      R5+ the sky is about to open
@@ -2203,10 +2203,13 @@ body.is-meltdown .tier-row.advanced .tier-note{
   /* transform+opacity only. The badge is small and the loop is slow, so the
      hint is added inside the interaction block below, not at rest. */
 }
-/* The live buy price rides with the badge. Optional (SIEGE only sets it) but
-   when present it is the number that decides the pick, so it is given its own
-   tier fill rather than inheriting the badge's warn tint - gold says "this is
-   a price you can pay", warn says "this site is contested". */
+/* The live buy price rides with the badge. Optional (a priced pick has to be
+   shown as a price) but when present it is the number that decides the pick, so
+   it is given its own tier fill rather than inheriting the badge's warn tint -
+   gold says "this is a price you can pay", warn says "this site is contested".
+   NOTE: nothing currently emits `.loc-price` (the Siege buyout was its only
+   writer), so this block is inert until a priced pick exists again. Kept, not
+   deleted: it is the styling for a live affordance of the contested tile. */
 .loc-price{
   display:inline-flex; align-items:center; gap:4px;
   margin-left:6px; padding:1px 7px;
@@ -2284,9 +2287,11 @@ body.is-meltdown .tier-row.advanced .tier-note{
 }
 
 /* ---- CONTESTED: a site either side can still take. ▲ + word + dashed. ---
-   Used for BOTH contested sites (feature-wagers.js marks one per round from
-   R3) and the Rift's `contested_always` mutation (game.js:2886 reuses the
-   class deliberately).
+   Now used by ONE writer: the Rift's `contested_always` mutation, which
+   game.js sets `state.riftContested` for and then reuses the class
+   deliberately (`.loc loc-rift contested pickable`). The second writer - the
+   Siege feature marking one site per round from R3 - is gone, so this rule no
+   longer has to serve two different meanings.
 
    >>> MOVED UP into the TILE SCANNING ORDER block above, where the contested
    >>> treatment now includes the face wash, the 3px rim and the outer halo.
@@ -3136,7 +3141,6 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #log .entry.is-meltdown b,
 #log .entry.is-round b,
 #log .entry.is-fury b,
-#log .entry.is-siege b,
 #log .entry.is-pressure b,
 #log .entry.is-surge b{ color:inherit; }
 /* Newest first (game.js reverses the array), fading in from the top. */
@@ -3190,8 +3194,8 @@ body.is-meltdown .tier-row.advanced .tier-note{
    >>> stopped being a well. Hierarchy needs a loud end AND a quiet end.
 
    The split is by how much the line changes the game:
-     QUIET  (routine bookkeeping)  is-gain, is-system, is-rift, is-bounty,
-            is-siege, is-fury, is-betrayal, is-surge
+QUIET  (routine bookkeeping)  is-gain, is-system, is-rift, is-bounty,
+             is-fury, is-betrayal, is-surge
             -> a THIN left rule at 4px and a fill under .22 alpha. You can read
                the shape of the log; you are not meant to stop.
      LOUD   (the round changed, or something was taken)  is-round, is-danger,
@@ -3233,9 +3237,8 @@ body.is-meltdown .tier-row.advanced .tier-note{
      .is-unlock     a tier, a mode or a mechanic became legal
      .is-danger     something was lost, seized or taken away
      .is-fury       the Fury ladder announced a rung
-     .is-betrayal   a Betrayal token was earned or spent
-     .is-siege      a contested site was drafted or bought out
-     .is-rift       the Rift opened, mutated or was taken
+.is-betrayal   a Betrayal token was earned or spent
+      .is-rift       the Rift opened, mutated or was taken
      .is-pressure   a Dread tick, or the Collapse itself
      .is-bounty     a Bounty published or paid
      .is-meltdown   Round 6 began
@@ -3251,7 +3254,6 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #log .entry.is-system,
 #log .entry.is-rift,
 #log .entry.is-bounty,
-#log .entry.is-siege,
 #log .entry.is-fury,
 #log .entry.is-betrayal,
 #log .entry.is-surge{ border-left-width:4px; }
@@ -3270,13 +3272,6 @@ body.is-meltdown .tier-row.advanced .tier-note{
   border-left-color:var(--accent-mute-ink); background:rgba(92,83,67,.10);
 }
 #log .entry.is-betrayal::before{ content:'\25C6\00A0'; }
-#log .entry.is-siege{
-  /* Same correction as .is-fury, and for the same reason: light ink on a
-     translucent blood fill measured 1.28:1 against the composited background. */
-  border-left-color:var(--accent-blood); background:var(--accent-blood);
-  color:var(--accent-blood-ink); font-weight:700;
-}
-#log .entry.is-siege::before{ content:'\2694\00A0'; }
 #log .entry.is-rift{
   border-left-color:var(--rift-ink); background:rgba(138,90,168,.14);
 }
@@ -3380,7 +3375,7 @@ body.is-meltdown .tier-row.advanced .tier-note{
 #skirmishModal .box:focus{ outline:2px solid var(--accent-cool-ink); outline-offset:-2px; }
 #skirmishModal .box:focus:not(:focus-visible){ outline:none; }
 /* THE COMMIT BOX. `is-wide` is set by showCommitModal(). It is the one screen
-   that has to hold a troop slider, a live odds preview, a wager stance and a
+   that has to hold a troop slider, a live odds preview, a token row and a
    whole hand at once; at the default 560px the card picker wrapped to three
    rows and the odds panel pushed the body to 1438px of scroll behind a 720px
    dialog. 680px fits three 150px cards per category row, which is the
@@ -4187,14 +4182,22 @@ body.is-meltdown .tier-row.advanced .tier-note{
      COMMIT MODAL  commitUI()
        .wagers-block > b (block title)
        .wagers-fury-row                one per seat
-       .wagers-stance-row > .wagers-stance[data-wager]  (+ .selected/.disabled)
        .wagers-token-row  > .wagers-token[data-token]   (+ .selected/.disabled)
        .wagers-dim                      the explanatory second line
-       ids: #wagersFuryBlock #wagersStanceBlock #wagersStance
+       ids: #wagersFuryBlock
             #wagersTokenBlock #wagersTokens #wagersForceBlock #wagersForceAttack
      DECISION MODAL forceAttackHtml()  -> #wagersForceBlock > button.secondary
      EXT PANEL       panelHtml()
-       .wagers-line (+ .wagers-contested / .wagers-siege / .wagers-decl)
+       .wagers-line (+ .wagers-decl)
+
+   REMOVED with the mechanics (measured, 2026-10-03): Siege was accepted 0 times
+   in 2,408 games - a tax on drafting well, not a negotiation - and the All In /
+   Ghost stances were EV-negative against not wagering at all. The betrayal /
+   fury keys they used to write are gone from the engine, so no renderer emits
+   `.wagers-stance`, `.wagers-contested` or `.wagers-siege` any more. Every rule
+   for them is deleted below; the token row keeps the identical chip language,
+   which is why the `.wagers-token` arm is retained in rules that used to name
+   both.
 
    These blocks are appended INSIDE #skirmishBody, so they inherit the modal's
    panel gradient. Everything below is sized for a 560px box at 390px wide.
@@ -4238,21 +4241,15 @@ body.is-meltdown .tier-row.advanced .tier-note{
   padding-left:8px;
 }
 
-/* ---- STANCES: NORMAL / ALL IN / GHOST -----------------------------------
-   The pledge is a bet about Troops, so the two stances get opposite-looking
-   treatments and both say it in words, glyphs and border style:
-
-     ALL IN  solid blood, hard shadow, ⚠ + "EVERY TROOP"  -> dangerous
-     GHOST   hollow mute, dashed, ◌ + "NO TROOP"          -> desperate
-   ALL IN's border is a DOUBLE rule and GHOST's is DASHED: the two survive
-   greyscale, and they survive the warn/hot deuteranopia pair because neither
-   one uses warn or hot at all.                                            */
-.wagers-stance-row,
+/* ---- TOKEN CHIPS: +1 TOTAL / RE-ROLL -------------------------------------
+   A Betrayal token is a currency spend, so the chip wears the good tier when it
+   is affordable and cool-ink when declared - never blood, which is reserved for
+   "you are exposed". Selection is a CHECKMARK plus the word and a locked token
+   is dashed + the word LOCKED, so neither state is carried by hue alone.     */
 .wagers-token-row{
   display:grid; gap:8px; margin:8px 0 0;
   grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
 }
-.wagers-stance,
 .wagers-token{
   position:relative;
   display:flex; flex-direction:column; gap:4px;
@@ -4266,25 +4263,20 @@ body.is-meltdown .tier-row.advanced .tier-note{
              box-shadow var(--dur-2) var(--ease-out),
              transform var(--dur-1) var(--ease-out);
 }
-.wagers-stance b,
 .wagers-token b{
   font-family:var(--font-ui); font-size:13px; font-weight:800; letter-spacing:.5px;
   color:var(--ink-soft);
 }
-.wagers-stance span,
 .wagers-token span{ font-size:11px; line-height:1.4; color:var(--muted-text); }
-.wagers-stance:hover:not(.disabled),
 .wagers-token:hover:not(.disabled){
   border-color:var(--gold); transform:translateY(-1px); will-change:transform;
 }
-.wagers-stance.selected,
 .wagers-token.selected{
   border-color:var(--accent-gold-ink);
   background:linear-gradient(160deg,var(--accent-gold),#f4e6b4);
   box-shadow:0 0 0 2px var(--gold), var(--edge);
 }
 /* Selection is a CHECKMARK plus the word, not a thicker gold border. */
-.wagers-stance.selected::after,
 .wagers-token.selected::after{
   content:'\2713 DECLARED';
   position:absolute; top:0; right:0;
@@ -4294,16 +4286,12 @@ body.is-meltdown .tier-row.advanced .tier-note{
 }
 /* UNLOCKED-LATER / NO TOKENS: dashed, mute, and a padlock word. NOT
    opacity:.4 - the block still has to be readable to explain WHY it is dead. */
-.wagers-stance.disabled,
 .wagers-token.disabled{
   cursor:not-allowed; border-style:dashed; border-color:var(--accent-mute);
   background:rgba(92,83,67,.07);
 }
-.wagers-stance.disabled b,
 .wagers-token.disabled b{ color:var(--accent-mute-ink); }
-.wagers-stance.disabled span,
 .wagers-token.disabled span{ color:var(--accent-mute-ink); }
-.wagers-stance.disabled::after,
 .wagers-token.disabled::after{
   content:'\1F512\00A0LOCKED';
   position:absolute; top:0; right:0;
@@ -4311,61 +4299,6 @@ body.is-meltdown .tier-row.advanced .tier-note{
   background:var(--accent-mute); color:var(--accent-mute-ink);
   font-family:var(--font-ui); font-size:8px; font-weight:800; letter-spacing:.7px;
 }
-/* ALL IN. */
-.wagers-stance[data-wager="allin"]{
-  border-color:var(--accent-blood-ink); border-style:double; border-width:4px;
-  background:linear-gradient(160deg,var(--accent-blood),#8a3f3a);
-  color:var(--accent-blood-ink);
-}
-.wagers-stance[data-wager="allin"] b{ color:var(--accent-blood-ink); }
-.wagers-stance[data-wager="allin"] span{ color:#ffe4dc; }
-.wagers-stance[data-wager="allin"] b::before{ content:'\26A0\00A0'; }
-.wagers-stance[data-wager="allin"]:hover:not(.disabled){ border-color:var(--accent-blood-ink); }
-/* D3: THE WAGERS STANCES - the `-ink`-on-`-fill` pairing, made explicit.
-
-   The bug this fixes is a PAIRED-TOKEN bug, not a colour bug. The tier system
-   ships three values per tier: `-fill` (background), `-ink` (text ON that
-   fill), `-on` (text on DARK surfaces). `.wagers-stance[data-wager="allin"]`
-   was declared with `color:var(--accent-blood-ink)` on a `--accent-blood`
-   gradient - which is the CORRECT pairing and measures 5.59:1 on the flat
-   fill. But it ALSO matched `.wagers-stance.disabled`, whose rule sets
-   `background:rgba(92,83,67,.07)` - a nearly transparent wash - and the
-   `.disabled` and `[data-wager]` rules have the SAME specificity, so which one
-   won depended on source order. Measured live at 1440px, an ALL IN stance
-   that is locked rendered `#fff4ef` on `rgb(138,63,58)` (6.81:1, fine) but
-   under `prefers-contrast: more` the same element rendered `#fff4ef` on
-   `rgb(247,236,214)` = 1.08:1 - invisible - because the contrast block
-   flattens the fill to `--panel2` and never re-inks the text.
-
-   So the fix is not "darken ALL IN". It is: a stance that is DISABLED must
-   wear the mute ink, exactly as GHOST does, so a locked stance reads as
-   locked in the same way whether or not the OS asked for more contrast. The
-   state still has three non-colour channels - dashed border, the word
-   "LOCKED", the padlock glyph - so nothing is carried by hue. */
-.wagers-stance.disabled[data-wager="allin"],
-.wagers-stance.disabled[data-wager="ghost"]{
-  border-color:var(--accent-mute-ink);
-  background:rgba(92,83,67,.07);
-  color:var(--accent-mute-ink);
-}
-.wagers-stance.disabled[data-wager="allin"] b,
-.wagers-stance.disabled[data-wager="ghost"] b{ color:var(--accent-mute-ink); }
-.wagers-stance.disabled[data-wager="allin"] span,
-.wagers-stance.disabled[data-wager="ghost"] span{ color:var(--accent-mute-ink); }
-
-/* GHOST. */
-.wagers-stance[data-wager="ghost"]{
-  border-color:var(--accent-mute-ink); border-style:dashed;
-  background:rgba(205,199,186,.55); color:var(--accent-mute-ink);
-}
-.wagers-stance[data-wager="ghost"] b{ color:var(--accent-mute-ink); }
-.wagers-stance[data-wager="ghost"] span{ color:var(--accent-mute-ink); }
-.wagers-stance[data-wager="ghost"] b::before{ content:'\25CC\00A0'; }  /* ◌ hollow */
-
-/* The token buttons are a different KIND of thing from the stances (a
-   currency spend, not a posture), so they wear the good tier when they are
-   affordable and cool-ink when declared - never blood, which is reserved for
-   "you are exposed". */
 .wagers-token[data-token="plus"],
 .wagers-token[data-token="reroll"]{
   border-color:var(--accent-cool-ink);
@@ -4411,33 +4344,13 @@ body.is-meltdown .tier-row.advanced .tier-note{
    >>> already-measured ink. Hierarchy inside a chip is carried by size and
    >>> weight, never by dropping the descendant off the token - an inherited
    >>> opacity would have been the same mistake in softer clothing. */
-.wagers-contested b,
-.wagers-siege b,
 .wagers-decl b,
-.wagers-contested .wagers-dim,
-.wagers-siege .wagers-dim,
 .wagers-decl .wagers-dim{ color:inherit; }
-.wagers-contested b,
-.wagers-siege b,
 .wagers-decl b{ font-size:11px; }
 /* `.status-body b` is (0,2,0) and comes later in the file than the block above,
    so this rule is RE-STATED at (0,3,0) down in the feature-panels section. Both
    copies exist on purpose: the first covers a chip rendered anywhere, the
    second covers the status strip where a `<b>` is otherwise re-inked. */
-.wagers-contested{
-  padding:1px 8px; border-radius:var(--r-pill);
-  background:var(--accent-hot); color:var(--accent-hot-ink);
-  border:1px solid var(--accent-hot-ink);
-  font-weight:800; letter-spacing:.4px;
-}
-.wagers-contested::before{ content:'\25B2\00A0'; }
-.wagers-siege{
-  padding:1px 8px; border-radius:var(--r-pill);
-  background:var(--accent-blood); color:var(--accent-blood-ink);
-  border:1px solid var(--accent-blood-ink);
-  font-weight:800;
-}
-.wagers-siege::before{ content:'\2694\00A0'; }
 .wagers-decl{
   padding:1px 8px; border-radius:var(--r-pill);
   background:var(--accent-cool); color:var(--accent-cool-ink);
@@ -4516,25 +4429,21 @@ body.is-meltdown .tier-row.advanced .tier-note{
 .status-row[data-panel="chaos-pressure"] .status-body span[style*="color"]{
   font-family:var(--font-num); font-size:12px; letter-spacing:1px;
 }
-/* The wagers panel's surviving rows are a contest, a siege or a declaration -
-   things a player acts on - so they keep their own chip styling (a fill AND a
-   glyph) inside the row. `.wagers-line` stays `inline-flex` so the chip sits
-   BESIDE the WAGERS tag on one line; forcing it to `display:flex` blockified it
-   and pushed the whole fact onto a second line of its own. */
+/* The wagers panel's surviving row is a declaration - something a player acts
+   on - so it keeps its own chip styling (a fill AND a glyph) inside the row.
+   `.wagers-line` stays `inline-flex` so the chip sits BESIDE the WAGERS tag on
+   one line; forcing it to `display:flex` blockified it and pushed the whole
+   fact onto a second line of its own. */
 .status-body .wagers-line{ vertical-align:top; }
 .status-body .wagers-line + .wagers-line{ margin-left:8px; }
-/* The chip-ink inheritance rule from section 14, RE-STATED at a specificity that
+/* The chip-ink inheritance rule from section 13, RE-STATED at a specificity that
    actually wins here. `.status-body b{ color:var(--ink-soft) }` sits at (0,2,0);
-   the section-14 version was also (0,2,0) and lost on source order, so a <b>
-   inside a `.wagers-contested` chip measured 3.82:1 on the hot fill and 1.91:1
-   on the blood fill. (0,3,0) with `.status-body` in front settles it, and this
-   is the only place in the sheet a chip's ink can be inherited - which is
+   the section-13 version was also (0,2,0) and lost on source order, so a <b>
+   inside a `.wagers-decl` chip measured 3.82:1 on the hot fill and 1.91:1 on
+   the blood fill. (0,3,0) with `.status-body` in front settles it, and this is
+   the only place in the sheet a chip's ink can be inherited - which is
    correct, because the chip is the thing that chose the ink. */
-.status-body .wagers-contested b,
-.status-body .wagers-siege b,
 .status-body .wagers-decl b,
-.status-body .wagers-contested .wagers-dim,
-.status-body .wagers-siege .wagers-dim,
 .status-body .wagers-decl .wagers-dim{ color:inherit; }
 
 /* ---- THE SURGE (Round 6 d6 reveal) --------------------------------------
@@ -4796,8 +4705,8 @@ body.is-meltdown .tier-row.advanced .tier-note{
    ========================================================================== */
 
 /* The PALE-WASH entries only. This list is deliberately EXCLUSIVE of
-   `.is-danger`, `.is-round`, `.is-fury`, `.is-siege`, `.is-meltdown` and
-   `.is-pressure`: those five carry a SOLID accent fill and set their own
+   `.is-danger`, `.is-round`, `.is-fury`, `.is-meltdown` and
+   `.is-pressure`: those four carry a SOLID accent fill and set their own
    `color` to that fill's `-ink` (e.g. `.is-round` is hot-ink on a solid hot
    fill), which is the CORRECT pairing. Overriding them with `--ink-soft`
    measured 1.32:1 on the blood entries and 3.82:1 on the round entries - the
@@ -5336,12 +5245,12 @@ body.is-meltdown .tier-row.advanced .tier-note{
   .track-value{ font-size:24px; }
   .track-bar{ min-height:22px; }
 
-  /* Feature UI (s.13-15): the stance and token grids drop to ONE column so a
-     150px minimum never overflows a 390px modal body, and the commit-step
-     odds box loses its side padding to keep the WIN/TIE/LOSE segments
-     readable at full width. Nothing is hidden - the rows stack. */
-  .wagers-stance-row, .wagers-token-row{ grid-template-columns:minmax(0,1fr); }
-  .wagers-stance, .wagers-token{ min-height:48px; }
+  /* Feature UI (s.13-15): the token grid drops to ONE column so a 150px minimum
+     never overflows a 390px modal body, and the commit-step odds box loses its
+     side padding to keep the WIN/TIE/LOSE segments readable at full width.
+     Nothing is hidden - the rows stack. */
+  .wagers-token-row{ grid-template-columns:minmax(0,1fr); }
+  .wagers-token{ min-height:48px; }
   .wagers-block{ padding:9px 10px 10px; }
   .odds-panel, .odds-consequence{ padding:9px 10px; }
   .fury-pips{ display:none; }        /* the rung NUMBER is on the pill face */
@@ -5417,8 +5326,8 @@ body.is-meltdown .tier-row.advanced .tier-note{
       still read the ladder; only the two effects that would alias at 390px
       are removed.
    Nothing that conveys GAME STATE is dropped: caps, lock, contested, lead,
-   heat tier, round phase, the Rift glyph, every mutation word, every wager
-   stance and every pill still have a text or glyph equivalent.            */
+   heat tier, round phase, the Rift glyph, every mutation word, every Betrayal
+   token and every pill still have a text or glyph equivalent.             */
 @media (max-width:479px){
   :root{ --grain-opacity:0; }
   body{ padding:10px; }
@@ -6183,7 +6092,7 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   }
   /* Transitions added with the feature UI: collapsed to a cross-fade-free
      instant state change, so a declaration still flips on the first frame. */
-  .wagers-stance, .wagers-token, .pill.fury, .pill.betrayal{
+  .wagers-token, .pill.fury, .pill.betrayal{
     transition:none !important;
   }
   .od-flash, .od-burst, .od-confetti{ display:none !important; }
@@ -6304,14 +6213,9 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
      darkest thing in the bar it sits in. */
   .turn-banner{ border-color:var(--ink); background:var(--panel2); }
   .turn-banner b, .turn-banner .tb-main{ color:var(--ink); }
-  .wagers-stance[data-wager="allin"],
-  .wagers-stance[data-wager="ghost"],
-  .wagers-stance.selected, .wagers-token.selected,
-  .wagers-stance.disabled, .wagers-token.disabled{
+  .wagers-token.selected, .wagers-token.disabled{
     background:var(--panel2); border-width:2px;
   }
-  .wagers-stance[data-wager="allin"]{ border-color:var(--ink); }
-  .wagers-stance[data-wager="ghost"]{ border-color:var(--muted-text); }
   .tier-note.is-free, .tier-note.is-short, .tier-note.is-locked,
   .odds-fizzle, .odds-warn, .objective-callout, .rules-extra-callout,
   .objective-callout-flip, .pivot-note, .debrief-lookahead{
@@ -6361,7 +6265,7 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   #log .entry{ border-left-width:4px; }
   #log .entry:first-child{ background:var(--panel2); border-left-color:var(--ink); }
   #log .entry.is-danger, #log .entry.is-round, #log .entry.is-fury,
-  #log .entry.is-siege, #log .entry.is-meltdown{
+  #log .entry.is-meltdown{
     background:var(--panel2); color:var(--ink); border:2px solid var(--ink);
   }
   select{ border:2px solid var(--ink); background-image:none; }
@@ -6388,8 +6292,8 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
      so every state that was carried partly by a FILL is re-stated as a border
      plus an outline. The glyphs and the words all survive untouched, which is
      the reason nothing here needs forced-color-adjust:none. */
-  .pill.fury, .pill.betrayal, .wagers-block, .wagers-stance, .wagers-token,
-  .wagers-line, .wagers-contested, .wagers-siege, .wagers-decl,
+  .pill.fury, .pill.betrayal, .wagers-block, .wagers-token,
+  .wagers-line, .wagers-decl,
   .rift-reveal, .rift-mut, .phase-label, .loc-price, .res-headroom,
   .odds-panel, .odds-bar, .odds-fizzle, .odds-warn, .odds-consequence,
   .tier-note.is-free, .tier-note.is-short, .tier-note.is-locked,
@@ -6401,8 +6305,8 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
      entirely - leaving a hole that reads as a missing tile. */
   #board::after{ border:1px solid CanvasText; }
   .pill.fury[data-fury-tier="4"], .pill.fury.is-t4,
-  .wagers-stance.selected, .wagers-token.selected,
-  .wagers-stance[data-wager="allin"], .loc.contested,
+  .wagers-token.selected,
+  .loc.contested,
   .phase-label[data-phase="final-round"], .tier-note.is-free,
   .odds-panel[data-role="defender"], .odds-threshold,
   #wagersForceBlock > button.secondary{
