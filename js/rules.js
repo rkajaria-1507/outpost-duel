@@ -254,29 +254,28 @@ function furyCap(streak, fever){
   return fever ? Math.max(base, FURY_FEVER_CAP) : base;
 }
 
-/* CATCHING UP — the mandatory anti-snowball valve. If whoever is AHEAD
-   walked into the Skirmish on a 3+ win streak, the trailing side adds +2 to
-   their total BEFORE the result is decided, so it can flip a loss into a
-   win or tie it. Applied to the TOTALS, never to the Influence.
+/* THE ANTI-SNOWBALL VALVE IS NOT HERE ANY MORE.
 
-   Deliberately a SINGLE pass and never re-checked: the engine applies it
-   once (see resolveSkirmish in js/game.js) and this must be bit-for-bit the
-   same rule, or the odds panel would describe a game the game does not play. */
-const CATCHING_UP = Object.freeze({minStreak:FURY_STREAK_3, bonus:2});
+   A "Catching Up" rule used to live in this file: if the player who WALKED IN
+   ahead on a 3+ win streak, the trailing side added +2 to their total before
+   the result was decided. It was measured over ~4,500 simulated games and it
+   fired 0.23 times per game. Deleting it outright was worth +0.11 points per
+   seat and changed the winner in 0.4% of decided games - the weakest effect of
+   any system measured. Retuning it was WORSE than deleting it: forcing it to
+   fire ~2.5x more often (streak 2 instead of 3) scored -0.27 points per seat
+   (z = -2.43). It could not be fixed by lowering the threshold either, because
+   a 2-win streak dies at the next fight, which caps the achievable fire rate
+   at ~0.45x/game even in the best case.
 
-function catchingUp(aggTotal, defTotal, aggStreak, defStreak){
-  const out = {aggTotal, defTotal, applied:0, leaderIdx:-1, streak:0};
-  if(aggTotal === defTotal) return out;                 // a tie has no winner
-  const aggLeads = aggTotal > defTotal;
-  const streak = Math.max(0, num(aggLeads ? aggStreak : defStreak, 0) | 0);
-  if(streak < CATCHING_UP.minStreak) return out;
-  out.applied = CATCHING_UP.bonus;
-  out.leaderIdx = aggLeads ? 0 : 1;
-  out.streak = streak;
-  if(aggLeads) out.defTotal = defTotal + CATCHING_UP.bonus;
-  else out.aggTotal = aggTotal + CATCHING_UP.bonus;
-  return out;
-}
+   Meanwhile the Collapse clock is doing this job already, and it flips 9.7% of
+   winners. So the rule is GONE, not rebalanced. The Collapse clock is the
+   game's only anti-snowball system and is not represented in this module.
+
+   Nothing here needs a tombstone for backwards compatibility: resolveSkirmish
+   in js/game.js reads `OD.Rules.catchingUp` behind an
+   `&& OD.Rules.catchingUp` truthiness guard, so an absent member already
+   degrades to "no adjustment" rather than throwing. See the note on
+   projectSkirmish below for the preview-side equivalent. */
 
 /* -------------------------------------------------------------- projection */
 
@@ -489,8 +488,8 @@ function thresholdToBeat(side, opponentTotal){
 
 /* --------------------------------------------------------- whole-skirmish */
 
-/* The one call the UI should make: two projections, Catching Up applied to
-   the totals, then the win/tie/loss readout.
+/* The one call the UI should make: two projections, then the win/tie/loss
+   readout.
 
    `mine` / `theirs` are projectSide() specs. `cap` defaults to the HIGHER of
    the two Fury caps, lifted to 6 by `fever` — which is exactly the cap
@@ -499,39 +498,29 @@ function thresholdToBeat(side, opponentTotal){
    cards: pass what you know (the defender knows the aggressor's Troops but
    not their card) and the resulting percentages are the honest ones.
 
+   There is NO anti-snowball adjustment between the two projections any more
+   (see the tombstone above): both sides are now decided from their own
+   projected totals, unmodified. The returned object no longer carries a
+   `catchingUp` key. A consumer still reading one - catchingUpLine() in
+   js/game.js does - gets `undefined` and returns its empty string, because it
+   guards with `if(!cu || !cu.applied)`. That is why the key can be removed
+   outright instead of being pinned at `{applied: 0}`.
+
    Returns the raw projections as well as the head-to-head, because the UI
    needs the per-side means and caps to print its own sentence. */
 function projectSkirmish(mine, theirs, opts){
   const o = opts || {};
   const a = projectSide(mine);
   const b = projectSide(theirs);
-  /* Catching Up keys off WHO IS AHEAD once the dice fall, which a
-     projection cannot know exactly. The two sides' MEANS are the honest
-     single-pass proxy: they are the totals an average roll produces, so
-     "who is ahead on average" is the same question with a stable answer
-     instead of one that flips as the slider moves. The engine applies the
-     rule to the real totals; this is the preview of it, not a replacement. */
-  const cu = catchingUp(a.mean, b.mean, a.winStreak, b.winStreak);
-  const mineDelta = (cu.applied > 0 && cu.leaderIdx === 1) ? cu.applied : 0;
-  const theirDelta = (cu.applied > 0 && cu.leaderIdx === 0) ? cu.applied : 0;
   const fever = !!o.fever;
   const cap = (typeof o.cap === 'number') ? Math.max(0, o.cap)
            : Math.max(furyCap(a.winStreak, fever), furyCap(b.winStreak, fever));
-  /* A shifted base is still a shifted base: the dice ride on top of it
-     identically, so the whole distribution moves with the floor. */
-  const shift = (side, delta) => (delta === 0) ? side : Object.assign({}, side, {
-    base: side.base + delta,
-    min: side.min + delta,
-    max: side.max + delta,
-    mean: side.mean + delta,
-  });
   return Object.assign({
     mine: a, theirs: b,
-    catchingUp: Object.assign({}, cu, {mineDelta, theirDelta}),
     myCap: furyCap(a.winStreak, fever),
     theirCap: furyCap(b.winStreak, fever),
     fever,
-  }, headToHead(shift(a, mineDelta), shift(b, theirDelta), cap));
+  }, headToHead(a, b, cap));
 }
 
 /* The sentence a human can act on: "you win if you roll >= 3". Returns
@@ -546,8 +535,8 @@ function thresholdSentence(threshold){
 const Rules = Object.freeze({
   diceDist, maxDiceDist, dieGroup, combineDice, cardModParts, projectSide, headToHead,
   projectSkirmish, thresholdSentence,
-  /* the Fury ladder + Catching Up, as the single source of truth */
-  furyFor, furyCap, catchingUp, CATCHING_UP, FURY_FEVER_CAP,
+  /* the Fury ladder, as the single source of truth */
+  furyFor, furyCap, FURY_FEVER_CAP,
   /* the die both seats always roll. NEVER 0 for a live Skirmish. */
   BASE_DICE,
   CARD_MODS, E_D6, E_MAX_2D6,

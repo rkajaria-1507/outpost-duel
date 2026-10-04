@@ -1,7 +1,7 @@
-/* THE FURY LADDER and CATCHING UP — the two rules that replaced the old flat
-   "two wins in a row = +1" streak bonus.
+/* THE FURY LADDER — the rule that replaced the old flat "two wins in a row =
+   +1" streak bonus.
 
-   These live in js/rules.js, not in js/feature-wagers.js, for a load-order
+   This lives in js/rules.js, not in js/feature-wagers.js, for a load-order
    reason: rules.js loads BEFORE the feature and cannot import it, and the
    projection maths is pure. That makes this module the single source of truth
    for two things the game is judged on:
@@ -18,9 +18,12 @@
 
    test/rules.test.js covers the projection maths these feed. This file covers
    the LADDER ITSELF as a contract — the exact table, the monotonicity and
-   clamping properties that make it safe to reason about, Catching Up's
-   boundary behaviour, and the one alias whose whole job is to stop the bot
-   double-counting its own Fury. */
+   clamping properties that make it safe to reason about, and the one alias
+   whose whole job is to stop the bot double-counting its own Fury.
+
+   The CATCHING UP valve that used to be tested here has been DELETED from the
+   game; the two tests under "catching up" below exist only to pin that it
+   stays deleted. */
 
 'use strict';
 
@@ -198,115 +201,60 @@ test('the deprecated `momentum` alias is never undefined', () => {
 
 /* ---------------------------------------------------------- catching up */
 
-test('Catching Up: fires at exactly streak 3 and not one below', () => {
-  /* The boundary is the whole rule. One rung lower and the valve is inert;
-     one rung higher and it is a tax on being good at the game. */
-  const fires = Rules.catchingUp(10, 7, Rules.CATCHING_UP.minStreak, 1);
-  const doesNot = Rules.catchingUp(10, 7, Rules.CATCHING_UP.minStreak - 1, 1);
-  assert.strictEqual(fires.applied, Rules.CATCHING_UP.bonus);
-  assert.strictEqual(doesNot.applied, 0);
-  assert.strictEqual(Rules.CATCHING_UP.minStreak, 3);
-  assert.strictEqual(Rules.CATCHING_UP.bonus, 2);
+/* The Catching Up valve (a leader on a 3+ streak hands the trailer +2) was
+   DELETED from this module rather than rebalanced: it fired 0.23x/game, and
+   deleting it was worth +0.11 pts/seat against a 0.4% change in winners, while
+   retuning it to fire ~2.5x more often scored -0.27 pts/seat (z = -2.43). See
+   the tombstone in js/rules.js. Two tests below pin that the removal is
+   actually complete, so the rule cannot creep back in unnoticed. */
+
+test('the Catching Up rule is gone from the public API, not merely unused', () => {
+  /* Rules is a frozen export, so if these members still existed a consumer
+     would still be able to find and call the rule. Absence is the contract. */
+  assert.strictEqual(Rules.catchingUp, undefined, 'Rules.catchingUp must not be exported');
+  assert.strictEqual(Rules.CATCHING_UP, undefined, 'Rules.CATCHING_UP must not be exported');
 });
 
-test('Catching Up: the +2 lands on the TRAILER and only the trailer', () => {
-  const r = Rules.catchingUp(10, 7, 4, 1);
-  assert.strictEqual(r.applied, 2);
-  assert.strictEqual(r.leaderIdx, 0, 'the aggressor was ahead');
-  assert.strictEqual(r.defTotal, 9, 'the trailer gains the 2');
-  assert.strictEqual(r.aggTotal, 10, 'the leader is untouched');
-});
-
-test('Catching Up: it is symmetric - the trailer can be the one on the streak', () => {
-  const r = Rules.catchingUp(6, 9, 1, 5);
-  assert.strictEqual(r.applied, 2);
-  assert.strictEqual(r.leaderIdx, 1, 'the defender was ahead');
-  assert.strictEqual(r.aggTotal, 8, 'the aggressor, trailing, gains the 2');
-  assert.strictEqual(r.defTotal, 9, 'the leader is untouched');
-});
-
-test('Catching Up: a tie has no winner, so it never fires', () => {
-  /* No leader means no streak to punish. A tie that triggered the valve
-     would hand +2 to a coin-flip winner for no reason at all. */
-  [[8,8,4,4], [0,0,9,9], [5,5,3,0]].forEach(([a,d,as,ds]) => {
-    const r = Rules.catchingUp(a, d, as, ds);
-    assert.strictEqual(r.applied, 0);
-    assert.strictEqual(r.leaderIdx, -1);
-  });
-});
-
-test('Catching Up: it keys off the LEADER\'s streak, not the loser\'s', () => {
-  /* A trailing player on their own hot streak (they just lost, so their
-     streak is 0 - but construct it directly) must not trigger the valve
-     against themselves. */
-  const loserIsHot = Rules.catchingUp(10, 7, 0, 5);
-  assert.strictEqual(loserIsHot.applied, 0,
-    'a 5-streak on the LOSING side is not what triggers the valve');
-});
-
-test('Catching Up: it can flip a loss into a win and a loss into a tie', () => {
-  /* Which is the entire reason it exists. If it could not change an outcome
-     it would be a rounding error dressed up as an anti-snowball measure. */
-  const flipped = Rules.catchingUp(7, 8, 0, 3);
-  assert.strictEqual(flipped.applied, 2);
-  assert.strictEqual(flipped.aggTotal, 9);
-  assert.ok(flipped.aggTotal > flipped.defTotal, 'a loss became a win');
-
-  const tied = Rules.catchingUp(7, 9, 0, 3);
-  assert.strictEqual(tied.applied, 2);
-  assert.strictEqual(tied.aggTotal, tied.defTotal, 'a loss became a tie');
-
-  const cold = Rules.catchingUp(7, 9, 0, 0);
-  assert.strictEqual(cold.applied, 0, 'with no streak it stays a loss');
-});
-
-test('Catching Up: it is a single pass, applied to the TOTALS not the Influence', () => {
-  /* Re-checking would compound. The engine applies it once inside
-     resolveSkirmish, and this must be the same rule or the odds panel would
-     be describing a game the game does not play. The totals here are already
-     post-application, so applying the rule again must not be idempotent-by-
-     accident: it is simply not applied twice because there is no loop. */
-  const r = Rules.catchingUp(10, 7, 4, 1);
-  assert.strictEqual(r.applied, 2);
-  assert.strictEqual(r.streak, 4, 'it reports the streak it fired on');
-  /* The function returns the ADJUSTED totals in one pass. There is no
-     second application, which is what "single pass" means. */
-  assert.strictEqual(r.defTotal - r.applied, 7, 'the pre-adjustment total');
+test('projectSkirmish no longer reports a catchingUp field', () => {
+  const p = Rules.projectSkirmish(
+    {troops: 5, winStreak: 4},   // a hot leader, the case the valve used to fire on
+    {troops: 3, winStreak: 0},
+    {}
+  );
+  assert.ok(!('catchingUp' in p),
+    'the returned shape must not carry a catchingUp key');
+  /* js/game.js's catchingUpLine() reads `p.catchingUp` and guards with
+     `if(!cu || !cu.applied)`, so `undefined` is what makes that consumer
+     degrade to an empty string instead of throwing. */
+  const cu = p.catchingUp;
+  assert.ok(!cu || !cu.applied, 'a stale reader must read it as "no adjustment"');
 });
 
 /* ------------------------------------------------- through projectSkirmish */
 
-test('projectSkirmish: Catching Up makes the trailer look better on screen', () => {
-  /* The preview is the rule, applied to the two sides' MEANS. Without it the
-     commit modal would tell a trailing player on a 3+ streak's opponent
-     that they are dead when the engine is about to hand them +2. */
+test('projectSkirmish: the same fight from two seats is exactly complementary', () => {
+  /* Not a Catching Up test - a SYMMETRY test that happened to live beside one.
+     Describing the identical fight from the leader's seat and from the
+     trailer's seat must produce complementary win/loss rates, because the
+     projection applies nothing to either side any more. If a future rule is
+     added that keys off WHO IS AHEAD, this is the test that catches the two
+     framings drifting apart. */
   const asLeader = Rules.projectSkirmish(
-    {troops: 5, winStreak: 4},   // the leader, hot
+    {troops: 5, winStreak: 4},
     {troops: 3, winStreak: 0},
     {}
   );
   const asTrailer = Rules.projectSkirmish(
-    {troops: 3, winStreak: 0},   // me, trailing
+    {troops: 3, winStreak: 0},
     {troops: 5, winStreak: 4},
     {}
   );
-  assert.ok(asLeader.catchingUp.applied > 0, 'it fires in both framings');
-  assert.strictEqual(asLeader.catchingUp.theirDelta, 2, 'the opponent gets +2');
-  assert.strictEqual(asTrailer.catchingUp.mineDelta, 2, 'I get +2');
-  /* Symmetric by construction: the same fight, described from two seats. */
   assert.ok(Math.abs(asLeader.winPct - asTrailer.losePct) < 1e-9,
     'the leader sees exactly the trailer\'s loss rate');
-});
-
-test('projectSkirmish: no 3+ streak means no Catching Up at all', () => {
-  const p = Rules.projectSkirmish(
-    {troops: 5, winStreak: 2},
-    {troops: 3, winStreak: 0},
-    {}
-  );
-  assert.strictEqual(p.catchingUp.applied, 0);
-  assert.strictEqual(p.catchingUp.mineDelta, 0);
-  assert.strictEqual(p.catchingUp.theirDelta, 0);
+  assert.ok(Math.abs(asLeader.losePct - asTrailer.winPct) < 1e-9,
+    'and the trailer sees exactly the leader\'s loss rate');
+  assert.ok(Math.abs(asLeader.tiePct - asTrailer.tiePct) < 1e-9,
+    'ties are symmetric');
 });
 
 test('projectSkirmish: the reported cap is the higher Fury rung, lifted by Fever', () => {

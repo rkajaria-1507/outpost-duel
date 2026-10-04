@@ -210,21 +210,14 @@ function trueTotals(spec){
   return out;
 }
 
-/* Catching Up, applied to the two sides' MEANS exactly the way
-   projectSkirmish() does (the preview of the rule, not the rule). */
-function shiftTruth(dist, delta){
-  if(!delta) return dist;
-  const out = new Map();
-  dist.forEach((p, k)=> out.set(k + delta, (out.get(k + delta) || 0) + p));
-  return out;
-}
+/* The Catching Up valve was deleted (it fired in 0.4% of games; retuning it
+   measured worse than deleting it). The ground-truth oracle therefore no longer
+   applies any delta - it enumerates the two sides' true totals directly. That
+   is the SAME rule the engine now plays, so the sweep below is a comparison of
+   the projection against the rule rather than against a rule that no longer
+   exists. */
 function trueWTL(mineSpec, theirSpec){
-  const mine = trueTotals(mineSpec), theirs = trueTotals(theirSpec);
-  const a = Rules.projectSide(mineSpec), b = Rules.projectSide(theirSpec);
-  const cu = Rules.catchingUp(a.mean, b.mean, a.winStreak, b.winStreak);
-  const mDelta = (cu.applied > 0 && cu.leaderIdx === 1) ? cu.applied : 0;
-  const tDelta = (cu.applied > 0 && cu.leaderIdx === 0) ? cu.applied : 0;
-  const A = shiftTruth(mine, mDelta), B = shiftTruth(theirs, tDelta);
+  const A = trueTotals(mineSpec), B = trueTotals(theirSpec);
   let w = 0, t = 0, l = 0;
   A.forEach((pa, ka)=>{
     if(!pa) return;
@@ -233,21 +226,23 @@ function trueWTL(mineSpec, theirSpec){
       if(ka > kb) w += pa * pb; else if(ka === kb) t += pa * pb; else l += pa * pb;
     });
   });
-  return {winPct: w * 100, tiePct: t * 100, losePct: l * 100, applied: cu.applied};
+  return {winPct: w * 100, tiePct: t * 100, losePct: l * 100};
 }
 
 /* ---------------------------------------------------------------- the grid */
 
 const CARDS = [null, 'wild', 'gambit', 'guard', 'berserker', 'onslaught', 'overrun'];
 const GRID = {troops: [0, 1, 2, 3, 4, 5, 6], cards: CARDS, cases: 0, maxErr: 0, worst: null,
-             fever: 0, catchingUp: 0, threeDice: 0};
+             fever: 0, asym: 0, threeDice: 0};
 
 /* Every cell of the Troop grid 0-6 x {no card, wild, gambit, guard, berserker,
    onslaught, overrun} on BOTH sides, plus:
      - a FURY CAP case   (streak 4 / streak 3 with Skirmish Fever, so the paid
        cap is 6 and both rungs are paying their full bonus), and
-     - a CATCHING UP case (I trail against a hot 3-streak leader, so the +2
-       fires in my favour). */
+     - a SEAT-SWAP case  (I am the defender against a hot 3-streak aggressor),
+       which is the shape the deleted valve used to distort. It keeps the
+       sweep honest: projectSkirmish must stay exactly complementary between
+       seats now that nothing smooths a hot streak over. */
 function walkGrid(){
   CARDS.forEach(myCard => CARDS.forEach(theirCard => {
     for(let mine = 0; mine <= 6; mine++){
@@ -264,7 +259,9 @@ function walkGrid(){
           {opts:{fever:true},
            mineSpec:{troops:mine, cardId:myCard, winStreak:4, isAggressor:true, credits:3, ore:3, bonus:1},
            theirSpec:{troops:theirs, cardId:theirCard, winStreak:3, isAggressor:false, credits:3, ore:3, bonus:1}},
-          /* CATCHING UP: they lead on a 3-streak, so the +2 lands on ME. */
+          /* SEAT SWAP: I trail as the DEFENDER against a hot 3-streak
+             aggressor. With the valve gone this must show the raw streak
+             asymmetry rather than being smoothed toward parity. */
           {opts:{},
            mineSpec:{troops:mine, cardId:myCard, winStreak:0, isAggressor:false, credits:3, ore:3},
            theirSpec:{troops:theirs, cardId:theirCard, winStreak:3, isAggressor:true, credits:3, ore:3}},
@@ -274,10 +271,7 @@ function walkGrid(){
           const p = Rules.projectSkirmish(c.mineSpec, c.theirSpec, c.opts);
           const truth = trueWTL(c.mineSpec, c.theirSpec);
           if(c.opts.fever) GRID.fever++;
-          /* Only fires when they actually lead on their 3-streak, which is
-             exactly the valve's own condition - counted so the sweep cannot
-             quietly stop covering it. */
-          if(truth.applied > 0) GRID.catchingUp++;
+          if(c.mineSpec.isAggressor !== c.theirSpec.isAggressor) GRID.asym++;
           if(p.mine.dice >= 3 || p.theirs.dice >= 3) GRID.threeDice++;
           ['winPct', 'tiePct', 'losePct'].forEach(k=>{
             const err = Math.abs(truth[k] - p[k]);
@@ -296,19 +290,20 @@ walkGrid();
 test('D1 projectSkirmish matches a brute-force enumeration of the engine rule', () => {
   console.log(`    D1 ground-truth sweep: ${GRID.cases} cases `
     + `(Troop grid 0-6 x {no card, wild, gambit, guard, berserker, onslaught, overrun} on both sides `
-    + `x {plain, Fury cap on Skirmish Fever, Catching Up +2})`);
-  console.log(`    D1 coverage: ${GRID.fever} Fever cells, ${GRID.catchingUp} with Catching Up fired, `
+    + `x {plain, Fury cap on Skirmish Fever, seat-swapped against a hot streak})`);
+  console.log(`    D1 coverage: ${GRID.fever} Fever cells, ${GRID.asym} seat-asymmetric, `
     + `${GRID.threeDice} with a three-dice (Gambit) side`);
   console.log(`    D1 MAXIMUM REMAINING ERROR: ${GRID.maxErr.toExponential(4)} percentage points`);
   console.log(`    D1 worst cell: ${JSON.stringify(GRID.worst)}`);
-  assert.ok(GRID.cases >= 7000, 'the grid really was swept, not sampled');
+  /* 2401 card-pair cells x 2 remaining shapes. */
+  assert.ok(GRID.cases >= 4700, 'the grid really was swept, not sampled');
   /* The brief's bar: < 0.1 points. The measured figure is floating-point
      noise, i.e. the projection IS the enumeration. */
   assert.ok(GRID.maxErr < 0.1,
     `max error ${GRID.maxErr} percentage points exceeds 0.1`);
-  /* And the sweep really did exercise the three harder shapes, or the number
+  /* And the sweep really did exercise the harder shapes, or the number
      above would be an average over the easy ones. */
-  assert.ok(GRID.catchingUp > 500, `only ${GRID.catchingUp} Catching Up cells fired`);
+  assert.ok(GRID.asym > 500, `only ${GRID.asym} seat-asymmetric cells`);
   assert.ok(GRID.threeDice > 500, `only ${GRID.threeDice} three-dice cells`);
 });
 
@@ -1010,12 +1005,18 @@ test('D4 every phase-advancing handler is guarded, and none of them is per-insta
   assert.match(game, /commitBtn\.disabled = true;/,
     'and the button still goes dead on the first fire');
 
-  /* 2/3. The Skirmish Decision (Attack / Hold Back), which starts or ends the
-     round: the per-instance latch AND the round's own record. */
-  assert.match(game, /const decideOnce = \(attack, force\)=>{\s*\n\s*if\(decided\) return;/,
+/* 2/3. The Skirmish Decision (Hold / Attack / Blood), which starts or ends
+      the round: the per-instance latch AND the round's own record. The
+      parameter is the declared STANCE, not a boolean - it was widened from
+      `attack` when the two-way choice became the three-way STAKES dial. */
+  assert.match(game, /const decideOnce = \(stance, force\)=>\{[\s\S]{0,400}?if\(decided\) return;/,
     'the decision handler must latch');
   assert.match(game, /state\.roundRec\.decision = true;/,
     'and it must write the round-level latch that outlives the dialog');
+  /* And every stance must route through that one latch, never around it. */
+  ['STANCE_HOLD', 'STANCE_ORDINARY', 'STANCE_BLOOD'].forEach(s=>{
+    assert.ok(game.includes(`decideOnce(${s},`), `${s} must go through the latched handler`);
+  });
 
   /* 4. The Quiet Round answer (js/feature-wagers.js, not this file's to edit)
      keeps its per-instance `answered` latch - and gains the click shield,
@@ -1277,14 +1278,20 @@ test('D6 the log classifier has no rule for a mechanic that cannot emit a line',
 });
 
 test('D6 the commit "At stake" paragraph names only mechanics that exist', ()=>{
-  /* consequenceHtml used to destructure `decl.wager` - always undefined since
-     the cut - and print an ALL IN or GHOST sentence with payouts read out of
-     constants the feature no longer exports, falling back to numbers this file
-     had made up. */
-  assert.doesNotMatch(CONSEQUENCE_TEXT, /allin|ghost|ALL_IN|GHOST|stance/i,
-    'consequenceHtml still carries the deleted stance sentences');
+/* consequenceHtml used to destructure `decl.wager` - always undefined since
+      the cut - and print an ALL IN or GHOST sentence with payouts read out of
+      constants the feature no longer exports, falling back to numbers this file
+      had made up.
+      NB: the word "stance" is now CORRECT here - the three-way STAKES dial
+      declares one, and the paragraph must say so. Only the two DELETED stances
+      are forbidden. */
+  assert.doesNotMatch(CONSEQUENCE_TEXT, /all.?in|ghost/i,
+    'consequenceHtml still carries the deleted All In / Ghost sentences');
   assert.match(CONSEQUENCE_TEXT, /At stake\./, 'the paragraph itself is still there');
   assert.match(CONSEQUENCE_TEXT, /betrayal\.plus/, 'and the token sentences, which ARE live');
+  /* And it must describe the stance that IS declared, not the old pair. */
+  assert.match(CONSEQUENCE_TEXT, /declaredStance\(\)/,
+    'the paragraph reads from the live declaration');
 });
 
 test('D6 Shrine Advanced is quoted at the value the engine pays', ()=>{

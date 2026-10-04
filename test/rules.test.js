@@ -273,9 +273,9 @@ test('projectSide: fizzle lowers the projection, not just the card', () => {
 
 /* ============================== FURY LADDER (G7) ==========================
    The engine's flat "Momentum: +1 at two wins" rule is GONE. It was replaced
-   by a four-rung ladder plus Catching Up, and these are the numbers the odds
-   panel in the commit modal is computed from, so they are pinned here rather
-   than only in the rules copy. */
+   by a four-rung ladder, and these are the numbers the odds panel in the
+   commit modal is computed from, so they are pinned here rather than only in
+   the rules copy. */
 
 test('Fury ladder: the exact bonus/cap table, rung by rung', () => {
   /* streak 1 -> +0 cap 4 | 2 -> +1 cap 4 | 3 -> +2 cap 5 | 4+ -> +3 cap 6 */
@@ -326,57 +326,41 @@ test('Fury bonus and a card modifier add up, they do not replace one another', (
   close(p.mean, 9 + 3.5);
 });
 
-/* ============================ CATCHING UP (G7) ============================ */
+/* ============================ CATCHING UP: DELETED =========================
 
-test('Catching Up: fires at a 3+ streak on the leader and adds +2 to the loser', () => {
-  const r = Rules.catchingUp(10, 7, 4, 1);   // aggressor leads on a 4-streak
-  assert.strictEqual(r.applied, 2);
-  assert.strictEqual(r.leaderIdx, 0);
-  assert.strictEqual(r.streak, 4);
-  assert.strictEqual(r.aggTotal, 10, 'the leader is untouched');
-  assert.strictEqual(r.defTotal, 9, 'the trailer gets +2');
+   The anti-snowball valve (leader on a 3+ streak hands the trailer +2) was
+   removed from js/rules.js rather than rebalanced — it fired 0.23x/game, and
+   deleting it was worth +0.11 pts/seat against only a 0.4% change in decided
+   winners, while retuning it to fire ~2.5x more often scored -0.27 pts/seat
+   (z = -2.43). The Collapse clock already does this job. See the tombstone in
+   js/rules.js. Its behaviour is deliberately NOT re-specified here; the guard
+   below exists only so the rule cannot quietly return. */
+
+test('Catching Up is gone: no rule member, no projection field', () => {
+  assert.strictEqual(Rules.catchingUp, undefined);
+  assert.strictEqual(Rules.CATCHING_UP, undefined);
+  const p = Rules.projectSkirmish(
+    {troops: 2, winStreak: 0},
+    {troops: 3, winStreak: 3}
+  );
+  assert.ok(!('catchingUp' in p), 'projectSkirmish must not report the valve');
 });
 
-test('Catching Up: a 2-streak leader does not trigger it', () => {
-  const r = Rules.catchingUp(10, 7, 2, 1);
-  assert.strictEqual(r.applied, 0);
-  assert.strictEqual(r.leaderIdx, -1);
-  assert.strictEqual(r.defTotal, 7, 'the totals are returned untouched');
-});
-
-test('Catching Up: the TRAILER can be the one on the hot streak', () => {
-  /* Defender ahead on a 5-streak, so the +2 goes to the aggressor. */
-  const r = Rules.catchingUp(6, 9, 1, 5);
-  assert.strictEqual(r.applied, 2);
-  assert.strictEqual(r.leaderIdx, 1);
-  assert.strictEqual(r.aggTotal, 8);
-  assert.strictEqual(r.defTotal, 9);
-});
-
-test('Catching Up: a tie has no winner, so it never fires', () => {
-  const r = Rules.catchingUp(8, 8, 4, 4);
-  assert.strictEqual(r.applied, 0);
-  assert.strictEqual(r.aggTotal, 8);
-  assert.strictEqual(r.defTotal, 8);
-});
-
-test('Catching Up: it can flip a loss into a win and a loss into a tie, which is the point', () => {
-  /* I am behind by 1 and the LEADER is on a 3-streak, so the +2 turns a
-     clear loss into a win. Without the rule the fight was already over. */
-  const flipped = Rules.catchingUp(7, 8, 0, 3);
-  assert.strictEqual(flipped.applied, 2);
-  assert.ok(flipped.aggTotal > flipped.defTotal, 'the trailer is now AHEAD: 9 vs 8');
-
-  /* Behind by exactly 2 against the same hot leader: +2 lands it on a tie,
-     which still pays nothing, and is still better than the loss. */
-  const tied = Rules.catchingUp(7, 9, 0, 3);
-  assert.strictEqual(tied.aggTotal, 9);
-  assert.strictEqual(tied.defTotal, 9);
-
-  /* Same deficit, nobody on a streak: untouched, and still a loss. */
-  const cold = Rules.catchingUp(7, 9, 0, 0);
-  assert.strictEqual(cold.applied, 0);
-  assert.ok(cold.aggTotal < cold.defTotal);
+test('projectSkirmish: a hot leader no longer flatters the trailer', () => {
+  /* The exact framing the deleted valve used to exploit. With the rule gone
+     the only thing a streak still buys is the ladder bonus and the Influence
+     cap, so leading into a hot opponent is now strictly worse than trailing
+     into a cold one by the same margin — which is the intent. */
+  const asTrailer = Rules.projectSkirmish(
+    {troops: 2, winStreak: 0},
+    {troops: 3, winStreak: 3}
+  );
+  const asLeader = Rules.projectSkirmish(
+    {troops: 3, winStreak: 0},
+    {troops: 2, winStreak: 3}
+  );
+  assert.ok(asTrailer.winPct < asLeader.winPct,
+    'trailing against a hot leader is now strictly worse than the reverse');
 });
 
 /* ==================== head-to-head margin convolution =====================
@@ -455,23 +439,6 @@ test('projectSkirmish: Skirmish Fever raises the paid cap to 6', () => {
   assert.strictEqual(plain.cap, 4);
   assert.strictEqual(fever.cap, 6);
   assert.ok(fever.ev > plain.ev, 'a bigger cap pays a bigger blowout');
-});
-
-test('projectSkirmish: a 3+ streak on the leader makes the trailer look better', () => {
-  /* Identical commits, but the defender is on a 3-streak, so the
-     anti-snowball valve fires in MY favour as the trailer. */
-  const asTrailer = Rules.projectSkirmish(
-    {troops: 2, winStreak: 0},
-    {troops: 3, winStreak: 3}
-  );
-  const asLeader = Rules.projectSkirmish(
-    {troops: 3, winStreak: 0},
-    {troops: 2, winStreak: 3}
-  );
-  assert.ok(asTrailer.catchingUp.applied === 2, 'the +2 is applied to me');
-  assert.strictEqual(asTrailer.catchingUp.mineDelta, 2);
-  assert.ok(asTrailer.winPct > asLeader.losePct - 1e-9,
-    'being the trailer against a hot leader is not worse than leading into it');
 });
 
 test('thresholdSentence: speaks plain English for all three cases', () => {

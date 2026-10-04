@@ -234,6 +234,32 @@ const CAPS = {credits:8, ore:6, troops:6};
    in each entry) so the rules copy in RULES_HTML can quote it and the two
    can never drift apart. */
 const OBJECTIVE_BONUS = 2;
+/* >>> STAKES: the three declarations and their two numbers, declared HERE for
+   >>> the same reason OBJECTIVE_BONUS is. RULES_HTML is a top-level template
+   >>> literal evaluated while this file loads, so anything it interpolates has
+   >>> to exist above it or the whole file dies at require() time with a
+   >>> temporal-dead-zone ReferenceError that `node --check` cannot see (it is a
+   >>> runtime error, and it took test/sites.test.js down when it happened).
+   >>> The accessor FUNCTIONS - declaredStakes, bloodMinCommit, skirmishCap -
+   >>> live further down, beside the Fury ladder they read; only the constants
+   >>> are here. */
+const STANCE_HOLD = 'hold', STANCE_ORDINARY = 'ordinary', STANCE_BLOOD = 'blood';
+/* The BLOOD ceiling. It is the same number Skirmish Fever lifts every Fury rung
+   to, which is deliberate: two rules that both mean "this fight may pay six"
+   must not be able to argue about which of them is larger. If BLOOD and Fever
+   land together the answer is 6 either way - BLOOD cannot be raised above 6 and
+   Fever cannot lower it below 6 - so the two compose instead of competing, and
+   `skirmishCap()` is written as a max() over both for exactly that reason. */
+const BLOOD_CAP = 6;
+/* What a declared HOLD BACK pays. Deliberately 1, and deliberately not more:
+   measured, a flat +1 here is worth +0.25 pts/seat (z = 2.36) and lifts the
+   Bounty claim rate from 30.8% to 41.5% - real, and small enough that it cannot
+   become the plan. It is a stopgap, not a design: it is a flat additive
+   modifier, which is the pattern this game already suffers from (the Surge, the
+   Bounty, Catching Up are all flat adds). What makes it a decision rather than a
+   receipt is the Pressure floor beneath it - hold too often and the sky opens on
+   you. */
+const HOLD_BACK_INFLUENCE = 1;
 /* How long the end screen waits before looping into the next demo game. Long
    enough to actually read the final tally, and now visible + cancellable. */
 const DEMO_LOOP_SECONDS = 8;
@@ -427,12 +453,12 @@ const RULES_HTML = `
     <section class="rules-panel" id="rules-skirmish" role="tabpanel" aria-labelledby="rules-tab-skirmish" hidden>
       <p class="rules-intro">Only happens if someone took <b>Garrison</b> this round. That player is the Aggressor.</p>
       <ol class="rules-steps">
-        <li><span class="rules-step-title">Decide</span> Aggressor chooses attack or hold. Hold = no Skirmish.</li>
-        <li><span class="rules-step-title">Commit</span> Aggressor picks troops (0–all) and may play one Tactic face-down.</li>
-        <li><span class="rules-step-title">Respond</span> Defender does the same — and commits <b>second</b>, so they see what the aggressor committed. The commit window shows you the exact odds before you commit; the aggressor's window does not, because they do not know yet either.</li>
-        <li><span class="rules-step-title">Spend</span> Committed troops are spent by both sides unless a card returns them (e.g. Feint, Fortify).</li>
+        <li><span class="rules-step-title">Declare</span> Aggressor declares one of three stances. <b>Hold Back</b> &mdash; no Skirmish, you bank <b>+1 Influence</b>, and Pressure rises by 1 instead of 2. <b>Ordinary</b> &mdash; the rules below, nothing declared. <b>Blood</b> &mdash; the Influence ceiling is <b>${BLOOD_CAP}</b> whatever the Fury ladder says, you must commit at least <b>half your Troops</b>, and <b>the loser keeps their committed Troops</b> (a tie returns both sides&rsquo;). Worth it only if the margin reaches ${BLOOD_CAP-1}. In MELTDOWN, Hold Back is not on the table.</li>
+        <li><span class="rules-step-title">Commit</span> Aggressor picks troops (0&ndash;all) and may play one Tactic face-down.</li>
+        <li><span class="rules-step-title">Respond</span> Defender does the same — and commits <b>second</b>, so they see what the aggressor committed and which stance was declared. The commit window shows you the exact odds before you commit; the aggressor's window does not, because they do not know yet either.</li>
+        <li><span class="rules-step-title">Spend</span> Committed troops are spent by both sides unless a card returns them (e.g. Feint, Fortify) — or unless Blood was declared, which returns the <b>loser&rsquo;s</b> to them.</li>
         <li><span class="rules-step-title">Resolve</span> Each side: d6 + troops + card mod (+1 if Advanced Garrison Aggressor). Undermine subtracts 2 from the other total.</li>
-        <li><span class="rules-step-title">Score</span> Higher total wins Influence equal to the margin, capped at your <b>Fury</b> rung's ceiling (or 6 on Skirmish Fever). Tie = no Influence; troops still spent. Some cards fire regardless of winner.</li>
+        <li><span class="rules-step-title">Score</span> Higher total wins Influence equal to the margin, capped at your <b>Fury</b> rung&rsquo;s ceiling (or ${BLOOD_CAP} on Skirmish Fever, or under Blood). Tie = no Influence; troops still spent unless Blood was declared. Some cards fire regardless of winner.</li>
       </ol>
       <div class="rules-callout">
         <strong>The streak bonus is the Fury ladder, not a flat one.</strong> Two wins in a row is no longer worth the same as four. The full ladder, the Catching Up valve and the Betrayal tokens are all on the <b>Fury &amp; Tokens</b> tab — that tab is owned by the feature that implements them, so it cannot drift out of date with the game.
@@ -1395,7 +1421,107 @@ function furyRungCap(streak, fever){
   return (typeof OD !== 'undefined' && OD.Rules && OD.Rules.furyCap)
     ? OD.Rules.furyCap(streak, fever) : (fever ? 6 : 4);
 }
+/* The declaration, restated in machine-readable form on BOTH seats' commit
+   modals. `data-stake` is the contract: one attribute, the same three values
+   the decision group uses, so a stylesheet, a test or a screen reader can key
+   off the declaration without parsing a sentence. The sentence is there for
+   everyone else, and it is written from the same constants the engine applies
+   rather than from a second copy of the numbers.
+
+   ORDINARY prints nothing at all. It is the default, it is what the panel
+   already describes in full (the Fury rungs are two lines above it), and a
+   readout that fires on every ordinary fight trains the eye to skip it. */
+function stakeReadoutHtml(){
+  const s = declaredStakes();
+  const p = (state && s.aggressorIdx >= 0) ? state.players[s.aggressorIdx] : null;
+  if(!p) return '';
+  if(s.stance === STANCE_BLOOD){
+    return `<p class="stake-readout" data-stake="blood" style="font-size:12px;margin:0 0 8px">`
+      + `${esc(p.name)} declared <b>BLOOD</b> \u2014 cap ${BLOOD_CAP}, at least half their Troops, and the loser keeps their Troops.</p>`;
+  }
+  if(s.stance === STANCE_HOLD){
+    return `<p class="stake-readout" data-stake="hold" style="font-size:12px;margin:0 0 8px">`
+      + `${esc(p.name)} declared <b>HOLD BACK</b> \u2014 this round is a declaration, not a fight.</p>`;
+  }
+  return '';
+}
+
+/* Where the fight is being fought, restated for the seat that did NOT declare.
+   Only BLOOD changes the numbers, so only BLOOD prints anything - but it has to
+   print it HERE, next to the odds bar, because the bar's own cap line comes out
+   of OD.Rules.projectSkirmish() (js/rules.js, which this engineer does not own)
+   and that projection knows about the Fury ladder and Skirmish Fever but not
+   about a stance declared five seconds ago. Without this sentence the panel
+   would say "Influence cap this Skirmish: 4" directly above a fight that pays
+   6, which is the kind of small lie this panel exists to eliminate. */
+function stanceCeilingNote(){
+  if(declaredStance() !== STANCE_BLOOD) return '';
+  return `<div style="font-size:12px;margin-top:4px;color:var(--accent-blood,#8c1d18)">`
+    + `<b>BLOOD was declared</b> \u2014 the ceiling is <b>${BLOOD_CAP}</b> for this fight whatever the Fury ladder says.`
+    + `</div>`;
+}
+
 function isFeverRound(){ return !!(state && state.currentEvent==='skirmish_fever'); }
+
+/* ============================== THE STAKES ==============================
+   The Influence cap used to be a clamp applied to a fight nobody had a say
+   in: the aggressor pressed Attack, the margin came out at 5.03 on average,
+   the cap took 4 and ~15% of the entire game's score was generated and thrown
+   away (measured: the cap bound in 49.2% of 5.34 fights a game). The STAKES
+   turn that clamp into a wager - the aggressor declares, in public, how hard
+   they are willing to swing, and the cap becomes the thing they are bidding
+   for rather than the thing that quietly caps them.
+
+     HOLD BACK   no Skirmish; the aggressor banks +1 Influence and the round
+                 is not "quiet" for Pressure purposes (see holdBackRound).
+     ORDINARY    today's rules, unchanged: the winner's Fury rung ceiling.
+     BLOOD       the ceiling is 6 whatever the ladder says, the aggressor must
+                 commit at least half their Troop pool, and the LOSER of the
+                 fight keeps the Troops they committed.
+
+   EVERY READER GOES THROUGH declaredStakes(). `state.stakes` is reassigned
+   wholesale by beginRound and by the decision itself, and it rides the JSON
+   relay to the online guest, so any read has to survive three things: an
+   older snapshot from the wire (`undefined`), a hand-edited payload
+   (`'blood'` arriving from nowhere), and the round boundary. Hence `??`
+   everywhere and a whitelist that folds anything unrecognised to ORDINARY -
+   the inert choice is the one that cannot change a game's score.
+
+   The three STANCE_* names and the two numbers (BLOOD_CAP,
+   HOLD_BACK_INFLUENCE) are declared at the TOP of this file, beside
+   OBJECTIVE_BONUS, because RULES_HTML interpolates them from a top-level
+   template literal. Redeclaring them here would be a second `const` of the same
+   name in the same scope, which is a SyntaxError the whole file cannot survive. */
+function normaliseStance(v){
+  return (v === STANCE_HOLD || v === STANCE_BLOOD) ? v : STANCE_ORDINARY;
+}
+/* `state.stakes` is a plain object on the JSON relay; `?? {}` covers a guest
+   whose last snapshot predates the field entirely, and the integer coercion
+   covers `null`/`""` arriving as a seat. */
+function declaredStakes(){
+  const s = (state && state.stakes) ?? {};
+  return {aggressorIdx: (s.aggressorIdx | 0), stance: normaliseStance(s.stance)};
+}
+function declaredStance(){ return declaredStakes().stance; }
+/* The floor BLOOD puts under the aggressor's commitment. `ceil(pool/2)`: half
+   the pool, rounded UP, because "at least half" of 1 Troop has to be 1 or the
+   declaration would be unpayable. A pool of 0 needs 0 - there is nothing to
+   commit, and the rule must not invent a Troop. */
+function bloodMinCommit(pool){
+  const p = Math.max(0, pool|0);
+  return (p <= 0) ? 0 : Math.ceil(p / 2);
+}
+/* The one place the Influence ceiling for a fight is decided. `feverCap` is
+   the event's 6 (0 when it is not in play) and `bloodCap` is BLOOD_CAP under a
+   BLOOD declaration (0 otherwise), so ORDINARY behaves exactly as it did and
+   a tie is still worth nothing. */
+function skirmishCap(winnerCap, feverCap, bloodCap){
+  return Math.max(winnerCap|0, feverCap|0, bloodCap|0);
+}
+/* BLOOD's extra ceiling, for the screens that print the cap BEFORE the dice. */
+function stanceCeiling(winnerCap, fever){
+  return skirmishCap(winnerCap, fever ? BLOOD_CAP : 0, declaredStance() === STANCE_BLOOD ? BLOOD_CAP : 0);
+}
 
 function gamblerLeader(p){ const l = getLeader(p); return !!(l && l.id==='gambler'); }
 
@@ -1493,6 +1619,7 @@ function defenderOddsHtml(defIdx, troops, cardId, fever){
         ` &mdash; their card is <b>hidden</b>, so this is their Troops alone`)
     + thresholdLine(p)
     + catchingUpLine(p)
+    + stanceCeilingNote()
     + `<div style="font-size:12px;color:var(--muted);margin-top:4px">Expected Influence if you win: <b>${Math.round(p.ev*10)/10}</b> (capped at ${p.cap}).</div>`;
 }
 
@@ -1516,6 +1643,7 @@ function aggressorOddsHtml(aggIdx, troops, cardId, fever){
     + `<div style="margin-top:8px"><b style="font-size:12px">if ${esc(state.players[defIdx].name)} mirrors you (${troops} Troop${troops === 1 ? '' : 's'}, no card)</b></div>`
     + oddsBar(b) + thresholdLine(b)
     + projectionLine('Your projection', a.mine, furyNote(a.mine.winStreak, a.myCap))
+    + stanceCeilingNote()
     + `<div style="font-size:12px;color:var(--muted);margin-top:4px">Influence cap this Skirmish: <b>${a.cap}</b>. Expected Influence vs a passive defender: <b>${Math.round(a.ev*10)/10}</b>.</div>`;
 }
 
@@ -1570,15 +1698,29 @@ function fizzleWarning(playerIdx, cardId){
 function consequenceHtml(playerIdx, troops, cardId){
   const p = state.players[playerIdx];
   const fever = isFeverRound();
-  const cap = Math.max(furyRungCap(p.winStreak, fever), furyRungCap(state.players[1-playerIdx].winStreak, fever));
+  const cap = stanceCeiling(Math.max(furyRungCap(p.winStreak, fever), furyRungCap(state.players[1-playerIdx].winStreak, fever)), fever);
   const decl = (typeof OD !== 'undefined' && OD.Wagers && typeof OD.Wagers.commitDeclaration === 'function')
     ? OD.Wagers.commitDeclaration() : null;
   const token = (decl && decl.betrayal && decl.betrayal.plus) ? ' A <b>+1 token</b> is declared and is already in the projection above.' : '';
   const reroll = (decl && decl.betrayal && decl.betrayal.reroll) ? ' A <b>RE-ROLL</b> is declared: your die is cast twice, second cast stands.' : '';
+  /* >>> BLOOD CHANGES BOTH HALVES OF THIS SENTENCE, so it is written from the
+     >>> declaration rather than left to the paragraph above it: the ceiling is
+     >>> already `cap` (stanceCeiling), and the loser now KEEPS their committed
+     >>> Troops - which is the only rule in the game that turns a lost fight
+     >>> into a better round than an ordinary one, and it has to be on this
+     >>> panel or the defender is being asked to price a fight whose downside
+     >>> the panel does not mention. */
+  const blood = declaredStance() === STANCE_BLOOD;
+  const loseClause = blood
+    ? `Lose: you keep the <b>${troops}</b> Troop${troops===1?'':'s'} you commit \u2014 under BLOOD the loser keeps them \u2014 and no Influence moves. `
+    : `Lose: you lose the <b>${troops}</b> Troop${troops===1?'':'s'} you commit${troops===0?' (none)':''} and no Influence moves. `;
+  const tieClause = blood
+    ? `Tie: no Influence either way, and \u2014 again, under BLOOD \u2014 both sides keep what they committed.`
+    : `Tie: no Influence either way, but both sides still lose their committed Troops.`;
   return `<div class="odds-consequence" style="margin-top:8px;font-size:12px;line-height:1.5">`
-    + `<b>At stake.</b> Win: +the margin in Influence, capped at <b>${cap}</b>${isFeverRound()?' (Skirmish Fever)':''}, and they lose their committed Troops. `
-    + `Lose: you lose the <b>${troops}</b> Troop${troops===1?'':'s'} you commit${troops===0?' (none)':''} and no Influence moves. `
-    + `Tie: no Influence either way, but both sides still lose their committed Troops.`
+    + `<b>At stake.</b> Win: +the margin in Influence, capped at <b>${cap}</b>${isFeverRound()?' (Skirmish Fever)':''}${blood?' (BLOOD)':''}, and they ${blood?'keep':'lose'} their committed Troops. `
+    + loseClause
+    + tieClause
     + token + reroll
     + `</div>`;
 }
@@ -1598,41 +1740,118 @@ function commitOddsHtml(playerIdx, troops, cardId){
     + `</div>`;
 }
 
-/* `aggressorName` / `defenderName` / the two counts arrive over the WebSocket
+/* `aggressorName` / `defenderName` / the counts arrive over the WebSocket
    on the guest (handleGuestSocketMessage reads them straight off
    `requestSkirmishDecision`), so this modal body IS a trust boundary and both
    names are escaped here. The counts are coerced to finite integers rather
    than escaped: they are numbers, and escaping a number that is not one yet
-   would print the attacker's string instead of rejecting it. */
-function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, defenderHandCount, onDecision, forceHtml){
+   would print the attacker's string instead of rejecting it.
+
+   `aggressorTroops` is the DECLARING seat's own pool, and it is the seventh
+   argument rather than a read of `state` because on the guest this modal is
+   opened from a socket message: the host is the only side that knows the
+   aggressor's Troops at that moment, so the guest has to be told. Without it
+   the guest would render BLOOD for a pool it cannot see and the host would
+   then refuse the declaration - a button that lies across the wire. It is
+   coerced, and a payload that omits it degrades to 0, which hides BLOOD. */
+function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, defenderHandCount, onDecision, forceHtml, aggressorTroops){
   const troops = numOr(defenderTroops, 0);
   const handCount = numOr(defenderHandCount, 0);
+  /* A fresh declaration screen has no declaration yet, so #srLive must not
+     open on last round's. Same rule as srWagerSeen's reset in the commit modal,
+     for the same reason: the first announcement of a round has to be a CHANGE
+     or there is nothing to hear. */
+  srStanceSeen = '';
   showModal("Skirmish Decision", `
-    <p>${esc(aggressorName)}, you hold the Garrison. Attack ${esc(defenderName)}?</p>
+    <p>${esc(aggressorName)}, you hold the Garrison. Declare how you fight ${esc(defenderName)}?</p>
     <p style="color:var(--muted);font-size:13px">Defender has ${troops} Troops, ${handCount} cards in hand.</p>
-    ${skirmishStakesHtml()}
+    ${skirmishStakesHtml(aggressorTroops)}
     ${forceHtml || ''}
-    <div class="footer-actions">
-      <button class="secondary" id="skipAttack">Hold Back</button>
-      <button id="doAttack">Attack!</button>
+    <div class="stake-choices" role="radiogroup" aria-label="Your declaration" id="stakeChoices">
+      <button type="button" class="stake-btn stake-hold" id="skipAttack" role="radio" aria-checked="false" tabindex="-1" data-stake="hold">Hold Back</button>
+      <button type="button" class="stake-btn stake-ordinary" id="doAttack" role="radio" aria-checked="true" tabindex="0" data-stake="ordinary">Attack</button>
+      <button type="button" class="stake-btn stake-blood" id="doBlood" role="radio" aria-checked="false" tabindex="-1" data-stake="blood">Blood</button>
     </div>
     <div id="meltdownHoldNote" class="hidden" style="margin-top:10px;padding:8px 10px;border:1px solid #8c1d18;border-radius:6px;background:rgba(140,29,24,.10);font-size:12px;color:#8c1d18">
-      <b>MELTDOWN &mdash; no holding back.</b> In the last round the Garrison is an obligation, not an option. The button above is off; press <b>Attack!</b> to fight.
+      <b>MELTDOWN &mdash; no holding back.</b> In the last round the Garrison is an obligation, not an option. Hold Back is off; declare <b>Attack</b> or <b>Blood</b> to fight.
     </div>
   `);
+  /* >>> STAKES: the three declarations, as ONE radiogroup with a roving
+     tabindex (the same pattern the Rules tabs and the mode cards already use in
+     this file). Selection follows focus, so focus and `aria-checked` can never
+     disagree: there is no state in which the keyboard is parked on BLOOD while
+     the group still reports ORDINARY.
+
+     >>> The `id`s are load-bearing and are NOT decoration. #skipAttack and
+     >>> #doAttack are the names the balance harness drives a scripted human
+     >>> through (test/balance.sim.js serviceHumanDecision), and #doBlood is the
+     >>> third member of that same set: HOLD BACK keeps the old id so "hold" and
+     >>> ORDINARY keep working for anything that already knows them, and BLOOD
+     >>> is reachable by the same lookup rather than by a query the harness
+     >>> would have to learn. Removing the pair would silently turn every
+     >>> human-led balance run into a game where nobody ever fights.
+     >>> #doBlood is deliberately a plain id with no old counterpart to keep. */
+  const stakeBtns = ()=> Array.prototype.slice.call(
+    document.querySelectorAll('#stakeChoices .stake-btn')).filter(b=>!b.disabled);
+  const selectStance = (btn)=>{
+    if(!btn || btn.disabled) return;
+    stakeBtns().concat([btn]).forEach(b=>{
+      const on = (b === btn);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.tabIndex = on ? 0 : -1;
+    });
+  };
+  const stakeGroup = document.getElementById('stakeChoices');
+  if(stakeGroup){
+    stakeGroup.addEventListener('keydown', (e)=>{
+      if(e.ctrlKey || e.metaKey || e.altKey) return;
+      const btn = (e.target && e.target.closest) ? e.target.closest('.stake-btn') : null;
+      if(!btn) return;
+      const list = stakeBtns();
+      const i = list.indexOf(btn);
+      if(i < 0) return;
+      let next = -1;
+      const key = e.key;
+      if(key==='ArrowRight' || key==='ArrowDown') next = (i + 1) % list.length;
+      else if(key==='ArrowLeft'  || key==='ArrowUp')   next = (i - 1 + list.length) % list.length;
+      else if(key==='Home') next = 0;
+      else if(key==='End')  next = list.length - 1;
+      else if(key==='Enter' || key===' ' || key==='Spacebar') next = i;
+      else return;
+      if(next < 0 || !list[next]) return;
+      /* Space would scroll the dialog; Enter would submit the nearest form. */
+      e.preventDefault();
+      e.stopPropagation();
+      selectStance(list[next]);
+      if(typeof list[next].focus === 'function') list[next].focus();
+    });
+  }
   /* >>> CHAOS (feature-chaos.js) - MELTDOWN makes holding the Garrison an
      OBLIGATION. promptAggressorDecision() already ignores a hold-back
      (`noRetreat`), which means the button used to render, look clickable,
      accept the click, and then do nothing but log a complaint. A control
      that silently refuses is worse than no control: this disables it and
-     says why, in the same words the log will use. */
+     says why, in the same words the log will use.
+
+     >>> AND IT STILL DOES, in a group. Disabling one member is not enough on
+     >>> its own: the roving tabindex and the arrow keys both walk the list, so
+     >>> a disabled HOLD BACK left in the list would still be selectable with
+     >>> the keyboard and would still be announced as an option. `stakeBtns()`
+     >>> filters disabled members out of the movement, and the selection is
+     >>> forced onto ORDINARY below so `aria-checked` never names a stance the
+     >>> rules will refuse. */
   if(state && state.meltdown){
     const hold = document.getElementById('skipAttack');
     if(hold){
       hold.disabled = true;
       hold.setAttribute('aria-disabled', 'true');
-      hold.textContent = 'Hold Back — locked by MELTDOWN';
-      hold.title = 'Meltdown: holding the Garrison obliges you to attack.';
+      hold.setAttribute('title', 'Meltdown: holding the Garrison obliges you to attack.');
+      /* The button's own text stays "Hold Back": the reason it is off is printed
+         once, in #meltdownHoldNote, rather than baked into a label that would
+         then have to be un-baked - and the three labels are part of the
+         stylesheet's contract, so they do not vary with board state. */
+      const atk = document.getElementById('doAttack');
+      if(atk) selectStance(atk);
     }
     const note = document.getElementById('meltdownHoldNote');
     if(note) note.classList.remove('hidden');
@@ -1652,61 +1871,111 @@ function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, 
      >>> plain boolean, and rides the JSON relay to the online guest for free.
      >>> (It is NOT on the round's public contract for anything else: nothing
      >>> reads it but this guard.) `decided` is kept because it is what makes
-     >>> the buttons go visibly dead on the first click. */
+     >>> the buttons go visibly dead on the first click.
+
+     >>> THIRD LATCH, `state.stakes`. The stakes block below writes the
+     >>> declaration the moment the choice is made, and `stakes.stance` is a
+     >>> plain string on the JSON relay - so "has a declaration already been
+     >>> recorded for this round?" is answerable after the dialog is gone, which
+     >>> is precisely the window a double-click lands in. It answers the
+     >>> question `decision` cannot: `decision` is a boolean with one value, and
+     >>> three buttons now share it, so the guard has to be able to tell WHICH
+     >>> declaration won the race. Reading it costs one property and cannot
+     >>> reject a legitimate first click, because the dialog opens with the
+     >>> round's default (`stance:'ordinary'`, `aggressorIdx:-1`) - a seat index
+     >>> of -1 is what says "nobody has declared yet". */
   let decided = false;
-  const decideOnce = (attack, force)=>{
+  const alreadyDeclared = ()=>{
+    const s = declaredStakes();
+    return s.aggressorIdx >= 0;
+  };
+  const decideOnce = (stance, force)=>{
     if(decided) return;
     if(state && state.roundRec && state.roundRec.decision){
       log('The Skirmish decision was already made this round - ignored.');
       return;
     }
+    if(alreadyDeclared()){
+      log('The Skirmish declaration was already made this round - ignored.');
+      return;
+    }
     decided = true;
     if(state && state.roundRec) state.roundRec.decision = true;
-    const hold = document.getElementById('skipAttack');
-    const atk  = document.getElementById('doAttack');
-    if(hold) hold.disabled = true;
-    if(atk) atk.disabled = true;
+    /* Every member of the group dies together, not just the one clicked: a
+       radiogroup with two live members is a group whose second click can still
+       change the answer. */
+    ['skipAttack','doAttack','doBlood'].forEach(id=>{
+      const b = document.getElementById(id);
+      if(b) b.disabled = true;
+    });
     if(forceBtn) forceBtn.disabled = true;
-    hideModal(); onDecision(attack, force);
+    hideModal(); onDecision(stance, force);
   };
   const holdBtn = document.getElementById('skipAttack');
   const atkBtn  = document.getElementById('doAttack');
+  const bloodBtn = document.getElementById('doBlood');
   if(holdBtn) holdBtn.onclick = ()=>{
     if(state && state.meltdown){ return; }
-    decideOnce(false, false);
+    decideOnce(STANCE_HOLD, false);
   };
-  if(atkBtn) atkBtn.onclick = ()=> decideOnce(true, false);
+  if(atkBtn) atkBtn.onclick = ()=> decideOnce(STANCE_ORDINARY, false);
+  /* BLOOD is only offered when it can be paid. The rule is "at least half your
+     Troop pool", so a player holding zero Troops cannot declare it - and a
+     declaration that silently did nothing would be the same lying control the
+     MELTDOWN note exists to prevent. The button is removed rather than
+     disabled so the group is still two options wide. */
+  if(bloodBtn){
+    if((aggressorTroops|0) >= 1){
+      bloodBtn.onclick = ()=> decideOnce(STANCE_BLOOD, false);
+    } else {
+      if(bloodBtn.parentNode && typeof bloodBtn.parentNode.removeChild === 'function'){
+        bloodBtn.parentNode.removeChild(bloodBtn);
+      }
+      bloodBtn.disabled = true;
+    }
+  }
   // >>> WAGERS (feature: Betrayal tokens) - the FORCE button is injected by the
   // >>> feature and reports a token spend through the SAME decision handler.
   const forceBtn = document.getElementById('wagersForceAttack');
   if(forceBtn && forceBtn.dataset.token==='1'){
-    forceBtn.onclick = ()=> decideOnce(true, true);
+    forceBtn.onclick = ()=> decideOnce(STANCE_ORDINARY, true);
   }
 }
 
-/* "What is at stake" for the attack/hold decision, before any Troops are
-   committed. The Influence cap is the piece that was completely invisible
-   and is decision-changing: a player on a 3-win streak is capped at 5 and a
-   player on 4+ at 6, and Skirmish Fever lifts every rung to 6. Holding back
-   is not a neutral pass either - a round with no Skirmish doubles the
-   Pressure tick, which is the tax that eventually causes a Collapse. */
-function skirmishStakesHtml(){
+/* "What is at stake" for the decision, before any Troops are committed. The
+   Influence cap is the piece that was completely invisible and is
+   decision-changing: a player on a 3-win streak is capped at 5 and a player on
+   4+ at 6, and Skirmish Fever lifts every rung to 6.
+
+   >>> IT NOW DESCRIBES THE THREE DECLARATIONS, because the cap stopped being
+   >>> a fact about the winner and became the thing the aggressor is bidding
+   >>> for. The panel is the only place the player can read all three side by
+   >>> side before choosing, and a choice between three options that are only
+   >>> described one at a time is a guess. The numbers here are read from the
+   >>> same helpers the resolution uses (stanceCeiling / bloodMinCommit), never
+   >>> retyped, so the panel cannot quote a cap the engine would not honour. */
+function skirmishStakesHtml(ownTroops){
   if(!state) return '';
   const fever = isFeverRound();
   const [a, b] = state.players;
   const rows = [a, b].map(p=>{
     const f = furyRung(p.winStreak);
+    const cap = stanceCeiling(furyRungCap(f.streak, fever), fever);
     return `<div style="font-size:12px">${esc(p.name)}: <b>Fury ${f.streak}</b> `
-      + `<span style="color:var(--muted)">(+${f.bonus} to their total, Influence cap ${furyRungCap(f.winStreak, fever)})</span></div>`;
+      + `<span style="color:var(--muted)">(+${f.bonus} to their total, Influence cap ${cap})</span></div>`;
   }).join('');
   const dread = (state.dread|0);
+  const pool = Math.max(0, numOr(ownTroops, 0));
+  const half = bloodMinCommit(pool);
   return `<div class="odds-panel" id="stakesPanel" style="margin:10px 0;padding:8px 10px;border:1px solid rgba(140,120,90,.4);border-radius:6px">`
     + `<div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700">What is at stake</div>`
     + rows
     + `<div style="font-size:12px;margin-top:4px">${fever
         ? '<b style="color:var(--accent-gold-ink,#8a5a10)">SKIRMISH FEVER is in play</b> &mdash; every Influence ceiling is lifted to <b>6</b> this round.'
         : 'Influence is capped at the <b>winner&rsquo;s</b> Fury rung ceiling.'}</div>`
-    + `<div style="font-size:12px;margin-top:4px"><b>Hold back</b> and you keep every Troop and settle for no Influence &mdash; but a round with no Skirmish adds <b>2</b> to Pressure instead of 1, and Pressure ends in a Collapse.</div>`
+    + `<div style="font-size:12px;margin-top:6px"><b>Ordinary</b> &mdash; the rules above, nothing declared.</div>`
+    + `<div style="font-size:12px"><b>Blood</b> &mdash; the ceiling is <b>${BLOOD_CAP}</b> whatever the ladder says${half>0?`, you must commit at least <b>${half}</b> of your ${pool} Troops`:''}, and <b>the loser keeps the Troops they committed</b>. Worth it only if the margin reaches ${BLOOD_CAP-1}.${half>0?'':' <b>Locked</b> &mdash; it needs at least one Troop to divide, and you have none.'}</div>`
+    + `<div style="font-size:12px"><b>Hold Back</b> &mdash; no Skirmish, you bank <b>+${HOLD_BACK_INFLUENCE}</b> Influence, and the round costs <b>1</b> Pressure instead of 2. Every Troop stays yours.</div>`
     + (dread>0 ? `<div style="font-size:12px;margin-top:4px;color:var(--muted)">Pressure is at ${dread} &mdash; attacking keeps it at +1.</div>` : '')
     + `</div>`;
 }
@@ -1725,6 +1994,20 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
      first chip click would announce nothing at all. */
   srWagerSeen.wager = 'normal'; srWagerSeen.plus = false; srWagerSeen.reroll = false;
   maxTroops = Math.max(0, numOr(maxTroops, 0));
+  /* >>> STAKES ON THE COMMIT SCREEN. The declaration is PUBLIC (that is the
+     >>> whole point of it), so the seat that did not make it has to be able to
+     >>> read it - and the commit modal is where they find out what they are
+     >>> committing AGAINST. `commitFloor` is the same bloodMinCommit() the
+     >>> engine enforces in bloodFloorCommit(), and it is applied to the
+     >>> slider's OWN `min`: a control that offers a value the engine will
+     >>> override is a control that lies, and a range input whose floor is
+     >>> raised is the honest way to say "this is the least you may commit".
+     >>> It is zero for every other stance, so ORDINARY's slider is byte-for-
+     >>> byte what it always was. */
+  const stake = declaredStakes();
+  const bloodHere = (stake.stance === STANCE_BLOOD && playerIdx >= 0 && playerIdx === stake.aggressorIdx);
+  const commitFloor = bloodHere ? Math.min(bloodMinCommit(maxTroops), maxTroops) : 0;
+  const commitStart = Math.max(commitFloor, Math.min(1, maxTroops));
   const groups = groupHand(hand);
   const cardOptsHtml = groups.map(g=>`
     <div class="hand-group-label">${g.category}</div>
@@ -1761,12 +2044,13 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
      >>> is exactly the bug this file had for ten minutes. */
   showModal(`${playerName} — Commit Troops`, `
     <p>You have ${maxTroops} Troops available.</p>
+    ${stakeReadoutHtml()}
     <div class="troop-picker">
-      <span>0</span>
-      <input type="range" id="troopSlider" min="0" max="${maxTroops}" value="${Math.min(1,maxTroops)}">
+      <span>${commitFloor}</span>
+      <input type="range" id="troopSlider" min="${commitFloor}" max="${maxTroops}" value="${commitStart}">
       <span>${maxTroops}</span>
     </div>
-    <p>Committing: <b id="troopVal">${Math.min(1,maxTroops)}</b> <span id="troopWord">Troops</span></p>
+    <p>Committing: <b id="troopVal">${commitStart}</b> <span id="troopWord">Troops</span></p>
     <div id="oddsSlot"></div>
     <p style="margin-top:10px">Optionally play one hidden Tactic card as a modifier:</p>
     <div class="card-select" id="cardSelect">${cardOptsHtml}</div>
@@ -2070,11 +2354,22 @@ function startGame(){
       picks: [],
       intrigue: null,
       skirmish: false,
+      heldBack: false,        // a DECLARED hold-back round: no fight, +1 Influence
       capped: {credits:0, ore:0, troops:0},
     },
     history: [],             // per-round summaries, appended in endRound
     betrayed: {plus:false, reroll:false},  // this round's betrayal flags
     lastActiveIdx: 0,        // whose hand to show outside the draft
+    /* >>> STAKES: this round's PUBLIC declaration by the aggressor. Two plain
+       fields, no functions and no class instances, because renderAll()
+       JSON.stringify's the whole state to the online guest on every action and
+       a value that cannot survive a round trip is a value the second seat
+       cannot see. Defaulted here (rather than written at decision time) for the
+       same reason every other feature-owned key above is: a broadcast in the
+       window before anybody declares must carry ORDINARY, not undefined.
+       `aggressorIdx` is the SEAT that declared, so a stale or absent
+       declaration can never be applied to the wrong player. */
+    stakes: {aggressorIdx:-1, stance:'ordinary'},
   };
 
   state.players.forEach(p => drawCard(p, HAND_CAP));
@@ -2107,9 +2402,15 @@ function beginRound(){
      `decision` is the D4 latch that outlives the decision dialog: one
      Skirmish per round, so one decision, and the flag is re-created here. */
   s.roundRec = {round: s.round, picks: [], intrigue: null, skirmish: false, decision: false,
+                heldBack: false,
                 capped: {credits:0, ore:0, troops:0},
                 prevInfluence: s.players.map(p=>p.influence)};
   s.betrayed = {plus:false, reroll:false};
+  /* >>> STAKES ARE PER ROUND. A declaration is a claim about THIS round's
+     Skirmish ("cap 6, at least half my Troops"), so carrying it into the next
+     round would silently re-price a fight nobody declared. Re-created here for
+     the same reason `decision` is: the round's own latch has to start false. */
+  s.stakes = {aggressorIdx:-1, stance:'ordinary'};
 
   if(canRunExtensions()) OD.Ext.hooks.run('roundBegin', extCtx('draft', -1));
 
@@ -2620,32 +2921,63 @@ function promptAggressorDecision(aggressorIdx){
      decision and the human's Hold Back button are overridden here rather
      than in the modal (which is render territory another owner controls).
      The log line is the rule: the player is told exactly why the button
-     they just pressed did nothing. */
+     they just pressed did nothing.
+
+     >>> AND IT NOW OVERRIDES THE WHOLE STAKES BLOCK, not just the boolean.
+     >>> MELTDOWN's rule is "the Garrison is an obligation", and HOLD BACK is
+     >>> the only non-fighting stance - so MELTDOWN forbids exactly one of the
+     >>> three, and ORDINARY and BLOOD are both legal answers to it. A round-6
+     >>> BLOOD is a bigger swing than a round-6 Ordinary, which is coherent:
+     >>> Meltdown raises the caps and makes Advanced free, and a round with
+     >>> everything on the table is the round to swing on. */
   const noRetreat = !!(state && state.meltdown);
 
   if(aggressor.type==='bot'){
-    const wantsAttack = noRetreat ? true : botWantsToAttack(aggressor, defender);
+    /* One decision, three answers. `botWantsToAttack` still answers the
+       attack-or-not question underneath it (and keeps its own history and its
+       own tuning), so this is a policy layered on a policy rather than a
+       rewrite of one. */
+    const stance = noRetreat ? STANCE_ORDINARY : botChoosesStance(aggressor, defender);
     setTimeout(()=>{
-      if(wantsAttack) startSkirmishCommit(aggressorIdx, defenderIdx);
-      else { log(`${esc(aggressor.name)} holds back — no Skirmish this round.`); OD.Sound.play('turn.pass'); endRound(); }
+      if(stance === STANCE_HOLD){ holdBackRound(aggressorIdx); return; }
+      declareStance(aggressorIdx, stance);
+      startSkirmishCommit(aggressorIdx, defenderIdx);
     }, BOT_TICK_MS);
     return;
   }
 
-  const decisionHandler = (attack, force)=>{
+  const decisionHandler = (stance, force)=>{
     // >>> WAGERS (feature: Betrayal tokens) - a declared FORCE spends the token
-    // >>> and guarantees the attack.
+    // and guarantees the attack. FORCE is an ORDINARY attack: the token buys
+    // the fight, not a declaration, so it cannot smuggle in BLOOD's ceiling
+    // and floor without the player having chosen them.
     if(force && typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.spendForce) OD.Wagers.spendForce(aggressorIdx);
-    if(attack) startSkirmishCommit(aggressorIdx, defenderIdx);
-    else if(noRetreat) log(`<b>MELTDOWN — no holding back.</b> ${esc(aggressor.name)} holds the Garrison, and in Meltdown that means you attack.`);
-    else { log(`${esc(aggressor.name)} holds back — no Skirmish this round.`); OD.Sound.play('turn.pass'); endRound(); }
+    const asked = normaliseStance(stance);
+    if(asked === STANCE_HOLD){
+      if(noRetreat){ log(`<b>MELTDOWN — no holding back.</b> ${esc(aggressor.name)} holds the Garrison, and in Meltdown that means you fight.`); return; }
+      holdBackRound(aggressorIdx);
+      return;
+    }
+    /* MELTDOWN also refuses a BLOOD nobody can pay: the declaration needs half
+       a pool, and a pool of zero cannot fund it. ORDINARY is the fallback and
+       it is announced, because silently downgrading a declaration is the one
+       thing this panel must never do. */
+    if(asked === STANCE_BLOOD && aggressor.troops < 1){
+      log(`<b>NO BLOOD.</b> ${esc(aggressor.name)} has no Troops to stake, so the declaration is refused — ${esc(defender.name)} is attacked ordinarily.`);
+    }
+    declareStance(aggressorIdx, asked);
+    startSkirmishCommit(aggressorIdx, defenderIdx);
   };
 
   if(online.enabled && aggressorIdx!==online.myIndex){
     pendingGuestDecision = decisionHandler;
     // >>> WAGERS: `forceHtml` lets the guest render the FORCE button, and it is
     // >>> omitted entirely when the aggressor holds no Betrayal token.
+    // >>> `aggressorTroops` rides the SAME message: the guest is about to be
+    // >>> offered BLOOD and has to know whether the declaration is payable
+    // >>> before it renders the button, and it cannot see the host's pool.
     wsSend({type:'requestSkirmishDecision', aggressorName:aggressor.name, defenderName:defender.name, defenderTroops:defender.troops, defenderHandCount:defender.hand.length,
+      aggressorTroops:aggressor.troops,
       forceHtml: (typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.forceAttackHtml) ? OD.Wagers.forceAttackHtml(aggressorIdx) : ''});
     return;
   }
@@ -2656,7 +2988,73 @@ function promptAggressorDecision(aggressorIdx){
   OD.Sound.play('skirmish.horn');
   // >>> WAGERS: injects the "break the Quiet Round / buy the attack" button.
   showSkirmishDecisionModal(aggressor.name, defender.name, defender.troops, defender.hand.length, decisionHandler,
-    (typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.forceAttackHtml) ? OD.Wagers.forceAttackHtml(aggressorIdx) : '');
+    (typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.forceAttackHtml) ? OD.Wagers.forceAttackHtml(aggressorIdx) : '',
+    aggressor.troops);
+}
+
+/* Record the declaration, and paint it. Both halves matter:
+   - the write is what the defender's commit modal and the online guest read
+     (it is on `state`, so renderAll's broadcast carries it);
+   - renderAll() is what puts it on the wire BEFORE the next message goes out,
+     because wsSend preserves order on a real socket and the host sends
+     `requestCommit` to the other seat in the same breath. Without the paint the
+     guest's commit modal would open against a snapshot that still says
+     ORDINARY, and it would price a BLOOD fight as an ordinary one. */
+function declareStance(aggressorIdx, stance){
+  const s = normaliseStance(stance);
+  if(state) state.stakes = {aggressorIdx:(aggressorIdx|0), stance:s};
+  const who = state && state.players[aggressorIdx] ? state.players[aggressorIdx].name : 'The aggressor';
+  if(s === STANCE_BLOOD){
+    log(`<b>BLOOD declared</b> by ${esc(who)} \u2014 the Influence ceiling is <b>${BLOOD_CAP}</b> whatever the Fury ladder says, they must commit at least half their Troops, and <b>the loser keeps their committed Troops</b>.`);
+  } else if(s === STANCE_HOLD){
+    log(`<b>HOLD BACK declared</b> by ${esc(who)} \u2014 no Skirmish this round.`);
+  }
+  /* >>> ONLY WHEN ONLINE, and that is not an optimisation. renderAll() repaints
+     >>> animated counters that read Math.random(), so calling it where the
+     >>> declaration needs no painting shifts the random stream of every local
+     >>> game - which is exactly what the balance harness warns about when it
+     >>> says a re-ordering of Math.random() reshuffles which game each seed
+     >>> becomes, and it would make every before/after comparison of this change
+     >>> unreadable. A bot declares only in local play and demo, where the commit
+     >>> modal reads `state` directly; an online declaration is always a human's,
+     >>> and that is the only case that needs the broadcast. */
+  if(online.enabled) renderAll();
+  srStanceSentence(s);
+}
+
+/* The declared round with no Skirmish in it: +HOLD_BACK_INFLUENCE to the
+   aggressor and Pressure at +1 instead of +2.
+
+   >>> THE PRESSURE LEVER, AND WHAT IT COSTS TO BE HONEST ABOUT IT. The tick
+   >>> lives in js/feature-chaos.js (`const quiet = !rec.skirmish`), which this
+   >>> engineer does not own, and the ONLY state it reads is
+   >>> `state.roundRec.skirmish`. So the reduced tick is bought by writing that
+   >>> flag - and that flag is also what the round debrief and the end-screen
+   >>> trajectory read to decide whether to say "a Skirmish was fought". A flag
+   >>> that lies there would be worse than no rule at all: the one screen whose
+   >>> job is to tell the truth about the round would claim a fight that never
+   >>> happened, and no amount of correct Pressure would pay for that.
+
+   >>> So `roundRec.heldBack` is written at the same moment and BOTH readers
+   >>> are taught about it: the debrief and the trajectory ask `heldBack` first
+   >>> and print the truth ("held back \u2014 +1 Influence, Pressure +1"), and
+   >>> `skirmish` keeps its one remaining job, which is the honest one for this
+   >>> field: "this round was not quiet, the sky was not punished for silence".
+   >>> A round nobody drafted a Garrison into, or a Quiet Round EVENT, still
+   >>> costs the full +2 - being SKIPPED is a decision somebody made and was
+   >>> paid for; being unable to fight is not. */
+function holdBackRound(aggressorIdx){
+  const who = state.players[aggressorIdx];
+  declareStance(aggressorIdx, STANCE_HOLD);
+  who.influence += HOLD_BACK_INFLUENCE;
+  popupGain(aggressorIdx, `+${HOLD_BACK_INFLUENCE} Influence`, true);
+  if(state.roundRec){
+    state.roundRec.skirmish = true;   // the Pressure lever; see the note above
+    state.roundRec.heldBack = true;   // the truth both READERS ask first
+  }
+  log(`${esc(who.name)} <b>declares HOLD BACK</b> \u2014 no Skirmish, <b>+${HOLD_BACK_INFLUENCE} Influence</b> banked, every Troop kept, and Pressure rises by 1 rather than 2.`);
+  OD.Sound.play('turn.pass');
+  endRound();
 }
 
 function botWantsToAttack(aggressor, defender){
@@ -2685,6 +3083,74 @@ function botWantsToAttack(aggressor, defender){
   const dread = (typeof OD !== 'undefined' && OD.Chaos && OD.Chaos.dreadMod) ? OD.Chaos.dreadMod(aggressor, defender, state) : 0;
   if(isFinite(dread) && dread !== 0) return Math.random() < clamp(chance + dread, 0.05, 0.99);
   return Math.random() < chance;
+}
+
+/* THE STAKES DECISION, which is a decision ABOUT a decision.
+
+   botWantsToAttack() answers "do I fight at all" and keeps its own tuning, its
+   Dread term and its Fury drive; this sits on top of it and splits the YES
+   branch into ORDINARY and BLOOD. The question it actually asks is the one the
+   rules pose:
+
+     BLOOD pays at most BLOOD_CAP where ORDINARY pays at most the winner's Fury
+     rung (4 on a cold streak, which is where most fights happen). So BLOOD is
+     worth +2 over ORDINARY only if the margin actually REACHES 6 - and against
+     the measured mean margin of 5.03 with the cap already binding in half of
+     all fights, roughly half of all fights are one margin point from banking
+     it. That is the whole tension, and it is why this cannot be "always BLOOD
+     when the pool is big": the extra 2 is only worth the Troops it risks on the
+     fights that come up one point short.
+
+   Two terms, both measured rather than felt:
+     - the CEILING GAP, in margin points, between what this stance can pay and
+       what the ladder would have paid. Positive gap = BLOOD buys something.
+     - the FLOOR the declaration puts under the commitment, which is a real
+       cost: half the pool stops being Troops you hold for the next round.
+
+   The appetite is difficulty-weighted, and the measurement is what set the
+   direction. The first attempt ran it the obvious way - the easy bot
+   over-declares, the hard bot under-declares - and it cost 1.5 points of
+   ladder: over 60 games a game the EASY bot gained +1.55 pts/seat from the whole
+   stakes block and the HARD one gained +0.01, dropping separation from 5.44 to
+   3.90. BLOOD pays +2 to a bot whose ceiling the ladder left at 4 and only +1
+   to one already on Fury 3, so the cold bot buys more from it - and the easy bot
+   is the cold one. A hard bot has hoarded enough Troops to reach a margin of 5
+   on its own, so it needs the ceiling least. The ladder's job here is therefore
+   "how big a swing can this bot actually pay for", which is the honest reading
+   of a Stakes-aware bot rather than a difficulty multiplier pointed the
+   convenient way. */
+
+function botChoosesStance(aggressor, defender){
+  if(!botWantsToAttack(aggressor, defender)) return STANCE_HOLD;
+  /* An empty pool cannot fund the floor. Refusing here is the same rule the
+     modal hides the button for, and it has to be the same rule: a bot that
+     could declare BLOOD with nothing to stake would be a bot the UI forbids. */
+  if((aggressor.troops|0) < 1) return STANCE_ORDINARY;
+  const fever = isFeverRound();
+  /* What the ladder would pay this winner. The bot does not know who will win,
+     so it prices the rung it is most likely to meet: a bot on a streak expects
+     to keep it, and a cold bot expects the cold number. */
+  const ownRung = furyRungCap(aggressor.winStreak|0, fever);
+  const worstRung = furyRungCap(0, fever);
+  const feverCap = fever ? BLOOD_CAP : 0;
+  const ladderCap = Math.max(ownRung, worstRung, feverCap);
+  /* What the margin has to reach for BLOOD to pay one more point than the
+     ladder would have. Zero or negative means BLOOD changes nothing here. */
+  const headroom = BLOOD_CAP - ladderCap;
+  /* How far the bot's own margin expectation sits from the BLOOD ceiling.
+     botChooseTroops commits most of the pool it is asked to commit, and the
+     aggressor's edge over a ~35% defender is roughly one Troop of headroom plus
+     the +1 Garrison bonus, so the expected margin is expressed in points
+     rather than re-derived: it only has to be monotone. */
+  const edge = (aggressor.troops - defender.troops) + 1;
+  const expected = 3.5 + Math.max(0, Math.min(edge, 4));
+  const reach = BLOOD_CAP - expected;          /* margin points still needed */
+  const appetite = {easy:0.12, normal:0.30, hard:0.42}[state.difficulty] ?? 0.30;
+  /* BLOOD is worth declaring when the ceiling it buys is closer than the margin
+     it is likely to reach - and never worth it when it buys nothing. */
+  const worthIt = (headroom > 0) && (reach <= headroom + 1.5);
+  const p = clamp(appetite * (worthIt ? 1 : 0.35), 0, 0.9);
+  return (Math.random() < p) ? STANCE_BLOOD : STANCE_ORDINARY;
 }
 
 let skirmishCtx = null;
@@ -2823,6 +3289,27 @@ function takeCommitCard(player, cardIdx){
   return card || null;
 }
 
+/* BLOOD's commitment floor, applied ONCE, at the single point where a
+   commitment becomes real - after the Wagers pin (All In / Ghost) and after
+   the [0, pool] clamp, so it can neither be talked under by a declaration nor
+   invented out of nothing.
+
+   It is deliberately a function of the SEAT and the declaration rather than of
+   the modal: a human who drags the slider to zero under BLOOD has their
+   commitment raised to half their pool exactly as a bot's would, because a rule
+   the bot has to follow and the player does not is not a rule, it is a handicap.
+   (The commit modal RAISES THE SLIDER'S OWN FLOOR as well, so the control never
+   offers a value the engine would override - the enforcement here is the
+   backstop, not the surprise.) */
+function bloodFloorCommit(playerIdx, pool, troops){
+  const s = declaredStakes();
+  if(s.stance !== STANCE_BLOOD) return troops;
+  if(playerIdx !== s.aggressorIdx) return troops;
+  const floor = bloodMinCommit(pool);
+  if(floor <= 0) return troops;
+  return clamp(Math.max(troops|0, floor), 0, Math.max(0, pool|0));
+}
+
 function collectCommit(playerIdx, onDone){
   const player = state.players[playerIdx];
   /* resolveSkirmish() nulls skirmishCtx the moment a fight is settled, and a
@@ -2851,7 +3338,7 @@ function collectCommit(playerIdx, onDone){
     const cardIdx = botChooseCard(player);
     const card = takeCommitCard(player, cardIdx);
     const wagerStance = (typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.botStance) ? OD.Wagers.botStance(playerIdx, card, player.troops) : null;
-    const troops = botChooseTroops(player, playerIdx, wagerStance);
+    const troops = bloodFloorCommit(playerIdx, player.troops, botChooseTroops(player, playerIdx, wagerStance));
     if(typeof OD !== 'undefined' && OD.Wagers && OD.Wagers.payBotBetrayal) OD.Wagers.payBotBetrayal(playerIdx, wagerStance && wagerStance.betrayal);
     skirmishCtx[role] = {
       troops, card,
@@ -2894,8 +3381,9 @@ function collectCommit(playerIdx, onDone){
     // >>> drove its own pool deeply negative and won the fight on the way.
     // >>> clamp() here is the engine's own invariant ("you cannot commit more
     // >>> Troops than you hold") and it holds with or without the feature.
-    const commitTroops = (wagerDecl && typeof wagerDecl.troops === 'number')
-      ? clamp(wagerDecl.troops, 0, player.troops) : clamp(numOr(troops, 0), 0, player.troops);
+    const commitTroops = bloodFloorCommit(playerIdx, player.troops,
+      (wagerDecl && typeof wagerDecl.troops === 'number')
+        ? clamp(wagerDecl.troops, 0, player.troops) : clamp(numOr(troops, 0), 0, player.troops));
     skirmishCtx[role] = {
       troops: commitTroops, card,
       troopsMax: player.troops,
@@ -2958,13 +3446,85 @@ function botChooseTroops(player, playerIdx, stance){
      (measured: hard - easy = -2.01 Influence per seat, z = -4.19, i.e. Easy
      beat Hard by two points and it was not noise). With the defender fixed at
      50%, the ladder's only job is how hard the aggressor swings and how well it
-     drafts, which is the right way round. */
-  const share = player.isAggressor
-    ? ({easy:[0.45,0.75], normal:[0.70,1.0], hard:[0.85,1.0]}[state.difficulty] ?? [0.70,1.0])
-    : [0.20,0.20];
-  const [slo,shi] = share;
-  const pct = slo + Math.random()*(shi-slo);
-  return Math.max(0, Math.min(player.troops, Math.round(player.troops * pct)));
+     drafts, which is the right way round.
+
+     >>> AND 20% WAS ARITHMETICALLY DEAD, WHICH NOBODY MEASURED. The defender
+     >>> committed `round(pool * 0.20)`, and the defender's pool is small -
+     >>> measured, 26% of the time it is 1 Troop and 37% of the time it is 2 - so
+     >>> the share rounded to ZERO in 76.3% of all defensive commitments and
+     >>> never exceeded a third of the pool in 98.8% of them. Half the table's
+     >>> climax control moved nothing, and it moved nothing *arithmetically*:
+     >>> 0.2 x 1 rounds to 0, 0.2 x 2 rounds to 0. Raising the fraction would
+     >>> have hidden that behind a different constant with the same shape.
+
+     >>> WHAT REPLACES IT IS A REASON, and the reason is the cap. A committed
+     >>> Troop is a point of your total, so it raises your chance of winning -
+     >>> and it raises the margin by exactly the same point, which is the number
+     >>> the ceiling truncates. So a defender's marginal Troop is worth something
+     >>> up to the ceiling and NOTHING above it: commit too little and the fight
+     >>> is already lost before the dice matter; commit too much and the extra
+     >>> margin is paid at 4 whether it is 5 or 9. The window between those two
+     >>> failures is the entire value of this slider, and it is what
+     >>> botDefenderCommit() computes - from the PUBLIC aggressor commit (the
+     >>> defender really does see it), the live ceiling, and nothing else. */
+  if(player.isAggressor){
+    const share = ({easy:[0.45,0.75], normal:[0.70,1.0], hard:[0.85,1.0]}[state.difficulty] ?? [0.70,1.0]);
+    const [slo,shi] = share;
+    const pct = slo + Math.random()*(shi-slo);
+    return Math.max(0, Math.min(player.troops, Math.round(player.troops * pct)));
+  }
+  return botDefenderCommit(player);
+}
+
+/* THE DEFENDER'S COMMITMENT: what the ceiling can still pay for.
+
+   Three bounds, all of them failures rather than tastes:
+
+     FLOOR   - enough Troops to be IN the fight. The aggressor's committed total
+               is public (skirmishCtx.aggCommit, and the whole odds panel is
+               built on it), so the defender knows the number it has to
+               approach: the aggressor's Troops plus the +1 the Garrison bonus
+               pays, less what the defender's own die and Fury rung are going to
+               contribute. One Troop past parity is "able to win it", not
+               "certain to win it" - the die is still a die.
+
+     CEILING - how many Troops can still move the number that pays. Past the
+               ceiling, an extra Troop of margin buys exactly nothing, so the
+               defender stops there and keeps that Troop for the next round.
+               BLOOD's ceiling is 6 whatever the ladder says, which is the same
+               argument with a bigger window - not a special case.
+
+     RANGE   - half the pool stays home. This is the term that keeps the control
+               a control. A Troop held back is a Troop next round's draft can
+               spend on a full point of margin, and a Troop committed above the
+               fight's demand is a Troop spent moving a number the ceiling will
+               not pay for; the same Troop is worth more in the draft than in a
+               capped fight. It is also what stops the policy collapsing to
+               "commit everything", which is what the first attempt did: with
+               the pool at 1-2 Troops almost half the time, any rule phrased as
+               a bare floor produces a slider that only ever reads 100%.
+
+   NOT DIFFICULTY-SCALED, deliberately, for the reason the block above sets out:
+   the ladder's job is how hard the aggressor swings, not how a defensive slider
+   is set. */
+function botDefenderCommit(player){
+  const pool = Math.max(0, player.troops|0);
+  if(pool <= 0) return 0;
+  const fever = isFeverRound();
+  const ceiling = stanceCeiling(furyRungCap(player.winStreak|0, fever), fever);
+  const ctx = skirmishCtx;
+  const aggTroops = (ctx && ctx.aggCommit) ? Math.max(0, ctx.aggCommit.troops|0) : 0;
+  /* What the defender brings without committing a single Troop: a d6 (mean
+     3.5) and the Fury rung they are walking in on. A card is deliberately NOT
+     counted - the defender has not chosen it yet, and guessing at it would put
+     a hidden card into a public calculation. */
+  const ownFloor = 3.5 + furyRung(player.winStreak|0).bonus;
+  /* The Garrison bonus is +1 to the AGGRESSOR's total and it is on the board for
+     everyone, so it is named here rather than discovered as an off-by-one. */
+  const toContest = Math.max(1, Math.ceil((aggTroops + 1) - ownFloor) + 1);
+  const affordable = Math.max(1, Math.ceil(pool * 0.5));
+  const want = clamp(Math.min(toContest, affordable), 1, ceiling);
+  return Math.max(0, Math.min(pool, want));
 }
 
 function botChooseCard(player){
@@ -3095,9 +3655,18 @@ function resolveSkirmish(){
   if(loserCard === 'guard') rawMargin = Math.max(0, rawMargin - 1);
   // >>> WAGERS (feature: Fury) - the cap is now the winner's ladder rung, and
   // >>> Skirmish Fever raises the ceiling to 6.
+  // >>> >>> STAKES: the BLOOD ceiling rides the SAME max(). Two rules that both
+  // >>> mean "this fight may pay six" cannot be allowed to argue about which is
+  // >>> larger, so `skirmishCap()` takes the largest of the three contributors
+  // >>> rather than letting the declaration and the event override each other
+  // >>> in sequence. Concretely: BLOOD + Fever = 6, Fever alone = 6, BLOOD
+  // >>> alone = 6, and neither can pull the ceiling DOWN - a declaration is a
+  // >>> claim about what the fight is worth, and it may not reduce what a
+  // >>> player's own win streak already earned.
   const FEVER = state.currentEvent === 'skirmish_fever' ? 6 : 0;
+  const bloodCeil = declaredStance() === STANCE_BLOOD ? BLOOD_CAP : 0;
   const winnerCap = (aggWins ? AGGF.cap : DEFF.cap);
-  const inflCap = isTie ? 4 : Math.max(winnerCap, FEVER);
+  const inflCap = isTie ? 4 : skirmishCap(winnerCap, FEVER, bloodCeil);
   const influenceGained = isTie ? 0 : Math.min(rawMargin, inflCap);
   const winnerCard = isTie ? null : (aggWins ? aggCommit.card : defCommit.card);
   const rallyBonus = winnerCard === 'rally';
@@ -3109,6 +3678,10 @@ function resolveSkirmish(){
        to wonder where it came from. */
     guarded: !isTie && loserCard === 'guard' && rawMargin < Math.abs(aggTotal-defTotal),
     guardCut: (!isTie && loserCard === 'guard') ? Math.abs(aggTotal-defTotal) - rawMargin : 0,
+    /* The declaration, so the result modal can name the fight that was fought
+       instead of leaving the player to remember what they pressed. Plain JSON,
+       like everything else on this object. */
+    blood: !!bloodCeil,
     aggTotal, defTotal, aggName: aggressor.name, defName: defender.name
   };
 
@@ -3125,7 +3698,21 @@ function resolveSkirmish(){
     if(defCommit.card) defender.discard.push(defCommit.card);
 
     if(aggTotal===defTotal){
-      log(`It's a tie — both sides lose their committed Troops, no Influence changes.`);
+      /* >>> BLOOD ON A TIE: both sides KEEP their committed Troops. The rule is
+         >>> "the loser keeps their committed Troops" and a tie has no loser, so
+         >>> the honest reading is that nobody pays - not that both do. It is
+         >>> also the only reading that keeps BLOOD from being a trap: under the
+         >>> other one, a BLOOD declaration would make a tie the single worst
+         >>> outcome available (no Influence, and your half-pool gone), which
+         >>> would make ties the thing a BLOOD declarer most fears rather than
+         >>> the free roll it is worth reading "the loser's Troops are safe". */
+      if(bloodCeil){
+        aggressor.troops += aggCommit.troops;
+        defender.troops += defCommit.troops;
+        log(`It's a tie \u2014 no Influence either way, and under <b>BLOOD</b> both sides keep the Troops they committed.`);
+      } else {
+        log(`It's a tie — both sides lose their committed Troops, no Influence changes.`);
+      }
       aggressor.winStreak = 0; defender.winStreak = 0;
       // >>> WAGERS (feature: All In / Ghost) - a tie pays NOTHING to either
       // >>> stance. An All In that ties is simply dead.
@@ -3172,6 +3759,18 @@ function resolveSkirmish(){
       } else if(loser===aggressor && loserCommit.card==='feint'){
         aggressor.troops += aggCommit.troops;
         log(`${esc(loser.name)} loses the Skirmish but Feint returns their committed Troops.`);
+      } else if(bloodCeil && (loserCommit.troops|0) > 0){
+        /* >>> BLOOD: THE LOSER KEEPS THE TROOPS. The one rule in the game that
+           >>> makes a lost fight cheaper than a won one, and the reason BLOOD
+           >>> is worth declaring at all: the aggressor is bidding a ceiling
+           >>> they might not reach, and this is what the bid costs them when
+           >>> the dice do not cooperate. It is checked AFTER Feint on purpose -
+           >>> Feint's own return is a card effect and prints its own line, and
+           >>> paying both would pay twice. Ambush still bites underneath it:
+           >>> a card that costs Troops outright is not a refund of committed
+           >>> Troops. */
+        loser.troops += (loserCommit.troops|0);
+        log(`<b>BLOOD:</b> ${esc(loser.name)} lost, so they keep the <b>${loserCommit.troops}</b> Troop${loserCommit.troops===1?'':'s'} they committed.`);
       } else if(loserCommit.card==='ambush'){
         loser.troops = Math.max(0, loser.troops-1);
         log(`${esc(loser.name)}'s own Ambush backfires — 1 extra Troop lost.`);
@@ -3287,13 +3886,13 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
           `<div class="skirmish-totals">Totals (dice + troops + cards): <b>${result.aggTotal}</b> (${esc(result.aggName)}) vs <b>${result.defTotal}</b> (${esc(result.defName)})</div>` +
           `<div class="skirmish-result win">${verdict}</div>` +
           `<div class="skirmish-detail">Won by a margin of <b>${result.margin}</b> &rarr; <b>+${result.influence} Influence</b>${result.rally ? ` <span class="skirmish-bonus">Rally +1</span>` : ''}${result.guarded ? ` <span class="skirmish-bonus">Guard cut ${result.guardCut}</span>` : ''}.</div>` +
-          `<div class="skirmish-detail skirmish-split">${esc(result.winnerName)} takes the contested Troops; ${esc(result.loserName)} loses theirs${result.influence ? ` &mdash; the Influence split is <b>${esc(result.winnerName)} +${result.influence}</b>` : ''}.</div>`;
+          `<div class="skirmish-detail skirmish-split">${esc(result.winnerName)} takes the contested Troops; ${esc(result.loserName)} ${result.blood ? 'keeps theirs, under BLOOD' : 'loses theirs'}${result.influence ? ` &mdash; the Influence split is <b>${esc(result.winnerName)} +${result.influence}</b>` : ''}.</div>`;
       } else if(result && result.tie){
         verdict = "It's a tie!";
         detail =
           `<div class="skirmish-totals">Totals (dice + troops + cards): <b>${result.aggTotal}</b> vs <b>${result.defTotal}</b></div>` +
           `<div class="skirmish-result">${verdict}</div>` +
-          `<div class="skirmish-detail">Both sides lose their committed Troops &mdash; no Influence changes hands.</div>`;
+          `<div class="skirmish-detail">Both sides ${result.blood ? 'keep their committed Troops, under BLOOD' : 'lose their committed Troops'} &mdash; no Influence changes hands.</div>`;
       } else {
         if(aggTotal===defTotal) verdict = "It's a tie!";
         else if(aggTotal>defTotal) verdict = `${esc(aggName)} wins the Skirmish!`;
@@ -3357,6 +3956,10 @@ function debriefRecordFromState(){
     round: (typeof rec.round === 'number' && rec.round > 0) ? rec.round : s.round,
     picks: Array.isArray(rec.picks) ? rec.picks : [],
     skirmish: !!rec.skirmish,
+    /* The TRUTH about a round nobody fought. `skirmish` is true for a declared
+       HOLD BACK (that is the Pressure lever - see holdBackRound), so it cannot
+       be the field the debrief asks to print "a Skirmish was fought". */
+    heldBack: !!rec.heldBack,
     capped: rec.capped || {credits:0, ore:0, troops:0},
     prevInfluence: prev,
   };
@@ -3451,15 +4054,17 @@ function showRoundDebrief(rec, nextRound){
 
   const dread = state.dread|0;
   const dreadLine = (nxt >= 4 && dread > 0)
-    ? `<div style="font-size:12px;margin-top:4px;color:var(--muted)">Pressure stands at <b>${dread}</b>. A round with no Skirmish adds 2.</div>` : '';
+    ? `<div style="font-size:12px;margin-top:4px;color:var(--muted)">Pressure stands at <b>${dread}</b>. A round with no Skirmish adds 2 &mdash; a <i>declared</i> Hold Back adds only 1.</div>` : '';
 
   showModal(`Round ${r.round} debrief`, `
     <div class="debrief-panel" id="roundDebrief" data-round="${r.round}">
       <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700">Where the round left you</div>
       ${skirmishRows}
-      <div style="font-size:12px;margin-top:6px">${r.skirmish
-        ? 'A Skirmish was fought &mdash; the margin is in the log above.'
-        : 'No Skirmish this round &mdash; whoever held the Garrison held back.'}</div>
+      <div style="font-size:12px;margin-top:6px">${r.heldBack
+        ? 'A Skirmish was <b>declared off</b> &mdash; the Garrison holder held back and banked +1 Influence instead. Pressure rose by 1, not 2.'
+        : (r.skirmish
+          ? 'A Skirmish was fought &mdash; the margin is in the log above.'
+          : 'No Skirmish this round &mdash; whoever held the Garrison held back.')}</div>
       ${capLine}
       ${picks ? `<div style="font-size:12px;margin-top:6px;color:var(--muted)">Picks: ${picks}</div>` : ''}
       ${objLines ? `<div style="margin-top:8px">
@@ -3581,6 +4186,11 @@ function endRound(){
     event: state.currentEvent,
     picks: (state.roundRec && state.roundRec.picks) ? state.roundRec.picks.slice() : [],
     skirmish: !!(state.roundRec && state.roundRec.skirmish),
+    /* Whether that `skirmish: true` was a fight or a DECLARED hold-back. Both
+       readers of this entry (the debrief and the end-screen trajectory) print
+       a sentence from it, and a trajectory that says "yes" for a round nobody
+       fought is the same lie the debrief just learned to avoid. */
+    heldBack: !!(state.roundRec && state.roundRec.heldBack),
     capped: (state.roundRec && state.roundRec.capped)
       ? {credits:(state.roundRec.capped.credits|0), ore:(state.roundRec.capped.ore|0), troops:(state.roundRec.capped.troops|0)}
       : {credits:0, ore:0, troops:0},
@@ -4556,6 +5166,27 @@ function srWagerDeclaration(){
     betrayal: { plus: !!plus, reroll: !!reroll },
   };
 }
+/* >>> STAKES, ANNOUNCED. One fact, one delta, one write - the same contract
+   >>> every other #srLive entry obeys: `srWrite` assigns textContent (never
+   >>> appends), skips an identical message, and truncates at a word boundary
+   >>> under 120 characters. A declaration is public and irreversible, so both
+   >>> seats have to hear it: the aggressor hears what they just committed the
+   >>> game to, and the defender hears the ceiling they are about to play under
+   >>> - which is the one number that decides whether their commitment is worth
+   >>> anything. */
+let srStanceSeen = '';
+function srStanceSentence(stance){
+  const s = normaliseStance(stance);
+  if(s === srStanceSeen) return;
+  srStanceSeen = s;
+  if(s === STANCE_ORDINARY) return;   /* the default needs no announcement */
+  if(s === STANCE_HOLD){
+    srWrite(['HOLD BACK declared. No Skirmish; +1 Influence, Pressure +1.']);
+    return;
+  }
+  srWrite([`BLOOD declared. Cap ${BLOOD_CAP}, half your Troops at least, and the loser keeps their Troops.`]);
+}
+
 /* Every wager stance, and every token declared alongside it. State, not
    narration: what is committed, not what the player did. NORMAL is the absence
    of a pledge and says nothing; ALL IN and GHOST each pin the slider, so a
@@ -5612,7 +6243,9 @@ function showEndScreen(){
         + `<td>${h.influence[0]} <span style="color:var(--muted);font-size:11px">(${d0>=0?'+':''}${d0})</span></td>`
         + `<td>${h.influence[1]} <span style="color:var(--muted);font-size:11px">(${d1>=0?'+':''}${d1})</span></td>`
         + `<td class="${cls}">${leader}</td>`
-        + `<td>${h.skirmish ? 'yes' : '<span style="color:var(--muted)">held back</span>'}${bonusTag}</td>`
+        + `<td>${h.heldBack
+            ? '<span style="color:var(--muted)">held back (+1)</span>'
+            : (h.skirmish ? 'yes' : '<span style="color:var(--muted)">no fight</span>')}${bonusTag}</td>`
         + `</tr>`;
     }).join('');
 

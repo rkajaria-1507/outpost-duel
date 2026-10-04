@@ -8,8 +8,9 @@
                            d6 (public, declared before the dice fall), or to
                            force a Skirmish through a Quiet Round.
      F3  FURY              the flat "Momentum +1 at two wins" rule replaced
-                           by a four-rung ladder, plus CATCHING UP — the
-                           mandatory anti-snowball valve.
+                           by a four-rung ladder. The old Catching Up valve
+                           that used to be listed here is GONE - see WHAT WAS
+                           CUT below.
 
    WHAT WAS CUT, AND WHY
    ---------------------
@@ -39,6 +40,19 @@
    concluded, and did not. They also added a whole decision axis to the game's
    most decision-critical screen, which already has a Troop slider, a hand of
    cards and an odds panel.
+
+   CATCHING UP, the mandatory anti-snowball valve. If the player ahead on a
+   3+ win streak walked into a Skirmish, the loser added +2 to their committed
+   total. Measured over ~4,500 games it fired 0.23x/game; deleting it outright
+   was worth +0.11 pts/seat and moved the winner in 0.4% of decided games -
+   the weakest effect of any system the review measured. Retuning was WORSE
+   than deleting: forcing ~2.5x more fires (streak 2) scored -0.27 pts/seat
+   (z = -2.43), and no threshold could reach the ~0.45x/game ceiling, because
+   a 2-win streak dies at the next fight. The Collapse clock already does this
+   job and flips 9.7% of winners. So it was deleted rather than rebalanced.
+   Note this was the single most expensive rule to TEACH: it had a line in the
+   commit modal, a paragraph in these rules, an entry in the odds panel's
+   "at stake" text, and fired in 0.4% of games.
 
    WHAT SURVIVED THE CUT, AND WHY IT IS NOT A LOOSE END
    ----------------------------------------------------
@@ -102,9 +116,6 @@ const Wagers = (() => {
 const BETRAYAL_START = 2;          // also the default written into makePlayer
 const BETRAYAL_MAX   = 4;          // hard max per game, never a capped resource
 const BETRAYAL_INCOME_ROUNDS = [3, 5];
-
-const CATCHING_UP_MIN_STREAK = 3;
-const CATCHING_UP_BONUS      = 2;
 
 /* Difficulty-weighted bot behaviour. The bot does not roll against this
    number blindly — it first decides whether the board justifies spending a
@@ -611,8 +622,7 @@ function commitUI(o){
       return `<div class="wagers-fury-row">${esc(q.name)} &mdash; Fury <b>${f.streak}</b> ` +
         `<span class="wagers-dim">(+${f.bonus} to total, Influence cap ${cap}${fever ? ' &mdash; Skirmish Fever' : ''})</span></div>`;
     }).join('');
-    parts.push(`<div class="wagers-block" id="wagersFuryBlock"><b>Fury ladder</b>${rows}` +
-      `<div class="wagers-dim">A winner entering on a 3+ streak also hands the <b>loser +2</b> (Catching Up).</div></div>`);
+    parts.push(`<div class="wagers-block" id="wagersFuryBlock"><b>Fury ladder</b>${rows}</div>`);
   }
 
   parts.push(`<div class="wagers-block" id="wagersTokenBlock">
@@ -851,7 +861,7 @@ function install(){
     rerender();
   }, {priority:100});
 
-  /* skirmishResolved — the Fury / Catching Up announcement. The ladder's
+  /* skirmishResolved — the Fury announcement. The ladder's
      arithmetic is applied inline in resolveSkirmish (a hook fires too late to
      influence a total); this is the announcement beat. */
   H.on('skirmishResolved', (ctx)=>{
@@ -918,13 +928,6 @@ const RULES_HTML = `
     </tbody>
   </table>
   <p>Any tie resets <b>both</b> streaks to zero.</p>
-
-  <p class="rules-extra-callout"><b>CATCHING UP</b> &mdash; if the player who
-  <i>wins</i> a Skirmish walked into it on a streak of <b>3 or more</b>, the
-  <b>loser adds +2</b> to their committed total before the result is decided.
-  It is applied to the totals, not to the Influence, so it can flip a loss into
-  a win or tie it. This is the anti-snowball valve: the hotter you are, the more
-  the fight is worth taking off you.</p>
 </div>
 `;
 
@@ -946,7 +949,6 @@ const api = Object.freeze({
   /* tables, so tests and the rules copy can never drift */
   FURY: furyFor,
   BETRAYAL_START, BETRAYAL_MAX, BETRAYAL_INCOME_ROUNDS,
-  CATCHING_UP_MIN_STREAK, CATCHING_UP_BONUS,
 
   /* the commit-step UI */
   commitUI, wireCommit, mountCommit, commitDeclaration,
