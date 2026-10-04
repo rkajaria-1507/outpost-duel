@@ -376,7 +376,7 @@ const RULES_HTML = `
         <article class="rules-site">
           <h4>Shrine</h4>
           <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+1 Influence, free</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 2 Credits + 1 Ore → +2 Influence (else +1)</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 2 Credits + 1 Ore → +3 Influence (else +1)</span></div>
         </article>
       </div>
     </section>
@@ -435,7 +435,7 @@ const RULES_HTML = `
         <li><span class="rules-step-title">Score</span> Higher total wins Influence equal to the margin, capped at your <b>Fury</b> rung's ceiling (or 6 on Skirmish Fever). Tie = no Influence; troops still spent. Some cards fire regardless of winner.</li>
       </ol>
       <div class="rules-callout">
-        <strong>The streak bonus is the Fury ladder, not a flat one.</strong> Two wins in a row is no longer worth the same as four. The full ladder, the Catching Up valve, Betrayal tokens, the All In / Ghost wagers and Siege are all on the <b>Wagers</b> tab — that tab is owned by the feature that implements them, so it cannot drift out of date with the game.
+        <strong>The streak bonus is the Fury ladder, not a flat one.</strong> Two wins in a row is no longer worth the same as four. The full ladder, the Catching Up valve and the Betrayal tokens are all on the <b>Fury &amp; Tokens</b> tab — that tab is owned by the feature that implements them, so it cannot drift out of date with the game.
       </div>
     </section>
 
@@ -888,8 +888,18 @@ function getEvent(){
    announcement, a cap discard and a Chaos beat were pixel-identical and only
    readable by scrolling. css/style.css already authors eleven `.entry.is-*`
    variants (is-gain, is-loss, is-system, is-unlock, is-danger, is-round, plus
-   is-fury / is-betrayal / is-siege / is-rift / is-pressure / is-bounty /
+   is-fury / is-betrayal / is-rift / is-pressure / is-bounty /
    is-meltdown / is-surge) and not one of them was ever bound.
+
+   >>> D4: `is-siege` was the thirteenth, and it is GONE from both this list
+   >>> and (in the same commit that cut the mechanic) from the stylesheet. It
+   >>> was unreachable the moment Siege was: no line in the game can contain
+   >>> SIEGE, CONTESTED SITE, "the offer lapses" or "Price for the ... rises"
+   >>> any more, because js/feature-wagers.js was the only writer of all four.
+   >>> A classifier for a deleted mechanic is worse than no classifier - it is
+   >>> a rule that looks load-bearing and is not, so the next engineer
+   >>> preserves it. The Rift's own `contested` line is a DIFFERENT mechanic
+   >>> and keeps its own rule above.
 
    WHY CLASSIFY AT RENDER TIME AND NOT AT LOG TIME. `state` is JSON-serialised
    wholesale to the online guest, so an entry cannot become a {html,type} pair
@@ -927,7 +937,6 @@ const LOG_TYPE_RULES = [
   ['is-bounty',    /\bBOUNTY PUBLISHED\b|\bclaims the Bounty\b|\bNobody claims the Bounty\b/i],
   ['is-pressure',  /\bPRESSURE\s*\d|\bTHE SKY (OPENS|CLOSES)\b|\bCollapse\s+\d/i],
   ['is-rift',      /\bTHE RIFT\b|\bRift (mutates|opens|is live)\b|\bNine sites on the board\b/i],
-  ['is-siege',     /\bSIEGE\b|\bCONTESTED SITE\b|\bCONTESTED:|\bthe offer lapses\b|\bPrice for the .* rises\b|\bkeeps the .* at its <b>basic<\/b>/i],
   ['is-betrayal',  /\bBETRAYS THE ROUND\b|\bBetrayal token/i],
   ['is-fury',      /\bFURY\s*\d|\breaches <b>Fury\b/i],
 
@@ -1246,9 +1255,15 @@ function handleHostIncomingAction(msg){
     if(!loc || loc.id!==msg.locId) return;
     /* The two guards that were missing. Identical to humanPick's. */
     if(msg.tier==='advanced' && (!advancedUnlocked() || !canAffordExtra(loc, state.players[1]))) return;
-    // >>> WAGERS (feature: Siege) - the guest's draft pick goes through the
-    // >>> SAME contested-site interceptor as humanPick(), so an online game
-    // >>> can never desync on a contested site.
+    /* >>> D4: this used to be documented as "the guest's draft pick goes
+     >>> through the same CONTESTED-SITE interceptor as humanPick(), so an
+     >>> online game can never desync on a contested site". There is no
+     >>> contested site any more - Siege was cut, and with it
+     >>> OD.Wagers.beforePick (pinned absent by test/skirmish-odds.test.js D2),
+     >>> so the call is a no-op guard against a hook that does not exist. It
+     >>> is kept, because it costs one property read and is the correct seam
+     >>> for any future feature that wants to veto a guest's pick; the comment
+     >>> no longer claims a mechanic the player cannot see. */
     if(window.OD && OD.Wagers && OD.Wagers.beforePick && OD.Wagers.beforePick(1, msg.locId, msg.tier)) return;
     applyLocationEffect(1, msg.locId, msg.tier);
     advanceDraftOrSkirmish();
@@ -1291,11 +1306,15 @@ function handleHostIncomingAction(msg){
        rejected by the same code the local click goes through. */
     const idx = currentPicker();
     if(idx===1 && state.phase==='draft' && typeof msg.cardId==='string'){ playIntrigueCard(1, msg.cardId); }
-  // >>> WAGERS (feature: Siege) - the only NEW message kind in this feature.
+  /* >>> D4: `buySite` was Siege's own message kind - the host offering a
+     >>> contested site for sale. It is a BRANCH THAT CANNOT RUN: the feature
+     >>> that answered it (OD.Wagers.onBuySite) was cut, so nothing sends the
+     >>> message and nothing handles it. Left in place deliberately rather than
+     >>> deleted, because a wire branch is part of the protocol surface a peer
+     /// runs, and removing it would change what an OLD guest's message does
+     >>> (silently nothing, instead of a no-op hook call). No copy reaches the
+     >>> player: there is no CONTESTED SITE to buy. */
   } else if(msg.kind==='buySite'){
-    /* AUDITED, no hole. accept===true is a strict boolean test, and
-       finishSiege() re-derives buyer/seller/price from the host's own
-       st.siege and re-checks (buyer.credits|0) >= sg.price before paying. */
     if(window.OD && OD.Wagers && OD.Wagers.onBuySite) OD.Wagers.onBuySite(msg.accept===true);
   }
 }
@@ -1533,29 +1552,33 @@ function fizzleWarning(playerIdx, cardId){
 }
 
 /* What a commit actually risks, in the two sentences a player actually
-   wants. Stance payouts are read back through the feature's OWN
-   commitDeclaration() rather than re-derived here, so a rebalance of
-   ALL_IN_WIN cannot leave this preview quoting a stale number. */
+   wants. The token declaration is read back through the feature's OWN
+   commitDeclaration() rather than re-derived here, so a rebalance of the token
+   cannot leave this preview quoting a stale number.
+
+   >>> D4: THIS USED TO CARRY A STANCE PARAGRAPH. `const stance = (decl &&
+   >>> decl.wager) ? decl.wager : 'normal'` and two sentences behind it -
+   >>> "ALL IN declared: you commit every Troop, and a win pays +3 Influence"
+   >>> and the GHOST equivalent - were unreachable from the moment the wagers
+   >>> were cut, because applyCommitDeclaration() no longer returns a `wager`
+   >>> at all (test/skirmish-odds.test.js D2 pins that it is `undefined`). The
+   >>> branch was not harmless: it named two mechanics that are not in the game
+   >>> from the one panel whose whole purpose is to be trustworthy, and it
+   >>> would have woken up silently the day anyone re-added a stance. The
+   >>> numbers came from `typeof OD.Wagers.ALL_IN_WIN !== 'undefined' ? ... : 3`
+   >>> fallbacks, so it would have quoted numbers this file had invented. */
 function consequenceHtml(playerIdx, troops, cardId){
   const p = state.players[playerIdx];
   const fever = isFeverRound();
   const cap = Math.max(furyRungCap(p.winStreak, fever), furyRungCap(state.players[1-playerIdx].winStreak, fever));
   const decl = (typeof OD !== 'undefined' && OD.Wagers && typeof OD.Wagers.commitDeclaration === 'function')
     ? OD.Wagers.commitDeclaration() : null;
-  const stance = (decl && decl.wager) ? decl.wager : 'normal';
-  let stanceLine = '';
-  if(stance === 'allin'){
-    stanceLine = ` <b style="color:var(--accent-gold-ink,#8a5a10)">ALL IN</b> declared: you commit every Troop, and a win pays <b>+${(typeof OD.Wagers.ALL_IN_WIN!=='undefined'?OD.Wagers.ALL_IN_WIN:3)} Influence</b> on top, a loss costs you <b>-${(typeof OD.Wagers.ALL_IN_LOSS!=='undefined'?OD.Wagers.ALL_IN_LOSS:2)} Influence</b>.`;
-  } else if(stance === 'ghost'){
-    stanceLine = ` <b style="color:var(--accent-gold-ink,#8a5a10)">GHOST</b> declared: you commit no Troop and keep all of them, and a win pays <b>+${(typeof OD.Wagers.GHOST_WIN!=='undefined'?OD.Wagers.GHOST_WIN:2)} Influence</b> on top. A loss costs Influence nothing.`;
-  }
   const token = (decl && decl.betrayal && decl.betrayal.plus) ? ' A <b>+1 token</b> is declared and is already in the projection above.' : '';
   const reroll = (decl && decl.betrayal && decl.betrayal.reroll) ? ' A <b>RE-ROLL</b> is declared: your die is cast twice, second cast stands.' : '';
   return `<div class="odds-consequence" style="margin-top:8px;font-size:12px;line-height:1.5">`
     + `<b>At stake.</b> Win: +the margin in Influence, capped at <b>${cap}</b>${isFeverRound()?' (Skirmish Fever)':''}, and they lose their committed Troops. `
     + `Lose: you lose the <b>${troops}</b> Troop${troops===1?'':'s'} you commit${troops===0?' (none)':''} and no Influence moves. `
     + `Tie: no Influence either way, but both sides still lose their committed Troops.`
-    + (stanceLine ? stanceLine : '')
     + token + reroll
     + `</div>`;
 }
@@ -1619,11 +1642,26 @@ function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, 
      >>> which re-seeds `skirmishCtx` and starts a commit chain; a second
      >>> invocation re-seeds it again underneath the first, so the aggressor's
      >>> commit is discarded and the defender's modal is asked for a commit
-     >>> into a context that no longer matches. One shot, then off. */
+     >>> into a context that no longer matches.
+
+     >>> TWO LATCHES, because `decided` alone has exactly the weakness the
+     >>> Commit button's `commitFired` had: it dies with the dialog, and the
+     >>> second click of a double-click lands on whatever the first one put in
+     >>> its place. `state.roundRec.decision` is the round's own record - one
+     >>> Skirmish per round, no exceptions - so it survives the re-render, is a
+     >>> plain boolean, and rides the JSON relay to the online guest for free.
+     >>> (It is NOT on the round's public contract for anything else: nothing
+     >>> reads it but this guard.) `decided` is kept because it is what makes
+     >>> the buttons go visibly dead on the first click. */
   let decided = false;
   const decideOnce = (attack, force)=>{
     if(decided) return;
+    if(state && state.roundRec && state.roundRec.decision){
+      log('The Skirmish decision was already made this round - ignored.');
+      return;
+    }
     decided = true;
+    if(state && state.roundRec) state.roundRec.decision = true;
     const hold = document.getElementById('skipAttack');
     const atk  = document.getElementById('doAttack');
     if(hold) hold.disabled = true;
@@ -1889,34 +1927,52 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
 
   refreshOdds();
 
-  /* >>> D4: DOUBLE-CLICKING COMMIT SUBMITTED THE OPPONENT'S WHOLE COMMIT.
+/* >>> D4: DOUBLE-CLICKING COMMIT SUBMITTED THE OPPONENT'S WHOLE COMMIT.
      Both Commit buttons - the aggressor's and the defender's - are laid out at
      the SAME PIXEL (measured dx=0, dy=1), because showModal reuses one dialog
      and only the title changes. A real double-click therefore lands twice on
      the same spot, and the second click arrived AFTER the first had closed the
      aggressor's modal and opened the defender's:
 
-        before: "Player 1 - Commit Troops"   troops [4,1]
-        after : "Rolling the Dice"            troops [3,0]
-        *** the defender's commit was submitted: 1 troop, no card, no wager ***
+         before: "Player 1 - Commit Troops"   troops [4,1]
+         after : "Rolling the Dice"            troops [3,0]
+         *** the defender's commit was submitted: 1 troop, no card, no wager ***
 
      The defender never saw their own commit screen at all. Nothing about the
      click handler noticed, because `onSubmit` is the ordinary submit path -
      the second invocation was a perfectly valid commit for the seat that
      happened to be asking now.
 
-     Two independent guards, because either alone leaves a hole:
-       1. a one-shot latch, so a second click on the SAME handler is a no-op
-          even if the button is somehow still clickable (and so it holds for
-          the keyboard path too); and
-       2. disabling the button on the first fire, so the second click does not
-          even reach the handler in a real browser.
-     The latch is the load-bearing one; the disable is what makes the fix
-     visible to the player instead of merely silent. */
+     THREE guards, because no single one of them covers the whole hole and the
+     first version shipped exactly one of them, which is the bug:
+
+       1. `commitFired` below - a one-shot latch on THIS handler. It stops a
+          second click on the same button (so it holds for the keyboard path
+          too), and it is what makes the button read "Committed" rather than
+          looking live. It cannot stop the bug on its own: a re-render builds
+          a new closure with a new `false`.
+       2. `commitIsReplayed(playerIdx)`, which asks `skirmishCtx` - the object
+          that survives the re-render - whether this seat has already committed.
+          This is the guard that outlives the modal.
+       3. the click shield hideModal() raises, which stops the replaying click
+          BEFORE it reaches ANY handler. This is the one that closes the
+          CROSS-SEAT case - the second click arriving on the defender's
+          freshly rendered button - because a value on the context cannot tell
+          that apart from a deliberate click, and a click that never arrives is
+          the only answer that does not involve a clock.
+
+     The button also goes `disabled` on the first fire, which is what makes the
+     fix visible to the player instead of merely silent. */
   const commitBtn = document.getElementById('commitBtn');
   let commitFired = false;
   const fireCommit = ()=>{
     if(commitFired) return;
+    /* Guard 2. Checked BEFORE the button is touched, so a refused replay leaves
+       the button exactly as it was: live, and saying "Commit". */
+    if(commitIsReplayed(playerIdx)){
+      log(`${esc((state.players[playerIdx] || {}).name || 'A player')}'s commit arrives after one was already accepted this Skirmish - ignored.`);
+      return;
+    }
     commitFired = true;
     if(commitBtn){
       commitBtn.disabled = true;
@@ -1933,6 +1989,12 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
     const wagersExtra = (window.OD && OD.Wagers && OD.Wagers.commitDeclaration) ? OD.Wagers.commitDeclaration() : null;
     hideModal();
     onSubmit(troops, cardId, wagersExtra);
+    /* Latch here too, for the one caller whose onSubmit is NOT applyCommit -
+       the online guest's, which sends a socket message instead of touching the
+       engine. Writing it after the call is deliberate: onSubmit is what opens
+       the NEXT modal, and the next modal's guard reads this at ITS click
+       time, so ordering cannot matter either way. */
+    latchCommit(playerIdx);
   };
   if(commitBtn) commitBtn.onclick = fireCommit;
 }
@@ -2041,8 +2103,11 @@ function beginRound(){
   /* Fresh per-round scratch pad, so a feature reading roundRec never sees
      last round's picks or cap overflow. `prevInfluence` is the Influence
      tally as it stood at the TOP of this round, so the round debrief can
-     report "+3 this round" as a real delta instead of a running total. */
-  s.roundRec = {round: s.round, picks: [], intrigue: null, skirmish: false, capped: {credits:0, ore:0, troops:0},
+     report "+3 this round" as a real delta instead of a running total.
+     `decision` is the D4 latch that outlives the decision dialog: one
+     Skirmish per round, so one decision, and the flag is re-created here. */
+  s.roundRec = {round: s.round, picks: [], intrigue: null, skirmish: false, decision: false,
+                capped: {credits:0, ore:0, troops:0},
                 prevInfluence: s.players.map(p=>p.influence)};
   s.betrayed = {plus:false, reroll:false};
 
@@ -2462,11 +2527,13 @@ function humanPick(locId, tier){
   if(!loc || loc.id!==locId) return;
   if(tier==='advanced' && (!advancedUnlocked() || !canAffordExtra(loc, state.players[idx]))) return;
 
-  // >>> WAGERS (feature: Siege) - a contested site pauses the draft and offers
-  // >>> the opponent one chance to buy it. Returns true when the feature has
-  // >>> taken the pick over, in which case IT calls applyLocationEffect
-  // >>> EXACTLY ONCE. The online guest's pick is routed through the very same
-  // >>> interceptor in handleHostIncomingAction's 'pick' branch.
+  /* >>> D4: this used to read "a CONTESTED SITE pauses the draft and offers the
+     >>> opponent one chance to buy it" - Siege, whose hook
+     >>> (OD.Wagers.beforePick) no longer exists, so the call is a no-op. Kept
+     >>> as the seam: one property read, and it is the right place for any
+     >>> future feature that needs to veto a pick. The comment no longer
+     >>> advertises a mechanic that is not in the game. The online guest's pick
+     >>> is routed through the very same call in handleHostIncomingAction. */
   if(window.OD && OD.Wagers && OD.Wagers.beforePick && OD.Wagers.beforePick(idx, locId, tier)) return;
 
   applyLocationEffect(idx, locId, tier);
@@ -2505,9 +2572,10 @@ function maybeAutoPick(){
          that null directly, which is the second half of the same crash. */
       const pick = botChoosePick(idx);
       if(!pick) return;
-      // >>> WAGERS (feature: Siege) - bot picks go through the SAME contested-
-      // >>> site interceptor as human picks, so the rule cannot be dodged by
-      // >>> letting the Bot pick first.
+      /* >>> D4: bot picks go through the SAME (now no-op) beforePick seam as human
+         >>> picks, so a future feature cannot be dodged by letting the bot pick
+         >>> first. It is not there to stop a contested site any more - Siege was
+         >>> cut - and the asymmetry that seam used to protect is gone with it. */
       if(!(window.OD && OD.Wagers && OD.Wagers.beforePick && OD.Wagers.beforePick(idx, pick.locId, pick.tier))){
         applyLocationEffect(idx, pick.locId, pick.tier);
         advanceDraftOrSkirmish();
@@ -2621,12 +2689,72 @@ function botWantsToAttack(aggressor, defender){
 
 let skirmishCtx = null;
 
+/* >>> D4: THE COMMIT GUARD, ON THE CONTEXT.
+
+   `commitIsReplayed()` is asked by every commit before it is allowed to change
+   anything, and it asks `skirmishCtx` - the object created once per Skirmish
+   and NOT recreated by a re-render - rather than a closure that dies with the
+   dialog. It refuses exactly one thing: a commit for a seat that has already
+   committed this Skirmish. That is the online guest's replayed socket message,
+   and a stale modal re-fired after the board moved on, and both of them would
+   otherwise overwrite the first payload on `skirmishCtx[role]` and spend the
+   Troops twice. The next Skirmish builds a new context, so the second fight of
+   a game commits normally.
+
+   >>> WHAT THIS GUARD DELIBERATELY DOES NOT DO, and why it cost a rewrite.
+   >>> The first attempt also refused any commit arriving within 400ms of the
+   >>> last one, which reads like it covers the double-click: the second click
+   >>> does land on the OTHER seat's modal. It does cover it - and it cost
+   >>> test/balance.sim.js a deadlock on the first run, because that harness
+   >>> plays a scripted human through a SYNCHRONOUS timer queue, so a whole
+   >>> six-round game commits two seats within a few milliseconds of wall
+   >>> clock and every commit after the first was refused as a "replay". A
+   >>> guard that can be defeated by a clock is not a guard: the same refusal
+   >>> fires on a real machine whose clock steps backwards (NTP, a laptop
+   >>> waking from sleep), and it fires with no way for the player to recover
+   >>> except clicking again. So the cross-seat case is closed where it can be
+   >>> closed without a clock - by the click shield hideModal() raises, which
+   >>> stops the replaying click BEFORE it reaches any handler at all - and this
+   >>> guard is left doing the one job a value on the context can do honestly.
+   >>> js/game.js's own D4 tests say which half each one covers; the cross-seat
+   >>> half is verified in a real browser, where hit-testing actually exists. */
+function commitIsReplayed(playerIdx){
+  const ctx = skirmishCtx;
+  if(!ctx || playerIdx < 0) return false;
+  return !!(Array.isArray(ctx.commitLatched) && ctx.commitLatched[playerIdx]);
+}
+/* The single writer. applyCommit() is the only place a human commit becomes
+   real - the button's onSubmit AND the online guest's socket message both land
+   here - so writing the guard in one place is what makes "at most one commit
+   per seat per Skirmish" a fact rather than a convention. */
+function latchCommit(playerIdx){
+  if(!skirmishCtx) return;
+  if(!Array.isArray(skirmishCtx.commitLatched)) skirmishCtx.commitLatched = [false, false];
+  if(playerIdx >= 0) skirmishCtx.commitLatched[playerIdx] = true;
+}
+
 function startSkirmishCommit(aggressorIdx, defenderIdx){
   state.phase = 'skirmish-commit';
   skirmishCtx = {aggressorIdx, defenderIdx, aggCommit:null, defCommit:null};
   // >>> WAGERS (feature: Betrayal tokens) - at most one RE-ROLL per player per
   // >>> Skirmish; the record lives on the existing skirmishCtx object.
   skirmishCtx.wagersReroll = [false, false];
+  /* >>> D4: THE COMMIT GUARD, ON THE CONTEXT AND NOT THE CLOSURE.
+     The old latch was `let commitFired = false` INSIDE showCommitModal, and
+     that is not a guard against a double-click at all - it is a guard against
+     one button being clicked twice. The button is destroyed between the two
+     clicks of a double-click (showModal rewrites #skirmishBody), the next
+     modal builds a fresh closure with a fresh `false`, and the second click
+     therefore fires a perfectly valid commit for whichever seat is asking
+     NOW. Measured: the defender was committed at the slider default - 1 Troop,
+     no card - at every gap from 40ms to 320ms, and never saw their own modal.
+
+     So the guard lives on `skirmishCtx` (commitIsReplayed / latchCommit, both
+     declared beside it), which is created once per Skirmish and cannot be
+     recreated by a re-render. It is per SEAT, so the defender's own first
+     commit is still allowed, and it is re-created by every
+     startSkirmishCommit, so the second Skirmish of a game commits normally. */
+  skirmishCtx.commitLatched = [false, false];
   if(state.roundRec) state.roundRec.skirmish = true;
   if(canRunExtensions()){
     OD.Ext.hooks.run('skirmishBegin', extCtx('aggressor', aggressorIdx, {defenderIdx}));
@@ -2738,6 +2866,15 @@ function collectCommit(playerIdx, onDone){
   }
 
   const applyCommit = (troops, cardId, extra)=>{
+    /* >>> D4: the same guard, at the door. Two commits for one seat in one
+       Skirmish is never legitimate: the second would overwrite the first on
+       `skirmishCtx[role]` and the troops would be deducted twice. Same shape
+       as the null-skirmishCtx guard above: late, so say so and stop. */
+    if(commitIsReplayed(playerIdx)){
+      log(`${esc(player.name)}'s commit arrives after one was already accepted this Skirmish - ignored.`);
+      return;
+    }
+    latchCommit(playerIdx);
     const idx = cardId ? player.hand.indexOf(cardId) : -1;
     const card = takeCommitCard(player, idx);
     // >>> WAGERS (feature: Wagers + Betrayal tokens) - the public declaration
@@ -3172,7 +3309,18 @@ function animateDiceRoll(aggName, defName, aggRoll, defRoll, aggTotal, defTotal,
 
   // Fallback: if the player never clicks Continue, still advance so the
   // round can't get stuck. Longer than holdMs so reading isn't cut short.
-  setTimeout(finish, rollMs + Math.max(holdMs, 2600));
+  /* >>> L3, the other half. Same rule as the debrief failsafe below: in a DEMO
+     >>> nobody is there to press Continue, so this floor - not the dice
+     >>> animation - is what a spectator actually watches, and a 2.6s hold on
+     >>> every roll is most of a demo round. A human keeps the full
+     >>> `rollMs + max(holdMs, 2600)` and the Continue button, unchanged.
+     >>> `state.mode` is the existing field startGame() already puts on the state
+     >>> literal, so this adds no key and nothing new to serialise. `finished`
+     >>> still gates both the button and this timer, so they cannot both fire. */
+  const demoDice = !!(state && state.mode === 'demo');
+  setTimeout(finish, demoDice
+    ? rollMs + Math.min(900, Math.max(320, holdMs))
+    : rollMs + Math.max(holdMs, 2600));
 }
 
 /* ------------------------------ Round end ------------------------------ */
@@ -3281,10 +3429,20 @@ function showRoundDebrief(rec, nextRound){
      fixed rounds and one of them (Meltdown) takes an option away rather than
      adding one - both are invisible until the player is already in the round
      they land in. A round with nothing new gets the generic line rather than
-     an EMPTY "Coming up" box, which read as a broken panel. */
+     an EMPTY "Coming up" box, which read as a broken panel.
+
+     >>> D4: THESE THREE LINES ARE THE LAST WORD ON WHEN A MECHANIC BECOMES
+     >>> LEGAL, and they used to advertise two that no longer exist - the All In
+     >>> / Ghost wagers (cut: measured worth -1.5 and -2.1 Influence per seat,
+     >>> and a bot that used them scored 11% worse than one that ignored them)
+     >>> and Siege (cut with them). Each line is derived from the predicates
+     >>> the engine actually tests - advancedUnlocked(), intrigueUnlocked(),
+     >>> eventsUnlocked() and the Betrayal token's own rule in
+     >>> js/feature-wagers.js - rather than from a list of what used to be
+     >>> true, so a mechanic that is cut cannot leave a sentence behind. */
   const lookahead = [];
-  if(nxt === 2) lookahead.push('<b>Round 2:</b> the <b>Advanced</b> tier and <b>Intrigue</b> cards unlock, and the <b>All In / Ghost</b> wagers become legal.');
-  if(nxt === 3) lookahead.push('<b>Round 3:</b> <b>Round Events</b> start, <b>Betrayal tokens</b> pay +1, <b>Siege</b> marks a site CONTESTED, the <b>Rift</b> opens as a ninth site, and the first <b>Bounty</b> is published.');
+  if(nxt === 2) lookahead.push('<b>Round 2:</b> the <b>Advanced</b> tier and <b>Intrigue</b> cards unlock.');
+  if(nxt === 3) lookahead.push('<b>Round 3:</b> <b>Round Events</b> start, <b>Betrayal tokens</b> pay +1, the <b>Rift</b> opens as a ninth site, and the first <b>Bounty</b> is published.');
   if(nxt === 5) lookahead.push('<b>Round 5:</b> a second <b>Betrayal token</b> and a second <b>Bounty</b>.');
   if(nxt === 6) lookahead.push('<b style="color:#8c1d18">MELTDOWN.</b> Caps rise, <b>every Advanced cost is free</b>, a <b>Surge</b> of 1&ndash;6 Influence is rolled at the top of the round &mdash; and if you take the Garrison you <b>must attack</b>. Holding back is not on the table.');
   if(!lookahead.length){
@@ -3363,6 +3521,24 @@ function showRoundDebrief(rec, nextRound){
   };
   const btn = document.getElementById('debriefNext');
   if(btn) btn.onclick = next;
+  /* >>> L3. THE DEBRIEF ATE ~84 SECONDS OF EVERY 90-SECOND DEMO.
+     >>> Measured unattended, at every bot speed: 13.8s of no screen change per
+     >>> round, and Instant vs Fast differing by ~3s across a whole game - because
+     >>> this single modal dominated both. In a demo there is nobody to click
+     >>> Continue, so the failsafe is the ONLY thing that ever advances the round,
+     >>> and it was set for a human reading speed.
+     >>>
+     >>> So the timer is now chosen by WHO IS WATCHING:
+     >>>   human / host / online : 14,000ms - UNCHANGED, Continue button unchanged
+     >>>   demo                 : 2,600ms
+     >>>
+     >>> NOTHING about the latch or the round guard changes: `advanced` still gates
+     >>> the button AND the timer, the handle is still cleared inside next(), and
+     >>> the stale-round guard in the callback below is untouched. The demo just
+     >>> reaches that same guarded path sooner. The Continue button also stays in
+     >>> a demo on purpose - a spectator SHOULD be able to hold the round open,
+     >>> and a human watching can always click it instead of waiting. */
+  const demoDebriefMs = (state.mode === 'demo') ? 2600 : 14000;
   failsafe = setTimeout(()=>{
     failsafe = null;
     if(advanced) return;
@@ -3372,7 +3548,7 @@ function showRoundDebrief(rec, nextRound){
     const modal = document.getElementById('skirmishModal');
     if(!modal || modal.classList.contains('hidden')) return;
     next();
-  }, 14000);
+  }, demoDebriefMs);
   OD.Sound.play('turn.pass');
 }
 
@@ -3640,8 +3816,69 @@ function showModal(title, bodyHtml, opts={}){
   else if(typeof requestAnimationFrame === 'function') requestAnimationFrame(enter);
   else enter();
 }
-function hideModal(){
+/* >>> D4: THE CLICK SHIELD — the third layer under the commit guard, and the
+   only one that stops the second click BEFORE it reaches a handler.
+
+   The defect was never really "the handler ran twice". It was "the DOM under
+   the player's finger changed, and the new DOM had a live button in the same
+   place". Every dialog in this game is ONE reused #skirmishModal whose body is
+   rewritten in place, so a double-click's second click is aimed at a control
+   that did not exist when the first click landed: the other seat's Commit, the
+   next round's board tile, the next dialog's Continue. A latch inside the
+   handler that was destroyed cannot see that, which is why the fix that
+   shipped first did not work.
+
+   So the shield is raised by hideModal() - the single choke point EVERY
+   phase-advancing dialog in the game closes through, including the two this
+   file does not own (js/feature-wagers.js's Quiet Round answer goes through
+   the OD.WagersBridge, and the dice reveal's own finish()). It is a
+   transparent, unfocusable, text-free layer over the whole dialog for
+   MODAL_SHIELD_MS, so the replaying click hits nothing at all.
+
+   #skirmishModal is `position:fixed; inset:0`, so an absolutely positioned
+   child covers the dialog AND the scrim around it; z-index 60 puts it above
+   .box in the paint order, which is what actually wins the hit test. It is
+   `aria-hidden` and carries no tabindex, so it adds nothing to the tab order
+   or to the accessibility tree - the keyboard path is covered by the
+   per-handler latch instead.
+
+   THE WINDOW. 400ms, chosen from a measurement rather than a feel: the
+   playtest drove double-clicks at gaps of 40, 80, 120, 200 and 320ms and the
+   defender was committed at EVERY one, so the shield has to outlast the widest
+   gap a real double-click produces with room to spare. It is deliberately not
+   enforced anywhere else - see commitIsReplayed() for why a guard that also
+   refused commits on a clock had to be taken back out.
+
+   `{shield:false}` opts out, and is used only where closing the dialog is a
+   pure UI action that advances nothing: the close button, the scrim and
+   Escape. Those are reachable from the Rules modal, where a 400ms dead zone on
+   the board behind it would be felt as a dropped click. */
+const MODAL_SHIELD_MS = 400;
+function shieldModalClicks(ms){
   const modal = document.getElementById('skirmishModal');
+  if(!modal || typeof modal.appendChild !== 'function') return null;
+  if(typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+  let sh = null;
+  try{
+    sh = document.createElement('div');
+    sh.id = 'odClickShield';
+    sh.setAttribute('aria-hidden', 'true');
+    sh.style.cssText = 'position:absolute;inset:0;z-index:60;background:transparent;';
+    modal.appendChild(sh);
+  }catch(_){ return null; }
+  const drop = ()=>{
+    try{
+      if(sh.parentNode && typeof sh.parentNode.removeChild === 'function') sh.parentNode.removeChild(sh);
+      else if(typeof sh.remove === 'function') sh.remove();
+    }catch(_){ /* the dialog went away first; nothing to clean up */ }
+  };
+  setTimeout(drop, (typeof ms === 'number' && ms > 0) ? ms : MODAL_SHIELD_MS);
+  return drop;
+}
+
+function hideModal(opts={}){
+  const modal = document.getElementById('skirmishModal');
+  if(!opts || opts.shield !== false) shieldModalClicks(opts && opts.ms);
   modal.classList.add('hidden');
   modal.classList.remove('is-rules');
   modal.classList.remove('is-wide');
@@ -3670,9 +3907,14 @@ function hideModal(){
 function onDom(fn){ if(typeof document !== 'undefined' && typeof window !== 'undefined') fn(); }
 
 onDom(()=>{
-document.getElementById('modalCloseBtn').addEventListener('click', hideModal);
+/* The three ways out that ADVANCE NOTHING opt out of the click shield: the
+   close button, a click on the scrim, and Escape. All three are reachable from
+   the Rules dialog, where a 400ms dead zone over the board would be felt as a
+   dropped click rather than as protection. Every other close is a move in the
+   game, and keeps the shield. */
+document.getElementById('modalCloseBtn').addEventListener('click', ()=> hideModal({shield:false}));
 document.getElementById('skirmishModal').addEventListener('click', (e)=>{
-  if(e.target.id==='skirmishModal' && e.currentTarget.dataset.dismissible==='1') hideModal();
+  if(e.target.id==='skirmishModal' && e.currentTarget.dataset.dismissible==='1') hideModal({shield:false});
 });
 /* The trap itself. A keydown listener on the modal (not on document) so it
    only runs while the modal is open, and so the game's other document-level
@@ -3738,7 +3980,7 @@ document.getElementById('skirmishModal').addEventListener('keydown', (e)=>{
 });
 document.addEventListener('keydown', (e)=>{
   const modal = document.getElementById('skirmishModal');
-  if(e.key==='Escape' && !modal.classList.contains('hidden') && modal.dataset.dismissible==='1') hideModal();
+  if(e.key==='Escape' && !modal.classList.contains('hidden') && modal.dataset.dismissible==='1') hideModal({shield:false});
 });
 });
 
@@ -3755,11 +3997,79 @@ function popupGain(playerIdx, text, good){
   const stack = activePopupCount[playerIdx] || 0;
   activePopupCount[playerIdx] = stack + 1;
   const el = document.createElement('div');
-  el.className = `gain-popup ${good?'good':'bad'}`;
+  /* `is-stacked` on every popup after the first: css/style.css already carried a
+     rule for it that nothing had ever set, because a stack that looks exactly
+     like a lone popup is not a stack. */
+  el.className = `gain-popup ${good?'good':'bad'}${stack ? ' is-stacked' : ''}`;
   el.textContent = text;
-  el.style.left = `${rect.left + rect.width/2}px`;
-  el.style.top = `${rect.top - stack*22}px`;
-  document.body.appendChild(el);
+  /* >>> L2. THREE POPUPS AT ONCE PRINTED ON TOP OF EACH OTHER AND ON TOP OF THE
+     >>> STAT CHIPS. Two separate faults, both in the three lines this replaces:
+     >>>
+     >>> 1. `rect.top - stack*22` walks UP from the card's top edge, and the
+     >>>    Credits/Ore/Troops/Cards chips are the SECOND row INSIDE that same
+     >>>    card (renderPlayerCards: `.player-card > .name` then `.stats`). So the
+     >>>    first popup printed across its own chip row, and the second popup for
+     >>>    a seat printed across the chips of the card ABOVE it.
+     >>> 2. 22px of pitch is smaller than a popup's own line box, so even two
+     >>>    popups on one seat overprinted each other by construction.
+     >>>
+     >>> The stack now starts BELOW the chip row and grows DOWNWARD, with the
+     >>> pitch taken from the popup's own measured height rather than a magic
+     >>> number - so two popups cannot share a pixel at any font size. It only
+     >>> grows upward when a downward run would leave the viewport, and `left` is
+     >>> clamped so a long line ("Intrigue: Sabotage (-2)") cannot hang off the
+     >>> side of the screen.
+     >>>
+     >>> Minimal and additive: `activePopupCount`, `cleanup`, the animationend
+     >>> listener and the 1500ms fallback are all untouched. */
+  const chipRow = cardEl.querySelector('.stats');
+  const chipRect = chipRow ? chipRow.getBoundingClientRect() : null;
+  const chipTop = chipRect ? chipRect.top : rect.top;
+  const baseTop = (chipRect ? chipRect.bottom : rect.top) + 4;
+  document.body.appendChild(el);   /* appended before measuring: a popup's own
+                                      height is what sets the next one's row. */
+  const vw = window.innerWidth  || document.documentElement.clientWidth  || 0;
+  const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+  const GAP = 4;
+  const popH = el.offsetHeight || 24;
+  const popW = el.offsetWidth  || 60;
+  /* >>> The on-screen clamp, and why the base must NOT depend on `stack`.
+     >>> Every earlier attempt here was wrong in the same instructive way: the
+     >>> base was re-derived per row (as `vh-4-span-popH`, then as
+     >>> `baseTop-overflow` where overflow itself contained `stack*row`), so the
+     >>> `stack*row` term cancelled and every popup in a deep stack landed on the
+     >>> SAME y. Measured at 1280x720: "+2 Ore" and "Skirmish: Fortify" both
+     >>> printed at top=693. The base is now computed from `baseTop` and `popH`
+     >>> only - nothing that varies with the row - so it is identical for every
+     >>> popup of the same seat, and `row` genuinely separates them. Seat 1,
+     >>> which had room below its chips, stacked correctly at 30px pitch
+     >>> throughout.
+     >>>
+     >>> `maxRack` is how many rows the rack reserves space for. Past that, a
+     >>> row can run past the bottom edge rather than overprint its neighbour -
+     >>> the lesser of the two failures, and self-clearing in 1.5s.
+     >>>
+     >>> AND THE FLIP. A lower seat's card can sit low enough that its chip row
+     >>> straddles the fold - measured at 1280x720, seat 2's chips run y=599 to
+     >>> y=749 on a 720px viewport - and then "below the chips" and "on screen"
+     >>> are the same requirement, not two. Measured before this: seat 2's two
+     >>> popups were clear of each other and inside the viewport, and both
+     >>> landed ON the chip row. So when there is no room for the rack below the
+     >>> chips, the rack goes ABOVE them instead, growing upward from the chip
+     >>> row's top edge - over the seat's own name row, which is the player's own
+     >>> card and not the numbers the popup is annotating. */
+  const row = popH + GAP;
+  const maxRack = 3;
+  const rackRoom = popH + maxRack * row;
+  const roomBelow = !vh || (baseTop + rackRoom <= vh - 4);
+  const base = roomBelow
+    ? Math.max(4, Math.min(baseTop, vh - 4 - rackRoom))
+    : chipTop - GAP - popH;          /* flipped: rows climb from here */
+  const top = roomBelow ? base + stack * row : base - stack * row;
+  const centre = rect.left + rect.width/2;
+  const half = popW/2;
+  el.style.left = `${(!vw) ? centre : Math.min(Math.max(centre, half + 4), vw - half - 4)}px`;
+  el.style.top = `${Math.max(4, top)}px`;
   const cleanup = ()=>{ activePopupCount[playerIdx] = Math.max(0, (activePopupCount[playerIdx]||1)-1); el.remove(); };
   el.addEventListener('animationend', cleanup);
   setTimeout(()=>{ if(el.isConnected) cleanup(); }, 1500); // fallback if animationend never fires
@@ -4275,6 +4585,14 @@ function srWagerBits(decl){
     ? decl : srWagerDeclaration();
   if(!d) return [];
   const w = d.wager || 'normal';
+  /* >>> D4: THE STANCE BITS BELOW CANNOT FIRE, and that is worth saying rather
+   >>> than leaving to be discovered. `d.wager` is 'normal' or undefined,
+   >>> because #wagersStance is no longer rendered by js/feature-wagers.js (the
+   >>> All In / Ghost wagers were cut), and srWagerSeen.wager is reset to
+   >>> 'normal' every time a commit modal opens - so `w !== srWagerSeen.wager`
+   >>> is never true and none of the three stance sentences is ever pushed.
+   >>> Verified in a real browser with tokens in hand: #srLive never carried
+   >>> one. The TOKEN bits below are live and are the half that matters. */
   const bet = d.betrayal || {};
   const bits = [];
   if(w !== srWagerSeen.wager){
@@ -4294,22 +4612,39 @@ function srWagerBits(decl){
   return bits;
 }
 function srWagerSentence(decl){ srWrite(srWagerBits(decl)); }
-/* The stance block's LOCKED state. The chips are painted `disabled` before
-   Round 2, and a disabled chip is not focusable and is skipped by the tab
-   order - so without this, "All In and Ghost are not available" is a fact a
-   screen-reader player never hears at all. */
+/* The stance block's LOCKED state. The stance chips used to be painted
+   `disabled` before Round 2, and a disabled chip is not focusable and is
+   skipped by the tab order - so this existed to tell a screen-reader player
+   "All In and Ghost are not available".
+
+   >>> D4: THE STANCES ARE GONE, so the sentence never fires: the query below
+   >>> looks for `#wagersStance .wagers-stance[data-wager="allin"].disabled`,
+   >>> and js/feature-wagers.js renders no stance chips at all any more, so
+   >>> `locked` is false and srFact() returns null. Called on every commit modal
+   >>> mount (showCommitModal, and installWagerChipA11y), so it is a live call
+   >>> site - it simply cannot speak. Kept, and kept honest by this note: a
+   >>> player is never told about a mechanic that does not exist, and the next
+   >>> engineer is told why the string is still here rather than finding it. */
 function srWagerLockSentence(){
   const locked = !!document.querySelector('#wagersStance .wagers-stance[data-wager="allin"].disabled');
   return srFact('wagerLock', String(locked), locked ? 'Wager locked: All In and Ghost unlock in Round 2.' : null);
 }
 
 /* ---- THE WAGER AND TOKEN CHIPS (D2) ------------------------------------
-   js/feature-wagers.js renders NORMAL / ALL IN / GHOST / +1 TOTAL / RE-ROLL
-   as bare <div>s: measured role null and tabindex null on all five, with
-   cursor:pointer. So the two decisions in the entire game that carry a real
-   cost - risk every Troop for +3 Influence, or risk none for +2 - were the
-   two a keyboard player could not take at all, and neither was announced.
-   A player who wanted to gamble had to be told by someone else.
+   /* >>> D4: THIS BLOCK WAS WRITTEN WHEN THERE WERE FIVE CHIPS. js/feature-wagers.js
+   >>> used to render NORMAL / ALL IN / GHOST / +1 TOTAL / RE-ROLL as bare
+   >>> <div>s - measured role null and tabindex null on all five - and this
+   >>> upgrade is what made the two decisions that carried a real cost
+   >>> (risk every Troop for +3 Influence, or risk none for +2) reachable by
+   >>> keyboard at all. The All In / Ghost wagers were then MEASURED and CUT
+   >>> (worth -1.5 and -2.1 Influence per seat; a bot that used them scored 11%
+   >>> worse than one that ignored them), so today the feature renders TWO chips
+   >>> - the +1 TOTAL and the RE-ROLL tokens - and both are labelled, focusable
+   >>> and announced, as this block intended. The stance arms of
+   >>> wagerChipLabel() below are the residue of the other three: unreachable,
+   >>> because paintWagerChips() only ever sees the chips that exist. Verified
+   >>> in a real browser with tokens in hand - both token chips carry an
+   >>> aria-label, and nothing in the commit modal mentions a stance.
 
    feature-wagers.js is not this file's to edit, so the upgrade is applied from
    here, at MOUNT time, through a delegated listener on the commit modal's
@@ -4570,11 +4905,16 @@ function srDeltas(){
   out.push(srFact('round', `${r}|${heat}|${phaseKey()}`, `Round ${r} of ${TOTAL_ROUNDS}. ${heat}. ${phase}.`));
   out.push(srFact('rift', `${state.riftTarget}|${state.riftMut}|${state.riftContested}`, srRiftSentence()));
   out.push(srFact('lock', String(r), (r < 2) ? 'Advanced tiers are locked this round - they unlock in Round 2.' : null));
-  /* CONTESTED: the Rift's permanent one, and the Siege feature's paid-for one,
-     which the feature writes straight onto state via api.set(). */
-  const siegeId = state.contestedLocId || '';
-  const siegeName = siegeId ? ((LOCATIONS.find(l=>l.id===siegeId) || {}).name || siegeId) : '';
-  out.push(srFact('siege', siegeId, siegeName ? `${siegeName} is Contested - it can be bought this round.` : null));
+  /* >>> D4: THE CONTESTED FACT IS THE RIFT'S NOW. This used to read
+     >>> `state.contestedLocId` and announce "X is Contested - it can be bought
+     >>> this round", which is Siege's paid-for contested site. The key was
+     >>> seeded only by js/feature-wagers.js and has had no writer since the
+     >>> cut, so the sentence could never fire - but the Rift's permanent
+     >>> contested state, which IS real and IS announced, was reading the
+     >>> wrong key for it: `srRiftSentence()` above already covers
+     >>> `state.riftContested`, so nothing is lost. The Rift's tile styling
+     >>> (`.loc.contested`) is deliberately still in css/style.css and is still
+     >>> used; only this dead reader goes. */
   const caps = srCapsSentence();
   out.push(srFact('caps', caps, caps));
   for(let i=0;i<2;i++){
@@ -4744,19 +5084,40 @@ function boardLocations(){
   return rift ? LOCATIONS.concat([rift]) : LOCATIONS;
 }
 
-/* What the Advanced tier's note actually says. Under Meltdown every
-   Advanced cost is waived for every site, so canAffordExtra() returns true
-   for all of them - and the old code then printed each tile's real price
-   ("pay 1 Ore") for a cost that is NOT charged. The tile was lying on all
-   eight sites at once. The Rift is different: its own price is this round's
-   MUTATED one (Toll doubles it, Open Hands zeroes it), and it goes through
-   the identical check, so its own note is the right thing to print - except
-   that Meltdown overrides even the Rift, so the Meltdown branch comes first
-   for every tile. */
-function advancedNote(loc, advUnlocked, advAffordable){
+/* What the Advanced tier's note actually says. `advAfford` is a TRI-STATE and
+   has to be one:
+     true  - this player was evaluated against this price and can pay it;
+     false - this player was evaluated against this price and cannot;
+     null  - nobody was evaluated, because it is NOT THIS PLAYER'S PICK.
+
+   The old signature took a boolean that the caller built as
+   `actor ? canAffordExtra(loc, actor) : false`, so "not your turn" arrived
+   indistinguishable from "you cannot pay this", and every Advanced tier on the
+   board printed "cannot afford" for roughly half the wall-clock of a
+   human-vs-bot game - including Outpost and Shrine Advanced, which are
+   `consolation`-tiered and therefore ALWAYS takeable at a reduced payout, and
+   which under MELTDOWN the board strip itself describes as free. The renderer
+   was making a claim about a player it had not looked at.
+
+   So a note that is about AFFORDABILITY is now only ever printed from an
+   evaluation. `null` says nothing about the price at all - the row is still
+   visually inert (see `advDisabled`), it is inert because it is not your pick,
+   and the tile head's own title already says exactly that.
+
+   The gate ('unlocks Round 2') is a fact about the ROUND, not about a player,
+   so it is still printed when it is not your pick. */
+function advancedNote(loc, advUnlocked, advAfford){
   if(!advUnlocked) return 'unlocks Round 2';
-  if(!advAffordable) return 'cannot afford';
+  /* The two ROUND facts come first and are printed whoever is picking: a waived
+     cost is waived for the whole board, exactly as the gate is a fact about the
+     round rather than about a player. This is also the only order in which the
+     waiver and the price cannot disagree - `loc.advanced.note` is the real
+     price, and the Rift's is this round's MUTATED one, so under Meltdown (which
+     overrides even the Rift) it must never be printed. */
   if(state && state.meltdown) return 'FREE — MELTDOWN';
+  if(advAfford === false) return 'cannot afford';
+  /* Not your pick: no affordability was evaluated, so none is claimed. */
+  if(advAfford !== true) return '';
   return loc.advanced.note || '';
 }
 
@@ -4801,14 +5162,25 @@ function renderBoard(){
     newSnapshot[loc.id] = taken ? taken.owner : null;
     const justTaken = !!taken && prevBoardSnapshot && prevBoardSnapshot[loc.id]===null;
     const pickable = humanCanPick && !taken;
-    const advAffordable = actor ? canAffordExtra(loc, actor) : false;
+    /* >>> D4: THE TRI-STATE. `actor` is null whenever it is not this player's
+       pick, and the old `actor ? canAffordExtra(loc, actor) : false` turned
+       that into a claim about a player who was never evaluated. null now means
+       exactly "nobody was evaluated" and advancedNote() reads it as silence
+       rather than as a verdict. */
+    const advAfford = actor ? !!canAffordExtra(loc, actor) : null;
 
     const advUnlocked = advancedUnlocked();
     const takenBasic = taken && taken.tier==='basic';
     const takenAdvanced = taken && taken.tier==='advanced';
 
     const basicDisabled = !pickable;
-    const advDisabled = !pickable || !advUnlocked || !advAffordable;
+    /* Inert when it is not your pick (that is `!pickable`, and it is the
+       honest reason), when Advanced has not unlocked, or when the price was
+       evaluated and could not be met. `advAfford === null` adds nothing here:
+       `!pickable` is already true whenever there is no actor, so a not-your-turn
+       row is greyed for being not your turn and not for a price nobody looked
+       at. */
+    const advDisabled = !pickable || !advUnlocked || advAfford === false;
 
     function row(tier, label, note, isTaken, disabled, takenOwner){
       const tag = tier==='advanced' ? 'ADV' : 'BASIC';
@@ -4835,13 +5207,17 @@ function renderBoard(){
     }
 
     const tierRows = row('basic', loc.basic.label, loc.basic.note || '', takenBasic, basicDisabled, taken ? taken.owner : null)
-      + row('advanced', loc.advanced.label, advancedNote(loc, advUnlocked, advAffordable), takenAdvanced, advDisabled, taken ? taken.owner : null);
+      + row('advanced', loc.advanced.label, advancedNote(loc, advUnlocked, advAfford), takenAdvanced, advDisabled, taken ? taken.owner : null);
 
     const locIcon = locIconFor(loc.id);
-    /* The Rift gets its own class so the mutation reads at a glance, and the
-       `contested` class is REUSED from the ordinary contested-site styling
-       (feature-wagers.js) because `state.riftContested` means exactly the
-       same thing here. Both are state names in the markup, not colours. */
+    /* The Rift gets its own class so the mutation reads at a glance, and it takes
+       the `contested` class for its permanently contested state. >>> D4: that
+       class used to be described here as "REUSED from the ordinary
+       contested-site styling (feature-wagers.js)", which stopped being true when
+       Siege was cut - js/feature-wagers.js renders no contested-site styling
+       any more. The RULE in css/style.css is still there and still bound to
+       this class; it is the Rift's alone now. Both are state names in the
+       markup, not colours. */
     const riftCls = (loc.id==='rift') ? ' loc-rift' : '';
     const contestedCls = (loc.id==='rift' && state.riftContested) ? ' contested' : '';
     const riftTag = (loc.id==='rift') ? '<span class="taken-tag rift-tag">RIFT</span>' : '';
@@ -4866,7 +5242,9 @@ function renderBoard(){
       ? `${state.players[taken.owner].name} already took this site (${taken.tier==='advanced' ? 'Advanced' : 'Basic'}) — nothing left to pick here.`
       : (pickable
           ? 'Choose a tier below: Basic is free, Advanced costs more and pays more.'
-          : 'Not your turn to pick — the tier rows are the only live parts of this tile.');
+          : (state.phase==='draft'
+              ? 'Not your turn to pick — this tile opens when the picker reaches you.'
+              : 'The draft is not open right now — tiles open again on your pick turn.'));
 
     return `
       <div class="loc${riftCls}${contestedCls}${pickable?' pickable':''}${taken?' loc-taken':''}${justTaken?' just-taken':''}" data-loc="${loc.id}">
@@ -5238,11 +5616,26 @@ function showEndScreen(){
         + `</tr>`;
     }).join('');
 
+    /* >>> D4: "THE PIVOT WAS ROUND 6. ANA TOOK IT FROM ANA". The sentence was built
+     >>> from `pivot.now` (who leads AFTER the round) and `pivot.was` (who led
+     >>> BEFORE it) with no check that these are DIFFERENT people. Whenever one
+     >>> player led throughout - which is most games, and every game where the
+     >>> leader never gave the lead up - both names resolved to the same player
+     >>> and the screen said so, on the end screen, in the one line whose job is
+     >>> to explain the game. A pivot is a change of hands; where the hands did
+     >>> not change, the honest sentence is that the leader simply widened a
+     >>> lead they already had. */
     const pivotLine = (pivot && pivot.swing > 0)
       ? `<div class="pivot-note"><b>The pivot was Round ${pivot.h.round}.</b> `
-        + `${pivot.now === 0 ? 'The lead tied out'
-          : `${esc((pivot.now > 0 ? p1.name : p2.name))} took it`}`
-        + `${pivot.was === 0 ? '' : ` from ${esc((pivot.was > 0 ? p1.name : p2.name))}`}`
+        + `${(()=>{
+            if(pivot.now === 0) return 'The lead tied out';
+            const taker = esc((pivot.now > 0 ? p1.name : p2.name));
+            /* Signed by the same convention as `lead()`: positive is seat 1. */
+            const changedHands = (pivot.was !== 0 && Math.sign(pivot.was) !== Math.sign(pivot.now));
+            if(pivot.was === 0)     return `${taker} took the lead`;
+            if(!changedHands)        return `${taker} extended a lead they already had`;
+            return `${taker} took it from ${esc((pivot.was > 0 ? p1.name : p2.name))}`;
+          })()}`
         + ` &mdash; a swing of <b>${pivot.swing} Influence</b> in a single round.`
         + `${(pivot && pivot.h && Array.isArray(pivot.h.objectiveBonus) && (pivot.h.objectiveBonus[0] > 0 || pivot.h.objectiveBonus[1] > 0))
             ? ' Part of that was an objective bonus.' : ''}</div>`
@@ -5608,7 +6001,7 @@ function scrubRetiredRuleNames(html){
    that game.js never transcribes the copy, so it must name the export, not
    invent a second key that no feature sets. */
 const RULES_FEATURES = [
-  {id:'rules-wagers', label:'Wagers',   short:'Wagers', feature:'Wagers', key:'RULES_HTML'},
+  {id:'rules-wagers', label:'Fury & Tokens', short:'Fury', feature:'Wagers', key:'RULES_HTML'},
   {id:'rules-chaos',  label:'Meltdown', short:'Chaos',  feature:'Chaos',  key:'RULES_HTML'},
 ];
 
@@ -5724,5 +6117,19 @@ if(typeof module !== 'undefined' && module.exports){
     tierCost, tierIsAlwaysTakeable, canPayCost, takeCost, costPhrase,
     OBJECTIVES, OBJECTIVE_BONUS, HAND_CAP, ARCHIVIST_PLAYED, ARCHIVIST_HAND, INDUSTRIALIST_NEED,
     startGame, getState: ()=> state,
+    /* >>> D4: THE SEAMS test/skirmish-odds.test.js NEEDS TO TEST THE REAL
+       >>> THING. Its D4 block used to assert against a hand-rolled stand-in for
+       >>> the commit handler, which is why a suite of 140 green tests sat on
+       >>> top of a live double-click hole: a stand-in cannot be the defect.
+       >>> These five are the minimum surface that lets a headless test drive
+       >>> the ACTUAL commit chain - startSkirmishCommit builds the context,
+       >>> showCommitModal renders the real dialog, renderBoard is the real
+       >>> board renderer, logEntryType is the real log classifier, and
+       >>> readSkirmishCtx is a getter because `skirmishCtx` is a module-level
+       >>> `let` that an object literal would freeze at null. Nothing here is a
+       >>> re-implementation of the behaviour under test. */
+    showCommitModal, startSkirmishCommit, renderBoard,
+    logEntryType, advancedNote, commitIsReplayed, MODAL_SHIELD_MS,
+    readSkirmishCtx: ()=> skirmishCtx,
   };
 }

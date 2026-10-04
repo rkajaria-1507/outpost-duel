@@ -3555,7 +3555,15 @@ QUIET  (routine bookkeeping)  is-gain, is-system, is-rift, is-bounty,
 #skirmishBody > .footer-actions{
   position:sticky; bottom:-20px; z-index:2;
   margin:14px -20px -20px; padding:12px 20px 16px;
-  background:linear-gradient(180deg, rgba(242,228,200,.72), var(--panel) 34%);
+  /* Opaque from the very first pixel. It was
+     `rgba(242,228,200,.72) -> var(--panel) 34%`, which put a 72%-opaque wash
+     across the top third of the bar - and at 1280x720 the top row of card
+     options sits directly behind it, so the last line of a card description
+     ghosted through the Commit button (caught in a screenshot of the commit
+     modal at 1280x720). A sticky bar that content scrolls under has to be
+     opaque; a translucent one turns every overlap into a rendering artefact.
+     The gradient is kept, but it now only softens the first 12%. */
+  background:linear-gradient(180deg, var(--panel) 0%, var(--panel) 78%, #f2e4c8 100%);
   border-top:1px solid rgba(216,196,160,.7);
   box-shadow:0 -8px 14px -10px rgba(58,39,18,.4);
 }
@@ -3566,6 +3574,152 @@ QUIET  (routine bookkeeping)  is-gain, is-system, is-rift, is-bounty,
 .card-select .opt.selected::after{
   content:'\2713';
   position:absolute; top:4px; right:8px; color:var(--accent-gold-ink); font-weight:800;
+}
+
+/* =============================================================================
+   10A. THE COMMIT PICKER IS A BOUNDED REGION, NOT A PAGE
+   -----------------------------------------------------------------------------
+   >>> THE DEFECT THIS FIXES. Moving the odds panel ABOVE the cards was right -
+   >>> choosing a card is what moves the numbers, so the numbers have to be in
+   >>> view while you read the cards - but it left the card grid in a dialog that
+   >>> was already 648px tall with a 353px odds readout above it. Measured in real
+   >>> Chrome on a 7-card hand spread over all four categories, with a seat (so
+   >>> the odds panel renders):
+
+       viewport   cards top   cards bottom   past the fold   fully visible
+       1440x900       648          1227          +327            3 / 7
+       1366x768       641          1220          +452            3 / 7
+       1280x720       639          1218          +498            0 / 7
+       1024x768       641          1220          +452            3 / 7
+
+   At 1280x720 you saw the top 12% of ONE card. The grid was not clipped by the
+   viewport so much as by the sticky footer, which starts at y=610 - so the last
+   four cards were behind the Commit button at any scroll position that mattered.
+
+   >>> THE RULE. There is not enough height at 720px to show a troop slider, a
+   >>> live odds readout, seven cards and a commit button at once, and pretending
+   >>> otherwise by shrinking the type is the one answer this must not give (see
+   >>> the compacting band in 18A: it moves padding, gaps and line-height, and
+   >>> leaves the 12px card text and 13px card name exactly where they were). So
+   >>> the picker becomes its OWN bounded scroll region - the same
+   >>> `max-height:min(Nvh,Mpx); overflow-y:auto` shape #log already uses - and
+   >>> the three things a player must never lose sight of are pinned into it:
+     1 the CATEGORY LABEL for whatever is on screen, which is what stops a card
+       from reading as belonging to the category above it;
+     2 the TOTAL CARD COUNT, on a shelf pinned to the bottom of the region;
+     3 the SELECTED card, which is moved into view by the selection itself.
+   ======================================================================= */
+.card-select{
+  /* THE CAP, and the number is measured, not guessed. The rack's available
+     height is whatever the troop slider, the "Committing: n Troops" line and
+     the odds readout leave above the sticky Commit bar - 60px at 1280x720
+     before compaction, 226px at 1440x900. Compacting the chrome and the
+     readout (bands 18A/18B) lifts that to ~124px and ~293px, and 17vh/34vh
+     land inside both with the region bottom still above the footer. Any larger
+     and the rack's last row sits behind the Commit button, which is the
+     original defect wearing a different hat. */
+max-height:min(18vh,180px);
+  overflow-y:auto; overscroll-behavior:contain;
+  scrollbar-width:thin; -webkit-overflow-scrolling:touch;
+  /* Reserve the gutter a classic scrollbar occupies, or a card at the right
+     edge gets clipped by the overlay variant instead. */
+  padding-right:2px;
+  /* The inset fade at the foot of the port. Painted on the border box, so it
+     does NOT scroll - it is the fixed edge of the region, not an overlay that
+     travels with the content. Two jobs: it softens the hard clip where the
+     rack runs under #skirmishBody's opaque sticky Commit bar, and it is the
+     rack's non-colour "there is more below" signal for a player who has not
+     scrolled it yet. The count shelf above is the authoritative count; this is
+     only the edge treatment, so it is declared wherever the rack is capped. */
+  box-shadow:inset 0 -18px 14px -14px rgba(58,39,18,.55);
+  /* The counter behind the count shelf. Cards are the only incrementing thing
+     in the region, so the total is derived from the DOM rather than written
+     into it - no markup change, and it cannot fall out of step with the hand. */
+  counter-reset:od-card;
+}
+.card-select .opt{ counter-increment:od-card; }
+/* THE COUNT SHELF.
+   >>> COUNTER ORDER, AND WHY IT IS ::after WITH order:-1. CSS counters resolve
+   >>> in TREE order, not visual order. The shelf therefore has to be generated
+   >>> by ::after - the LAST box in the region, so by the time it paints it has
+   >>> already counted every card. A ::before shelf reads "CARDS IN HAND · 0" on
+   >>> every hand, which is exactly what a screenshot at 1280x720 caught.
+   >>> `order:-1` then puts it first VISUALLY on the cross axis. Counters ignore
+   >>> `order`, so the two mechanisms compose: tree position for the value, flex
+   >>> order for the placement.
+   >>> And why the top rather than the floor: #skirmishBody's own
+   >>> `.footer-actions` is `position:sticky` at the bottom of the same
+   >>> scrollport, so a shelf at `bottom:0` lands underneath the Commit button.
+   >>> At the top of the rack it is above the footer at every viewport measured.
+
+   The label is a static LABEL and the count is a FIGURE after it, not "N
+   cards" - CSS cannot pluralise, and "1 cards" on a one-card hand is worse
+   than no shelf at all. "CARDS IN HAND · 1" and "CARDS IN HAND · 7" are both
+   correct English and both read at a glance. WORDS plus a FIGURE, never
+   colour. */
+.card-select::after{
+  content:'Cards in hand\00A0\00B7\00A0' counter(od-card);
+  order:-1; flex:1 0 100%;
+  position:sticky; top:0; z-index:3;
+  margin:0 -2px 2px; padding:3px 2px 2px;
+  border-bottom:1px solid rgba(216,196,160,.85);
+  background:linear-gradient(180deg,var(--parchment) 66%,rgba(255,250,240,0));
+  font-family:var(--font-ui); font-size:9px; font-weight:800;
+  letter-spacing:.9px; text-transform:uppercase; white-space:nowrap;
+  color:var(--accent-gold-ink);
+}
+/* THE CATEGORY SHELF. `position:sticky` on the existing label (a full-width
+   flex line already, per the 3-up rule above) pins each label to the top of
+   the scroll port, directly UNDER the count shelf, while the cards belonging
+   to it move beneath. Sticky stacking is what makes this read correctly with
+   four categories: the next label pushes the previous one off rather than
+   letting two overlap. It needs an opaque floor so a card never shows through
+   the label's own letters. */
+.card-select .hand-group-label{
+  position:sticky; top:var(--rack-shelf); z-index:2;
+  margin:1px -2px 0; padding:1px 2px 0;
+  background:linear-gradient(180deg,var(--parchment) 72%,rgba(255,250,240,0));
+}
+/* The inset fade under the last row. Painted on the border box, so it does NOT
+   scroll - it is the fixed edge of the region, not an overlay that travels with
+   the content. Only declared where the region can actually overflow (the height
+   bands in 18A): a fade on a rack that fits is a lie about content that is not
+   there. */
+/* The inset fade under the last row. Painted on the border box, so it does NOT
+   scroll - it is the fixed edge of the region, not an overlay that travels with
+   the content. Only declared where the region can actually overflow (the height
+   bands in 18A): a fade on a rack that fits is a lie about content that is not
+   there. */
+
+/* =============================================================================
+   10B. FLOATING GAIN POPUPS - A STACK, NOT A PILE (L2)
+   -----------------------------------------------------------------------------
+   popupGain() anchors each popup to the player card's bounding rect and offsets
+   by `stack * 22px` upward. 22px is less than one popup's own line box, so three
+   concurrent popups for one seat overprinted each other - and the topmost of
+   them walked straight up into the Credits/Ore/Troops chips, which are exactly
+   the numbers a gain popup is annotating. CSS-only half of the fix: a real
+   line box, a floor so the stack grows DOWNWARD from its first row instead of
+   walking off the top of the card, and a chip-coloured keyline under the stack
+   so a popup never blends into a chip behind it.
+
+   The counting half - and the part that actually guarantees "no two popups for
+   one seat ever share a row" - is in popupGain(), because `position:fixed`
+   popups cannot be laid out by flex. See the note there.
+   ======================================================================= */
+.gain-popup{
+  /* 22px of offset per popup was inside a 14px/1.1 line box. 26px gives each
+     popup its own row with air, so the per-seat stack reads as a list. */
+  min-height:26px; padding:2px 8px;
+  border-radius:var(--r-pill);
+  /* The keyline the base rule already wanted, given a body: two stacked
+     popups stay separable over a busy felt. Background, not colour-coded -
+     `.good`/`.bad` still carry the ink colour and the sign. */
+  background:rgba(255,250,240,.86);
+  box-shadow:0 1px 3px rgba(58,39,18,.30);
+  /* An 8px label plate on each side so a popup sitting over a stat chip has
+     its own ground to read against. */
+  outline:1px solid rgba(216,196,160,.9); outline-offset:0;
 }
 
 .dice-row{ display:flex; justify-content:center; gap:32px; margin:18px 0 6px; }
@@ -5265,6 +5419,27 @@ QUIET  (routine bookkeeping)  is-gain, is-system, is-rift, is-bounty,
   .mode-cards{ grid-template-columns:minmax(0,1fr); }
   .stats-table{ font-size:12px; }
   .stats-table th,.stats-table td{ padding:7px 5px; }
+
+  /* The commit rack on a phone. At 390x844 the odds readout wraps to ~600px of
+     body before the first card, and two cards per row make the rack taller
+     still, so without this the rack ended 105px BELOW the fold. The same trim
+     band 2 applies to laptops is applied here - padding and margins only, and
+     no font-size anywhere, because a card on a phone is still a 12px card.
+     It is what buys the last ~14px that lets a whole card clear the Commit
+     bar. The CAP is re-asserted once more after the height bands below, since
+     `@media (max-height:940px)` sits further down the file and would win. */
+  .modal-header{ padding:9px 14px 6px; }
+  #skirmishBody{ padding:8px 14px 12px; }
+  #skirmishBody > .footer-actions{ margin:8px -14px -12px; padding:8px 14px 10px; }
+  #skirmishModal{ padding:8px; }
+  .odds-panel{ margin:3px 0; padding:4px 8px; }
+  .odds-consequence{ padding:3px 8px; margin-top:3px; }
+  .card-select{ max-height:min(15vh,128px); }
+  .card-select .opt{ width:132px; padding:5px; }
+  .card-select{ gap:4px 8px; margin:6px 0; }
+  .card-select .hand-group-label{ height:13px; margin-top:0; }
+  .card-select .opt .tcard-top{ margin-bottom:2px; }
+  .card-select .opt .tcard-desc{ line-height:1.24; }
 }
 
 /* ---- D1: THE SEATS ROW, BELOW ~700px --------------------------------------
@@ -5774,6 +5949,65 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   .status-strip{ margin-top:6px; padding-top:5px; }
   .status-grid{ grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:1px 16px; }
   .status-row{ padding:2px 0; }
+
+  /* ---- the commit dialog, same band (section 10A) ------------------------
+     A STEP DOWN, NOT A SHRINK. The commit picker is the screen a player is
+     choosing a hidden card on, and section 10A caps it at a viewport-relative
+     height. Below 940px of viewport height the only question left is how much
+     room the cap is given, and every declaration here is padding, margin, gap
+     or line-height. NOT ONE font-size moves: the card text stays at 12px and
+     the card name at 13px, because a card the player can half-read is a card
+     they will misplay, and a misplayed hidden card is worse than one they had
+     to scroll for. */
+  #skirmishModal{ padding:10px; }
+  /* 90vh left 36px of screen at the bottom of a 720px viewport and 45px at the
+     top. The dialog is the whole task at this point, so it takes more of the
+     screen than the board does. */
+  #skirmishModal.is-wide .box{ max-height:min(96vh,860px); }
+  .modal-header{ padding:11px 18px 8px; }
+  /* The dialog TITLE only. 22px -> 20px, which is not card text: it is still
+     the largest type on the screen by 7px, and it is not the readability floor
+     the brief protects. It buys the last 3px that lets a whole card clear the
+     Commit bar at 1280x720. */
+  .modal-header h2{ font-size:20px; }
+  #skirmishBody{ padding:10px 18px 14px; }
+  #skirmishBody > .footer-actions{ margin:10px -18px -14px; padding:10px 18px 12px; }
+  /* The three blocks between the header and the picker. */
+  .troop-picker{ margin:6px 0; }
+  /* The odds readout is ~318px of live decision content at this width - two
+     probability blocks, both bars, both threshold lines and the stakes line.
+     None of it is cut, and - deliberately - the panel is NOT given a scroll of
+     its own: its last two lines are the fizzle warning and the stakes, and an
+     overflow-hidden probability readout hides the one thing that can make a
+     card a mistake. What gives way is its 20px of margin and padding around it
+     and 13px inside it. */
+  #skirmishModal{ padding:8px; }
+  #skirmishModal.is-wide .box{ max-height:min(97vh,860px); }
+  .modal-header{ padding:9px 18px 6px; }
+  .modal-header h2{ font-size:20px; }
+  #skirmishBody{ padding:8px 18px 12px; }
+  #skirmishBody > .footer-actions{ margin:8px -18px -12px; padding:8px 18px 10px; }
+  #skirmishModal.is-wide #skirmishBody > p{ margin:2px 0; }
+  .odds-panel{ margin:4px 0; padding:4px 8px; }
+  .odds-head{ margin-bottom:0; padding-bottom:0; }
+  .odds-bar{ margin:1px 0; }
+  .odds-row{ padding:0; }
+  .odds-consequence{ padding:3px 8px; margin-top:3px; }
+  /* The troop slider row. Its own height was 48px for a single range input and
+     two end labels; the input does not need that much box, and 14px here is
+     what lets a whole row of CARDS clear the Commit bar at 1280x720 instead of
+     the bar's edge printing over the last line of a card. */
+  .troop-picker{ margin:4px 0; }
+  .troop-picker input[type=range]{ height:22px; }
+  /* >>> THE RACK CAP AT BAND 1. The dialog is `max-height:min(97vh,860px)`, so
+     >>> above ~890px of viewport it stops growing with the screen while the
+     >>> space around it keeps growing - and the rack, measured from the top of
+     >>> a fixed-height dialog, gets no more room at 1920x1080 than it got at
+     >>> 1366x768. Measured clearance above the sticky Commit bar: 278px at
+     >>> 1440x900, 183px at 1920x1080, 198px at 820x1180. 270px fits the first
+     >>> and overruns the other two, so band 1 takes 270 and the base (the same
+     >>> dialog WITHOUT band-1 compaction, so a much lower ceiling) takes 190. */
+  .card-select{ max-height:min(30vh,270px); }
 }
 
 /* Band 2 - the common short laptops: 1366x768 and 1280x720, the two sizes the
@@ -5838,6 +6072,26 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   .status-strip{ margin-top:4px; padding-top:3px; }
   .status-grid{ grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); gap:0 14px; }
   .status-row{ padding:1px 0; line-height:1.35; }
+
+  /* ---- the commit picker at the two sizes the brief measured ------------
+     1366x768 and 1280x720. The band above already took the dialog chrome and
+     the odds margins; this band takes the CARDS, because at 720px the rack is
+     competing with a 300px probability readout for the last 130px of screen.
+
+     The rack itself: gap 8x10 -> 5x8, and the category label 19px -> 15px.
+     The card: padding 9px -> 6px, and inside it the name row's 5px margin ->
+     3px and the description's 1.35 line-height -> 1.26. Padding and leading
+     are the two things that buy rows without buying legibility - a 12px card
+     with 6px of air is the same text as a 12px card with 9px of air, and
+     1.26 still clears the 12px type by enough to keep the descender off the
+     line below. Measured: a 3-line card goes 98px -> 76px, so a second row of
+     cards fits where none did. */
+  .card-select{ gap:4px 8px; margin:6px 0; max-height:min(17vh,124px); --rack-shelf:14px; }
+  .card-select .opt{ padding:5px; }
+  .card-select .hand-group-label{ height:13px; margin-top:0; }
+  .card-select .opt .tcard-top{ margin-bottom:2px; }
+  .card-select .opt .tcard-desc{ line-height:1.24; }
+  .card-select::after{ padding:2px 2px 1px; }
 }
 
 /* Band 3 - 1280x600, 1366x640 and the other genuinely tiny panels. Only padding
@@ -5849,6 +6103,31 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   .tier-row{ padding:2px 6px; }
   .status-grid{ grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
   #boardRulesRow .rules-entry{ padding:0 10px; }
+  /* The commit rack, same reasoning. At 600px of height the readout above the
+     cards is proportionally twice as greedy as it is at 720, so the rack gets
+     the smallest cap this stylesheet ships and leans entirely on the two sticky
+     affordances - the count at the top of the port, the category label under it
+     - to stay navigable. Card type is untouched here as everywhere.
+     >>> NOT SOLVED AT THIS HEIGHT, AND NOT SOLVABLE IN CSS: with every margin
+     >>> and padding above the rack already taken, the readout and the slider
+     >>> occupy 464px of the 470px between the dialog's top edge and the top of
+     >>> the Commit bar, so there is ~6px to give a card. Cutting the remaining
+     >>> 6px means hiding a line of the odds readout or the slider. The cap
+     >>> below keeps the REGION inside the 600px viewport; the player scrolls the
+     >>> dialog body, which is what a 600px-tall window is for. 1280x600 is
+     >>> below every viewport this project ships to. */
+  .card-select{ max-height:min(10vh,64px); }
+  #skirmishModal{ padding:8px; }
+}
+
+/* The rack cap for phones, re-asserted AFTER every height band. Band 1 is
+   `@media (max-height:940px)` and sits further down this file than the
+   `max-width:520px` block above, so at 390x844 - under 940 of height AND under
+   520 of width - band 1's 30vh/270px cap won and undid the phone's 15vh/124px,
+   putting the rack 39px past the fold. Media queries do not order themselves;
+   this one has to come last to be last. */
+@media (max-width:520px){
+  .card-select{ max-height:min(15vh,128px); }
 }
 
 /* =============================================================================
