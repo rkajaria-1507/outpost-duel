@@ -461,7 +461,7 @@ const RULES_HTML = `
         <li><span class="rules-step-title">Score</span> Higher total wins Influence equal to the margin, capped at your <b>Fury</b> rung&rsquo;s ceiling (or ${BLOOD_CAP} on Skirmish Fever, or under Blood). Tie = no Influence; troops still spent unless Blood was declared. Some cards fire regardless of winner.</li>
       </ol>
       <div class="rules-callout">
-        <strong>The streak bonus is the Fury ladder, not a flat one.</strong> Two wins in a row is no longer worth the same as four. The full ladder, the Catching Up valve and the Betrayal tokens are all on the <b>Fury &amp; Tokens</b> tab — that tab is owned by the feature that implements them, so it cannot drift out of date with the game.
+        <strong>The streak bonus is the Fury ladder, not a flat one.</strong> Two wins in a row is no longer worth the same as four. The full ladder and the Betrayal tokens are both on the <b>Fury &amp; Tokens</b> tab — that tab is owned by the feature that implements them, so it cannot drift out of date with the game.
       </div>
     </section>
 
@@ -1446,21 +1446,6 @@ function stakeReadoutHtml(){
   return '';
 }
 
-/* Where the fight is being fought, restated for the seat that did NOT declare.
-   Only BLOOD changes the numbers, so only BLOOD prints anything - but it has to
-   print it HERE, next to the odds bar, because the bar's own cap line comes out
-   of OD.Rules.projectSkirmish() (js/rules.js, which this engineer does not own)
-   and that projection knows about the Fury ladder and Skirmish Fever but not
-   about a stance declared five seconds ago. Without this sentence the panel
-   would say "Influence cap this Skirmish: 4" directly above a fight that pays
-   6, which is the kind of small lie this panel exists to eliminate. */
-function stanceCeilingNote(){
-  if(declaredStance() !== STANCE_BLOOD) return '';
-  return `<div style="font-size:12px;margin-top:4px;color:var(--accent-blood,#8c1d18)">`
-    + `<b>BLOOD was declared</b> \u2014 the ceiling is <b>${BLOOD_CAP}</b> for this fight whatever the Fury ladder says.`
-    + `</div>`;
-}
-
 function isFeverRound(){ return !!(state && state.currentEvent==='skirmish_fever'); }
 
 /* ============================== THE STAKES ==============================
@@ -1523,6 +1508,23 @@ function stanceCeiling(winnerCap, fever){
   return skirmishCap(winnerCap, fever ? BLOOD_CAP : 0, declaredStance() === STANCE_BLOOD ? BLOOD_CAP : 0);
 }
 
+/* >>> THE SINGLE CEILING, and the reason B2 could not be fixed by editing one
+   >>> number. Four places print the Influence ceiling for the fight on screen -
+   >>> the two odds panels, the "At stake" paragraph and (per seat) the stakes
+   >>> panel - and each used to derive it its own way. Any two of them could
+   >>> disagree, which is exactly what happened under BLOOD: cap 4 on the
+   >>> projection, cap 6 in the apology printed under it.
+   >>> So they all read THIS, fed the streaks that are in play. `winStreaks` is a
+   >>> list rather than two arguments because the odds panel has two PROJECTION
+   >>> specs and the "At stake" paragraph has two seats, and both mean the same
+   >>> thing: the ceiling is the higher of the two rungs, lifted by Fever, lifted
+   >>> again by a BLOOD declaration. */
+function fightCeiling(winStreaks, fever){
+  let top = 0;
+  (winStreaks || []).forEach(s=>{ top = Math.max(top, furyRungCap(s, fever)); });
+  return stanceCeiling(top, fever);
+}
+
 function gamblerLeader(p){ const l = getLeader(p); return !!(l && l.id==='gambler'); }
 
 /* A projectSide() spec for one side, built from everything that is PUBLIC
@@ -1551,9 +1553,47 @@ function tokenBonusOf(commit){
   return (commit && commit.betrayal && commit.betrayal.plus) ? 1 : 0;
 }
 
-function runOdds(mineSpec, theirsSpec, fever){
+/* The one call into OD.Rules, and the place the DECLARED CAP has to enter.
+
+   >>> B2. This used to be `projectSkirmish(mine, theirs, {fever})` and nothing
+   >>> else, so every projection on the commit screen was priced at the Fury
+   >>> ladder's cap and then corrected by a sentence printed NEXT to it. Under a
+   >>> BLOOD declaration that produced one panel quoting four different numbers
+   >>> for one ceiling - "Fury 2 (+1, cap 4)", "the ceiling is 6 for this fight",
+   >>> "Influence cap this Skirmish: 4", "capped at 6" - and, worse, an
+   >>> "Expected Influence" computed as if the declaration had not been made
+   >>> (4.0 where the true capped EV was ~5.9). That number is the one that tells
+   >>> a player whether their declaration paid.
+   >>>
+   >>> `projectSkirmish` has accepted `opts.cap` since it was written
+   >>> (js/rules.js:516), and `stanceCeiling()` above has always known the
+   >>> declaration. So the fix is to hand one to the other rather than to argue
+   >>> with the answer: the cap is computed ONCE, from the same helper the
+   >>> resolution pays under, and passed in.
+   >>>
+   >>> `myCap` / `theirCap` are re-stamped with it too. They are what the panel
+   >>> prints in "Fury 2 (+1, cap N)", and leaving them on the raw ladder rung is
+   >>> how "cap 4" survived on a fight that pays 6. For ORDINARY this is a
+   >>> no-op by construction: `stanceCeiling(max(rungA, rungB))` with no BLOOD and
+   >>> no Fever IS `max(furyCap(a), furyCap(b))`, which is the default
+   >>> `projectSkirmish` already computed - so nothing about the ordinary game
+   >>> moves, and no value anywhere is touched.
+
+   `cap` is optional so a caller with no seat, no declaration or a tree without
+   js/rules.js degrades to the previous behaviour rather than to a throw. */
+function runOdds(mineSpec, theirsSpec, fever, cap){
   if(typeof OD === 'undefined' || !OD.Rules || typeof OD.Rules.projectSkirmish !== 'function') return null;
-  try{ return OD.Rules.projectSkirmish(mineSpec, theirsSpec, {fever: !!fever}); }
+  try{
+    const mine = mineSpec || {};
+    const theirs = theirsSpec || {};
+    const ceiling = (typeof cap === 'number' && isFinite(cap))
+      ? Math.max(0, Math.round(cap))
+      : fightCeiling([mine.winStreak, theirs.winStreak], fever);
+    const p = OD.Rules.projectSkirmish(mine, theirs, {fever: !!fever, cap: ceiling});
+    if(!p) return p;
+    p.myCap = ceiling; p.theirCap = ceiling;
+    return p;
+  }
   catch(_){ return null; }
 }
 
@@ -1618,8 +1658,6 @@ function defenderOddsHtml(defIdx, troops, cardId, fever){
     + projectionLine(`${esc(state.players[aggIdx].name)} (committed ${ctx.aggCommit.troops})`, p.theirs,
         ` &mdash; their card is <b>hidden</b>, so this is their Troops alone`)
     + thresholdLine(p)
-    + catchingUpLine(p)
-    + stanceCeilingNote()
     + `<div style="font-size:12px;color:var(--muted);margin-top:4px">Expected Influence if you win: <b>${Math.round(p.ev*10)/10}</b> (capped at ${p.cap}).</div>`;
 }
 
@@ -1631,19 +1669,32 @@ function aggressorOddsHtml(aggIdx, troops, cardId, fever){
   const defIdx = 1 - aggIdx;
   const mine = projectionSpec(aggIdx, troops, cardId, true, garrisonBonusOf(aggIdx));
   const passive = projectionSpec(defIdx, 0, null, false, 0);
-  const mirror  = projectionSpec(defIdx, troops, null, false, 0);
+  /* >>> B6. The second reference point used to be priced at `troops` - the
+     >>> AGGRESSOR's own commitment - and labelled "if <them> mirrors you
+     >>> (8 Troops)". So with 5 Troops in hand the panel described a fight the
+     >>> defender cannot take part in: they cannot commit 8, and the bar was
+     >>> drawn for a scenario outside the rules. It is now bounded by their real
+     >>> pool, which the decision modal has already told this seat anyway
+     >>> ("Defender has N Troops"), and the label says which of the two numbers
+     >>> it used. When they can match, nothing changes. */
+  const defPool = Math.max(0, state.players[defIdx].troops|0);
+  const want = Math.max(0, troops|0);
+  const mirrorTroops = Math.min(want, defPool);
+  const mirror  = projectionSpec(defIdx, mirrorTroops, null, false, 0);
   const a = runOdds(mine, passive, fever);
   const b = runOdds(mine, mirror, fever);
   if(!a || !b) return '';
+  const mirrorHow = (mirrorTroops === want)
+    ? `matches your ${want} Troop${want === 1 ? '' : 's'}`
+    : `matches you as far as they can &mdash; all <b>${mirrorTroops}</b> Troop${mirrorTroops === 1 ? '' : 's'} they hold, not your ${want}`;
   return `<div style="font-size:12px;color:var(--muted);margin-bottom:2px">`
       + `You commit first, so you cannot know this yet. Two honest reference points:`
     + `</div>`
-    + `<div style="margin-top:6px"><b style="font-size:12px">vs a passive defender (they hold all ${state.players[defIdx].troops} Troops back)</b></div>`
+    + `<div style="margin-top:6px"><b style="font-size:12px">vs a passive defender (they hold all ${defPool} Troops back)</b></div>`
     + oddsBar(a) + thresholdLine(a)
-    + `<div style="margin-top:8px"><b style="font-size:12px">if ${esc(state.players[defIdx].name)} mirrors you (${troops} Troop${troops === 1 ? '' : 's'}, no card)</b></div>`
+    + `<div style="margin-top:8px"><b style="font-size:12px">if ${esc(state.players[defIdx].name)} ${mirrorHow}, no card</b></div>`
     + oddsBar(b) + thresholdLine(b)
     + projectionLine('Your projection', a.mine, furyNote(a.mine.winStreak, a.myCap))
-    + stanceCeilingNote()
     + `<div style="font-size:12px;color:var(--muted);margin-top:4px">Influence cap this Skirmish: <b>${a.cap}</b>. Expected Influence vs a passive defender: <b>${Math.round(a.ev*10)/10}</b>.</div>`;
 }
 
@@ -1651,14 +1702,17 @@ function furyNote(streak, cap){
   const f = furyRung(streak);
   return ` &mdash; Fury ${f.streak} (+${f.bonus}, cap ${cap})`;
 }
-function catchingUpLine(p){
-  const cu = p.catchingUp;
-  if(!cu || !cu.applied) return '';
-  const who = (cu.leaderIdx===0) ? 'the aggressor' : 'you';
-  return `<div style="font-size:12px;margin-top:2px"><b style="color:var(--accent-gold-ink,#8a5a10)">`
-    + `CATCHING UP:</b> ${who === 'you' ? 'you are' : 'they are'} on a ${cu.streak}-win streak, so the other side adds +${cu.applied}.`
-    + `</div>`;
-}
+/* >>> B4: catchingUpLine() IS GONE. It printed "CATCHING UP: you are on a
+   >>> 3-win streak, so the other side adds +2" off `p.catchingUp`, a key
+   >>> `projectSkirmish` stopped returning when the valve was deleted (two tests
+   >>> pin that: `!('catchingUp' in p)`). So the guard below was what made it
+   >>> safe - and unreachable code that names a mechanic the game does not have
+   >>> is exactly the defect D6 was written to remove from the commit panel. The
+   >>> same reasoning retires the matching block in resolveSkirmish(): it reads
+   >>> `OD.Rules.catchingUp`, which no longer exists, so `CU` is always null and
+   >>> the totals it would have adjusted are never touched. That one is left in
+   >>> place rather than deleted, because it sits in the scoring path and an inert
+   >>> branch there is worth less than a reviewer having to re-derive it. */
 
 /* Card fizzle warnings. Both are discovered LATE in the live game - the
    player finds out at cardModifier() that their Overrun was worth +0
@@ -1698,7 +1752,7 @@ function fizzleWarning(playerIdx, cardId){
 function consequenceHtml(playerIdx, troops, cardId){
   const p = state.players[playerIdx];
   const fever = isFeverRound();
-  const cap = stanceCeiling(Math.max(furyRungCap(p.winStreak, fever), furyRungCap(state.players[1-playerIdx].winStreak, fever)), fever);
+  const cap = fightCeiling([p.winStreak, state.players[1-playerIdx].winStreak], fever);
   const decl = (typeof OD !== 'undefined' && OD.Wagers && typeof OD.Wagers.commitDeclaration === 'function')
     ? OD.Wagers.commitDeclaration() : null;
   const token = (decl && decl.betrayal && decl.betrayal.plus) ? ' A <b>+1 token</b> is declared and is already in the projection above.' : '';
@@ -1801,6 +1855,42 @@ function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, 
       b.tabIndex = on ? 0 : -1;
     });
   };
+  /* >>> B3. The keyboard half of a radiogroup: Enter and Space CONFIRM, they do
+     >>> not merely re-select. This handler used to `preventDefault()` and then
+     >>> call `selectStance(btn)` on the button that was already selected - which
+     >>> is the standard "arrow to choose, Space to confirm" pattern - and because
+     >>> it swallowed the default it also killed the click the browser would have
+     >>> synthesised for Space on a <button>. So a keyboard-only player could Tab
+     >>> to the group, walk it with the arrows, watch `aria-checked` follow
+     >>> correctly, and then be STUCK: nothing else in the dialog is focusable,
+     >>> and no key did anything. The only escape was the mouse.
+     >>>
+     >>> So activation goes through `decideOnce` - the SAME latched path the click
+     >>> uses, with the same three-way stance it derives from `data-stake`. The
+     >>> latch is not weakened by this: `decideOnce` still refuses a second
+     >>> declaration for the round (`decided`, `state.roundRec.decision` and the
+     >>> `state.stakes` aggressor seat), so a key repeat, an Enter that lands
+     >>> while the dialog is closing, or a click arriving after the key all
+     >>> resolve to one declaration. That is the property the previous pass fixed
+     >>> the double-click for, and it is the reason this routes through the
+     >>> function rather than calling `onDecision` directly.
+     >>>
+     >>> MELTDOWN gets the same refusal the click gets: a disabled HOLD BACK is
+     >>> not in `stakeBtns()` and so cannot be reached by an arrow either, but
+     >>> the guard is repeated here because `activateStance` is also reachable by
+     >>> a stale focus that survived the disable. */
+  const activateStance = (btn)=>{
+    if(!btn || btn.disabled) return false;
+    const s = btn.dataset ? btn.dataset.stake : '';
+    if(s === STANCE_HOLD){
+      if(state && state.meltdown) return false;
+      decideOnce(STANCE_HOLD, false);
+      return true;
+    }
+    if(s === STANCE_BLOOD){ decideOnce(STANCE_BLOOD, false); return true; }
+    decideOnce(STANCE_ORDINARY, false);
+    return true;
+  };
   const stakeGroup = document.getElementById('stakeChoices');
   if(stakeGroup){
     stakeGroup.addEventListener('keydown', (e)=>{
@@ -1811,12 +1901,13 @@ function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, 
       const i = list.indexOf(btn);
       if(i < 0) return;
       let next = -1;
+      let confirming = false;
       const key = e.key;
       if(key==='ArrowRight' || key==='ArrowDown') next = (i + 1) % list.length;
       else if(key==='ArrowLeft'  || key==='ArrowUp')   next = (i - 1 + list.length) % list.length;
       else if(key==='Home') next = 0;
       else if(key==='End')  next = list.length - 1;
-      else if(key==='Enter' || key===' ' || key==='Spacebar') next = i;
+      else if(key==='Enter' || key===' ' || key==='Spacebar'){ next = i; confirming = true; }
       else return;
       if(next < 0 || !list[next]) return;
       /* Space would scroll the dialog; Enter would submit the nearest form. */
@@ -1824,6 +1915,9 @@ function showSkirmishDecisionModal(aggressorName, defenderName, defenderTroops, 
       e.stopPropagation();
       selectStance(list[next]);
       if(typeof list[next].focus === 'function') list[next].focus();
+      /* And now the declaration actually happens. AFTER the selection and the
+         focus move, so what the panel reads back is the stance that was chosen. */
+      if(confirming) activateStance(list[next]);
     });
   }
   /* >>> CHAOS (feature-chaos.js) - MELTDOWN makes holding the Garrison an
@@ -2087,6 +2181,9 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
      >>> "no seat", not "detached node", and hunting a re-render for it wastes a
      >>> day. Warned once per session so the next reader is told outright. */
   function refreshOdds(){
+    /* The feature re-renders its own blocks when a token changes, so the cap
+       parity pass has to ride along with every repaint rather than run once. */
+    alignWagerFuryCaps();
     const slot = document.getElementById('oddsSlot');
     if(!slot) return;
     if(!(playerIdx >= 0)){
@@ -2117,8 +2214,23 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
   }
 
   document.querySelectorAll('#cardSelect .opt').forEach(el=>{
+    /* >>> B5. The second half of a double-click is not a second DECISION. This
+     >>> is a toggle, so two activations of one card netted to zero: a
+     >>> double-click left `aria-pressed="false"` on every option, `setCard(null)`
+     >>> behind it, and the player committed with no card and nothing on screen
+     >>> to say why. `e.detail` is the browser's own click count - 1 for a single
+     >>> click, 2 for the second click of a double-click, 0 for a key-activation
+     >>> - so ignoring `detail >= 2` makes a double activation idempotent with no
+     >>> clock, no timer and no latch to get stuck. A deliberate second click
+     >>> (detail 1) still deselects, which is how you take the card back off, and
+     >>> `e.repeat` stops a HELD key from toggling the card on and off while it is
+     >>> held down. */
     const toggle = (e)=>{
-      if(e){ e.preventDefault(); e.stopPropagation(); }
+      if(e){
+        if(e.detail >= 2) return;   /* the tail of a double-click: one decision, already made */
+        if(e.repeat) return;        /* key auto-repeat is one activation, not a stream of them */
+        e.preventDefault(); e.stopPropagation();
+      }
       const cardId = el.dataset.card;
       sfx.click();
       setCard(selectedCardId===cardId ? null : cardId);
@@ -2170,6 +2282,7 @@ function showCommitModal(playerName, maxTroops, hand, onSubmit, playerIdx=-1){
          >>> cannot see the chip flip has to be told their commitment moved. */
       onChange: (decl)=>{ refreshOdds(); srWagerSentence(decl); },
     });
+    alignWagerFuryCaps();
     srWrite([srWagerLockSentence()]);
     /* >>> D2: upgrade the five chips the feature just appended, from here,
        because js/feature-wagers.js is not this file's to edit. One delegated
@@ -3000,8 +3113,9 @@ function promptAggressorDecision(aggressorIdx){
      `requestCommit` to the other seat in the same breath. Without the paint the
      guest's commit modal would open against a snapshot that still says
      ORDINARY, and it would price a BLOOD fight as an ordinary one. */
-function declareStance(aggressorIdx, stance){
+function declareStance(aggressorIdx, stance, opts){
   const s = normaliseStance(stance);
+  const announce = !(opts && opts.announce === false);
   if(state) state.stakes = {aggressorIdx:(aggressorIdx|0), stance:s};
   const who = state && state.players[aggressorIdx] ? state.players[aggressorIdx].name : 'The aggressor';
   if(s === STANCE_BLOOD){
@@ -3019,7 +3133,7 @@ function declareStance(aggressorIdx, stance){
      >>> modal reads `state` directly; an online declaration is always a human's,
      >>> and that is the only case that needs the broadcast. */
   if(online.enabled) renderAll();
-  srStanceSentence(s);
+  if(announce) srStanceSentence(s);
 }
 
 /* The declared round with no Skirmish in it: +HOLD_BACK_INFLUENCE to the
@@ -3045,7 +3159,24 @@ function declareStance(aggressorIdx, stance){
    >>> paid for; being unable to fight is not. */
 function holdBackRound(aggressorIdx){
   const who = state.players[aggressorIdx];
-  declareStance(aggressorIdx, STANCE_HOLD);
+  /* >>> B7. THE ANNOUNCEMENT WAS BORN AND BURIED IN THE SAME TASK.
+     `declareStance` ends in `srStanceSentence`, and this function then calls
+     `endRound()` synchronously - whose `renderAll()` ends in `srWrite(srDeltas())`.
+     Both are `textContent =` writes to the same `aria-live` region in the same
+     task, so the live region only ever holds the SECOND one: a MutationObserver
+     on addedNodes/removedNodes measured the HOLD BACK text going in and coming
+     out at the same +118ms, and no screen reader announced either. A player who
+     holds back was never told they had declared it - the one irreversible,
+     public, in-round decision in the game.
+     BLOOD was never affected, because it does not end the round here: it is
+     announced when the DEFENDER's commit modal opens, a task later.
+     So the announcement moves to AFTER the round closes. `endRound()` is the
+     last thing that writes #srLive on this path (the debrief it opens is a
+     showModal, which does not render), so the sentence is still there for the
+     next paint - which is exactly what a polite live region needs. The write
+     contract is untouched: still `srWrite`, still textContent assignment, still
+     one delta, still deduped against the last thing said. */
+  declareStance(aggressorIdx, STANCE_HOLD, {announce:false});
   who.influence += HOLD_BACK_INFLUENCE;
   popupGain(aggressorIdx, `+${HOLD_BACK_INFLUENCE} Influence`, true);
   if(state.roundRec){
@@ -3055,6 +3186,7 @@ function holdBackRound(aggressorIdx){
   log(`${esc(who.name)} <b>declares HOLD BACK</b> \u2014 no Skirmish, <b>+${HOLD_BACK_INFLUENCE} Influence</b> banked, every Troop kept, and Pressure rises by 1 rather than 2.`);
   OD.Sound.play('turn.pass');
   endRound();
+  srStanceSentence(STANCE_HOLD);
 }
 
 function botWantsToAttack(aggressor, defender){
@@ -5329,6 +5461,52 @@ function paintWagerChips(root){
     chip.setAttribute('aria-disabled', chip.classList.contains('disabled') ? 'true' : 'false');
     const label = wagerChipLabel(chip);
     if(label) chip.setAttribute('aria-label', label);
+  });
+}
+
+/* >>> B2, THE FOURTH CAP FIGURE - AND THE ONE THIS FILE DOES NOT OWN.
+   `OD.Wagers.mountCommit` appends a "Fury ladder" block to the commit modal with
+   one row per seat: "Player 1 - Fury 2 (+1 to total, Influence cap 4)". The cap
+   there is `furyCap(winStreak, fever)` computed inside js/feature-wagers.js,
+   which knows the ladder and the event and has never heard of a stance. Under a
+   BLOOD declaration that block therefore printed "Influence cap 4" in the middle
+   of a fight that pays 6 - the fourth disagreeing figure, and the one B2's
+   acceptance test ("every cap figure on the panel must be the same number")
+   fails on while js/feature-wagers.js is out of this engineer's hands.
+
+   So the integrator corrects it, the same way it already re-labels the feature's
+   chips for assistive tech (installWagerChipA11y, two functions up): from here,
+   after the mount, on the mounted DOM. Three properties make it safe rather than
+   clever:
+     - it only ever RAISES a printed cap to `fightCeiling(...)`, and only when
+       that ceiling is above the rung, so it can never make the panel contradict
+       the engine in the other direction;
+     - it is a no-op under ORDINARY and under Skirmish Fever, where the feature's
+       `furyCap(streak, fever)` is already the ceiling - which is the case the
+       overwhelming majority of Skirmishes are, so the common path touches
+       nothing;
+     - it matches the feature's own wording ("Influence cap <digits>") and gives
+       up silently if that wording ever changes, so a reworded feature degrades
+       to the old text rather than to a broken panel.
+   The source-level fix belongs in the feature: a `capFor(winStreak)` hook it
+   asks the engine for. This is the integrator's half of that, and it is marked
+   as such so the next reader does not mistake it for the rule. */
+function alignWagerFuryCaps(){
+  const block = document.getElementById('wagersFuryBlock');
+  if(!block) return;
+  const fever = isFeverRound();
+  const ceiling = fightCeiling(state.players.map(p=>p.winStreak), fever);
+  if(!(ceiling > 0)) return;
+  block.querySelectorAll('.wagers-dim').forEach(span=>{
+    const m = /Influence cap (\d+)/.exec(span.textContent || '');
+    if(!m) return;
+    const printed = parseInt(m[1], 10);
+    if(!isFinite(printed) || printed >= ceiling) return;
+    /* A real em dash, not the entity: this is a textContent assignment, so
+       "&mdash;" would print as the six characters. And the qualifier goes
+       INSIDE the feature's own parentheses, so the row still reads as one
+       clause: "(+1 to total, Influence cap 6 - BLOOD)". */
+    span.textContent = span.textContent.replace(m[0], `Influence cap ${ceiling} \u2014 BLOOD`);
   });
 }
 

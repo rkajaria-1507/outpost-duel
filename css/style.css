@@ -5652,6 +5652,81 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   .tcard{ width:140px; }
 }
 
+/* (a2) THE SAME BAND, ON A SHORT SCREEN: THE RAIL GOES UNDER THE BOARD.
+   -----------------------------------------------------------------------------
+   WHY. The @media (max-width:1180px) block above drops #board to 2-up, because
+   with BOTH rails still standing the centre column is 492px at 1024 and a 3-up
+   tile would be 155px wide - which is what shreds "Market" into "Mark/et". The
+   cost of that trade was never measured against the other axis: 2-up makes the
+   site grid FOUR ROWS, and four rows of tiles is 647px of board on a 768px
+   screen.
+
+   MEASURED, on a pinned fresh game (startGame(), Round 1, the state the repo's
+   own audit harness measures), before -> after at each size:
+
+     1024x768   centre column      492px  ->  802px
+                 #board            462 wide, y 260..907 (4 rows, 647px)
+                                   772 wide, y 232..674 (3 rows, 442px)
+                 tile              228 x 163  ->  253 x 163
+                 #boardRulesRow    72px (two lines)  ->  44px (one line)
+                 tiles below the fold
+                                   2: Bazaar and Shrine, both cut at the fold
+                                      (Bazaar's Basic row y 796..843, +75px over;
+                                       both Advanced tiers +134px over)
+                                   0
+     1152x864   centre column      610px  ->  920px
+                 #board            y 276..1021 (4 rows)  ->  y 269..811 (3 rows)
+                 tiles below the fold
+                                   2: Bazaar and Shrine  ->  0
+     1366x768 / 1280x720 / 1440x900 / 1920x1080   unchanged, board already 3-up
+     820x1180 / 390x844           unchanged (below this band's width range)
+
+   So the regression was two tiles, at two sizes, and it was entirely a
+   four-rows-where-three-will-do problem: at 1366x768 and 1280x720 the same
+   board fits with 114px and 30px to spare, and the only thing that changed
+   between those sizes and 1152/1024 is the 1180 breakpoint.
+
+   THE REST OF THE STORY, because the 2-up fallback was not free on the way in
+   either. A 492px centre column is paid for twice - once in tile width, which
+   is what forced 2-up, and once in the height of the chrome ABOVE the board,
+   which is what the 2-up board then cannot fit under:
+     - `#boardRulesRow` carries #odBoardHeader - the heat chip, the phase chip
+       and the Rift reveal, injected by game.js - on a line of its own. In 492px
+       it wraps and the header goes from its 44px floor to 72px, and
+       `#eventLine` beside it wraps to two lines (36px against 18px).
+     - `.status-strip`, the board-state strip inside the scoreboard panel, is
+       `repeat(auto-fit,minmax(210px,1fr))`. In a 462px panel that is 2 columns,
+       so four facts become two rows of two and the strip measures 187px against
+       92px in an 800px panel. (Measured on a Round-4 board, which is the only
+       state where the strip has anything in it: 1024x768, 460px panel -> 187px.)
+
+   THE FIX IS THE ONE THE <=1000px BLOCK ALREADY MAKES, and it is a move rather
+   than a shrink: drop the third rail to a full-width row under the board and
+   give the centre column the whole right of the layout. Nothing about the rails
+   changes - the log and the hand are the same two panels, in the same order -
+   and the tile gets WIDER than it had (253px against 228px), which is the only
+   way 3-up is honest at this width. The cost is honest too and is the cost of
+   any of them: documentElement.scrollHeight at 1024x768 goes from 970 to 1567,
+   because the log and the hand now sit below the board instead of beside it.
+   The board - the thing a player reads every round - is above the fold at every
+   width from 1024 up, which is the trade this block is making.
+
+   GATED ON max-height:940px so it costs a tall window nothing. At 1024x1080
+   both rails stand and the board stays 2-up exactly as before; the height is
+   the axis that decides whether the board fits on a screen at all, and this is
+   a screen-height decision wearing a width range. */
+@media (min-width:1001px) and (max-width:1180px) and (max-height:940px){
+  .game-layout{ grid-template-columns:minmax(0,190px) minmax(0,1fr); gap:10px; }
+  /* Full width now, so the hand gets its whole row back - the same three
+     declarations the <=1000px block makes, for the same reason. */
+  .game-col-right{ grid-column:1 / -1; }
+  #hand{ gap:10px; }
+  .tcard{ width:150px; }
+  /* 3-up, restored: the centre column is wide enough to carry it, and 3x3 is
+     what makes the grid a square board and three rows instead of four. */
+  #board{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+}
+
 /* THE DOUBLE GAP, removed first, because it is free and it is everywhere.
    `.card-panel` carries `margin-bottom:14px` and `.game-col-center` is a flex
    column with `gap`, so the two centre panels were being separated by 14px plus
@@ -6535,8 +6610,9 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   color:var(--ink);
 }
 /* BLOOD inverts to the dark fill when chosen. This is the loudest state in the
-   whole control and it is meant to be: cap 6 instead of 4, half the army
-   committed, nothing back. -ink on -fill is the documented pairing (5.59:1). */
+   whole control and it is meant to be: cap 6 whatever the ladder says, at least
+   half the army committed, and the committed Troops come back to the LOSER too.
+   -ink on -fill is the documented pairing (5.59:1). */
 .stake-blood[aria-checked="true"]{
   background:var(--accent-blood);
   color:var(--accent-blood-ink);
@@ -6553,9 +6629,27 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   text-transform:none; line-height:1.25;
   opacity:.92;
 }
-.stake-hold::after{ content:'+1 Influence \00B7 every Troop stays yours'; }
-.stake-ordinary::after{ content:'Cap 4 \00B7 standard terms'; }
-.stake-blood::after{ content:'Cap 6 \00B7 half your army \00B7 nothing back'; }
+/* >>> THE THREE GLOSSES ARE THE BARGAIN, AND ALL THREE WERE WRONG. Every one
+   >>> of them has to be true for EVERY board state, because a stance button is
+   >>> read once, in the two seconds before the dice, and read off the button
+   >>> rather than off the panel above it.
+     BLOOD said "nothing back" - the exact inverse of the rule. The engine pays
+       the LOSER their committed Troops back (game.js consequenceHtml /
+       stakeReadoutHtml, and `holdBackRound`'s twin in the resolution), so the
+       gloss named a cost that does not exist and the button read as a trap. The
+       playtest consequence was that Blood was skipped on sight.
+     ORDINARY said "Cap 4", which is only true on a cold streak: the ceiling is
+       the WINNER's Fury rung (4/5/6) and Skirmish Fever lifts all of them to 6.
+       A hard-coded 4 is a lie on exactly the fights where the cap decides them.
+     HOLD was accurate but sold only half the bargain: +1 Pressure instead of +2
+       (feature-chaos.js `gain = quiet ? 2 : 1`, and roundRec.skirmish=true is
+       what makes a DECLARED hold back the cheap kind) is the whole reason to
+       hold, and it was the part left off.
+   #stakesPanel above carries all of this in real DOM text for assistive tech;
+   these are the visual parity of it, so they say the same thing. */
+.stake-hold::after{ content:'+1 Influence \00B7 Pressure +1 not +2 \00B7 Troops stay yours'; }
+.stake-ordinary::after{ content:'Cap = the winner\2019s Fury rung \00B7 standard terms'; }
+.stake-blood::after{ content:'Cap 6 \00B7 at least half your army \00B7 committed Troops stay yours'; }
 /* On the one stance that inverts to a dark fill, the gloss has to follow the
    fill rather than the other way round (the s.1 pairing rule). */
 .stake-blood[aria-checked="true"]::after{ color:var(--accent-blood-ink); }
@@ -6667,7 +6761,12 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
      gloss becomes a right-hand aside instead of a second line. */
   .stake-btn::after{ margin-top:0; margin-left:auto; text-align:right; }
   .stake-btn[aria-checked="true"]::before{ order:-1; }
-  .stake-blood::after{ content:'Cap 6 \00B7 half your army'; }
+  /* The stacked variant is a right-hand ASIDE now, so it is allowed to be the
+     short form - but it may not be a DIFFERENT claim. It used to read "Cap 6 ·
+     half your army", which dropped the "nothing back" (so it was accidentally
+     true) and now states the same bargain as the wide copy above, one clause
+     shorter: the cap, the floor, and the Troops. */
+  .stake-blood::after{ content:'Cap 6 \00B7 half your army \00B7 Troops stay yours'; }
 }
 /* ---- the short-laptop bands: the control is three short words wide --------- */
 @media (max-height:760px){
