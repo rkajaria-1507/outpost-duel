@@ -6610,8 +6610,8 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
   color:var(--ink);
 }
 /* BLOOD inverts to the dark fill when chosen. This is the loudest state in the
-   whole control and it is meant to be: cap 6 whatever the ladder says, at least
-   half the army committed, and the committed Troops come back to the LOSER too.
+   whole control and it is meant to be: a fixed ceiling whatever the ladder says,
+   half the army committed, and 3 Influence forfeited on a loss.
    -ink on -fill is the documented pairing (5.59:1). */
 .stake-blood[aria-checked="true"]{
   background:var(--accent-blood);
@@ -6649,7 +6649,7 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
    these are the visual parity of it, so they say the same thing. */
 .stake-hold::after{ content:'+1 Influence \00B7 Pressure +1 not +2 \00B7 Troops stay yours'; }
 .stake-ordinary::after{ content:'Cap = the winner\2019s Fury rung \00B7 standard terms'; }
-.stake-blood::after{ content:'Cap 6 \00B7 at least half your army \00B7 committed Troops stay yours'; }
+.stake-blood::after{ content:'Cap 5 \00B7 at least half your army \00B7 3 Influence forfeited if you lose'; }
 /* On the one stance that inverts to a dark fill, the gloss has to follow the
    fill rather than the other way round (the s.1 pairing rule). */
 .stake-blood[aria-checked="true"]::after{ color:var(--accent-blood-ink); }
@@ -6766,7 +6766,7 @@ html, #log, #skirmishBody, #hand, #intrigueHand, .rules-tabs, .rules-panels{
      half your army", which dropped the "nothing back" (so it was accidentally
      true) and now states the same bargain as the wide copy above, one clause
      shorter: the cap, the floor, and the Troops. */
-  .stake-blood::after{ content:'Cap 6 \00B7 half your army \00B7 Troops stay yours'; }
+  .stake-blood::after{ content:'Cap 5 \00B7 at least half your army \00B7 3 Influence forfeited if you lose'; }
 }
 /* ---- the short-laptop bands: the control is three short words wide --------- */
 @media (max-height:760px){
