@@ -93,7 +93,7 @@ function groupHand(hand){
      it deliberately does NOT reward hoarding - a player who banks Credits never
      sees the Market clause fire.
    * ARMY (Garrison) pays for Troops you already hold, and it is the only tile
-     that does. That is the tile that makes HOLDING BACK worth something: the
+     that does. That is the tile that makes HOLD BACK worth something: the
      army you did not spend keeps paying you standing, so spending it in a
      Skirmish costs you next round's Income. Without it, attacking was strictly
      free and the Hold Back button was dead.
@@ -110,16 +110,59 @@ function groupHand(hand){
    backwards. Keying the clauses to POVERTY instead removes the passive income
    and the ladder has somewhere to go again.
 
+   >>> AND WHAT THE MEASUREMENT TAUGHT THE POVERTY CLAUSES, TWICE (D2).
+   The brief that asked for this change asserted they "almost never fire" and
+   returned 0.23-0.47 Influence a pick. The FIRST half of that is wrong and was
+   checked before anything was edited: the 0.23-0.47 figure is Influence PER
+   PICK, which is the fire rate times 1, so it describes a clause that fires on
+   a quarter to a half of the picks it is printed on. Measured over 300 games
+   (4,650 clause-bearing picks, three difficulties):
+
+       Market 26.9% of its picks   (and the only one that FADES: 35.8% in R2,
+                                    27.2% in R6)
+       Quarry 51.0%
+       Foundry 41.5%
+       Bazaar  47.1%
+
+   So none of them was decoration, and none could honestly be deleted. What WAS
+   true is that they were four different rules wearing one name - "if you have
+   no X" for three of them and "if you cannot afford the trade" for the fourth -
+   with a 24-point spread in fire rate and a 2x spread in weight (Market 2.1%
+   of the score, Quarry 5.0%). A family of tiles that pays by four unrelated
+   rules is a family nobody can plan around, and the weakest member of it is
+   the most-drafted of the four (14.3% of every pick), so it is the one a
+   player meets most often and learns least from.
+
+   The fix is therefore NOT a rarer condition - a rarer condition is the wrong
+   direction, and the review's own line is the test: "a tile that pays nothing
+   in the common case is worse than one that pays a little". It is ONE rule for
+   all three: the clause now compares the pool to the OTHER PLAYER's pool, so
+   what it rewards is SPENDING rather than being unlucky. Measured candidate
+   rates for that test, same 300 games:
+
+       Market  (fewer Credits than your opponent)   60.9% of Advanced picks,
+                                                      45.3% of Basic
+       Quarry  (fewer Troops than your opponent)     57.7% / 55.2%
+       Foundry (fewer Ore than your opponent)        56.7% / 44.7%
+
+   which lands the three at 54-57% and, critically, still false roughly half
+   the time and still false LATE: it is a comparison, so it is false whenever
+   you are the richer of the two, which is a thing a player chooses. It also
+   keeps the direction that the FULL-pool version lost - banking Credits makes
+   you ineligible, so hoarding pays nothing - and it gives the player a real
+   two-pick plan (spend at the Outpost or the Bazaar, then take the Market)
+   instead of a lottery on whether a pool happened to be empty.
+
    The Advanced PRICES are unchanged on purpose: they are the numbers
    test/sites.test.js pins and the numbers js/feature-chaos.js prices the Rift's
    Toll and Open Hands mutations against. Only the yields moved. */
 const LOCATIONS = [
   {id:'market',   name:'Market',
-    basic:{label:'+2 Credits, +1 Influence if you have no Credits', cost:{}},
-    advanced:{label:'+4 Credits, +1 Influence if you have no Credits', cost:{ore:1}, note:'pay 1 Ore'}},
+    basic:{label:'+2 Credits, +1 Influence if your opponent is 3+ Credits ahead of you', cost:{}},
+    advanced:{label:'+4 Credits, +1 Influence if your opponent is 3+ Credits ahead of you', cost:{ore:1}, note:'pay 1 Ore'}},
   {id:'quarry',   name:'Quarry',
-    basic:{label:'+2 Ore, +1 Troop, +1 Influence if you have no Troops', cost:{}},
-    advanced:{label:'+3 Ore, +2 Troops, +1 Influence if you have no Troops', cost:{credits:1}, note:'pay 1 Credit'}},
+    basic:{label:'+2 Ore, +1 Troop, +1 Influence if your opponent has 3+ more Troops', cost:{}},
+    advanced:{label:'+3 Ore, +2 Troops, +1 Influence if your opponent has 3+ more Troops', cost:{credits:1}, note:'pay 1 Credit'}},
   {id:'garrison', name:'Garrison',
     basic:{label:'+2 Troops, +1 Influence per Troop you hold (max 1)', cost:{}},
     advanced:{label:'+4 Troops, +1 per Troop you hold (max 2), +1 combat', cost:{ore:1}, note:'pay 1 Ore'}},
@@ -130,8 +173,8 @@ const LOCATIONS = [
     basic:{label:'Draw 1 Tactic card — hand full? +1 Influence instead', cost:{}},
     advanced:{label:'Draw 3 Tactic cards — hand full? +1 Influence instead', cost:{credits:1}, note:'pay 1 Credit'}},
   {id:'foundry',  name:'Foundry',
-    basic:{label:'+1 Credit, +1 Ore, +1 Influence if you have no Ore', cost:{}},
-    advanced:{label:'+3 Credits, +2 Ore, +1 Influence if you have no Ore', cost:{troops:1}, note:'pay 1 Troop'}},
+    basic:{label:'+1 Credit, +1 Ore, +1 Influence if your opponent is 3+ Ore ahead of you', cost:{}},
+    advanced:{label:'+3 Credits, +2 Ore, +1 Influence if your opponent is 3+ Ore ahead of you', cost:{troops:1}, note:'pay 1 Troop'}},
   {id:'bazaar',   name:'Bazaar',
     basic:{label:'Trade 2 Ore for 2 Credits', cost:{ore:2}, note:'no 2 Ore? +1 Credit, +1 Influence', consolation:true},
     advanced:{label:'Trade 2 Ore for 4 Credits', cost:{ore:2}, note:'no 2 Ore? +2 Credits, +1 Influence', consolation:true}},
@@ -140,11 +183,45 @@ const LOCATIONS = [
     advanced:{label:'Pay 2 Credits + 1 Ore → +3 Influence', cost:{credits:2, ore:1}, note:'can’t pay? +1', consolation:true}},
 ];
 
-/* POVERTY: the clause the Market / Quarry / Foundry / Bazaar key off. 1
-   Influence when the pool is empty, nothing otherwise. Deliberately not a
-   function of how MUCH you hold - see the block comment above. */
-function povertyInfluence(held){
-  return (typeof held === 'number' && isFinite(held) && held <= 0) ? 1 : 0;
+/* POVERTY: the clause Market / Quarry / Foundry key off, and the ONE rule the
+   whole family shares - 1 Influence when your opponent is that far AHEAD of
+   you in the pool this site works in. Both pools are read BEFORE the yield is
+   paid (so the Market pays standing for the purse it is about to refill, not
+   the one it has just filled).
+
+   >>> WHY A GAP AND NOT "less than" (D2, measured). The first attempt at this
+   re-key was a bare comparison - "your pool is smaller than theirs" - and it
+   measured 76.6% / 84.3% / 68.3% on Market / Quarry / Foundry. That is not a
+   clause, it is a second base yield: with two players and a small symmetric
+   pool, one of the two is nearly always poorer, so a 1-unit gap is nearly
+   always true and the printed condition is true almost every time you read it.
+   A gap of 3 is measured (same 300 games, Advanced tier, the tier that is 75%
+   of every pick): 55.9% at the Market, 61.4% at the Quarry, 37.4% at the
+   Foundry. Three is also the number that means something against these caps -
+   Ore and Troops cap at 6, so "three more" is "half again your army" - and it
+   is FALSE whenever you are level or ahead, which is a thing a player decides.
+
+   Deliberately not a function of how MUCH you hold - see the block comment
+   above - and deliberately about the other player, which is what makes it a
+   decision (spend at the Outpost or the Bazaar, then take the Market) instead
+   of a coincidence. Banking a pool makes you ineligible, so hoarding pays
+   nothing; that direction is the one the full-pool version got wrong. */
+const POVERTY_GAP = 3;
+function povertyInfluence(mine, theirs){
+  const a = (typeof mine === 'number' && isFinite(mine)) ? mine : 0;
+  const b = (typeof theirs === 'number' && isFinite(theirs)) ? theirs : 0;
+  return (b - a >= POVERTY_GAP) ? 1 : 0;
+}
+/* The other seat's pool, for the comparative clause. One helper so the three
+   sites cannot each find the opponent a different way, and so the answer is a
+   number even in a hand-built state with no `state` at all (0, which makes the
+   clause pay - the honest reading of "they have nothing"). */
+function oppPool(player, res){
+  const st = (typeof state !== 'undefined') ? state : null;
+  if(!st || !Array.isArray(st.players) || !player) return 0;
+  const i = st.players.indexOf(player);
+  const o = (i >= 0) ? st.players[1-i] : null;
+  return (o && typeof o[res] === 'number' && isFinite(o[res])) ? o[res] : 0;
 }
 /* ARMY: what the Garrison pays for the Troops already in the holder's pool.
    `per` units buy 1 Influence and `max` bounds the clause, so a full hand of
@@ -385,6 +462,56 @@ function toggleSound(){
 const INTRIGUE_PLAY_COST = 2;
 const HAND_CAP = 5;
 
+/* Round Events - a shared random modifier drawn fresh each round, applying
+   to both players equally. Keeps the optimal strategy shifting round to
+   round instead of every round playing out the same way.
+
+   >>> CUT FROM SIX TO THREE, AND THE FOUR THAT WENT WERE THE WRONG SHAPE.
+   The table used to hold six entries, and four of them
+   (windfall_round +2 Credits, trade_winds +1 Ore, recruitment_drive +1 Troop,
+   council_session +1 Tactic card) were the SAME handout with a different noun
+   on the end. Measured over 300 games (1,200 event draws, this seed):
+
+     windfall 8.4%  trade 8.9%  recruitment 8.8%  council 8.6%
+     fever 7.6%     quiet 7.8%
+
+   even to one decimal place, i.e. a player learned nothing from seeing one.
+   Worse, the handout could not do the job it was in the deck for. Every pool
+   has a hard ceiling (Credits 8, Ore 6, Troops 6) and the final pools land at
+   6.2 / 2.9 / 1.0, so a "+2 Credits to both players" is swallowed by the cap
+   the moment either player touches 7: it is 0 Influence in the attribution
+   table in every round it matters, all four of them, in every game.
+
+   An EVENT earns its place by changing a RULE, so all three survivors do:
+
+     SKIRMISH FEVER   the fight's Influence cap goes 4 -> 6.
+     QUIET ROUND      no Skirmish may happen, whoever holds the Garrison.
+     REVERSE DRAFT    the pick snake runs backwards: whoever would draft
+                      fourth picks first. (NEW - takes recruitment_drive's
+                      slot, and is the only one of the three that touches the
+                      DRAFT rather than the fight.)
+
+   >>> THIS TABLE IS DECLARED ABOVE RULES_HTML ON PURPOSE. The rules copy
+   interpolates it, and RULES_HTML is a top-level template literal evaluated
+   while this file loads - so a table declared below it is a temporal-dead-zone
+   ReferenceError at require() time, which `node --check` cannot see. See the
+   identical note above STAKES. */
+const EVENTS = [
+  {id:'skirmish_fever', name:'Skirmish Fever', desc:'This round, the Skirmish Influence cap is raised from 4 to 6.'},
+  {id:'quiet_round',    name:'Quiet Round',    desc:'This round, no Skirmish may occur, no matter who takes the Garrison.'},
+  {id:'reverse_draft',  name:'Reverse Draft',  desc:'This round the pick snake runs backwards: whoever would draft fourth picks first.'},
+];
+/* The short form #srLive announces. Kept beside the table so a sentence about a
+   deleted event cannot survive its deletion: three entries, three ids, and the
+   id is the lookup key, so an event that stops being drawn stops being
+   announced. Nothing here is narrated - each line is a fact about the round
+   that is already true when it is written. */
+const EVENT_SR = {
+  skirmish_fever:'Skirmish Fever: this fight may pay 6 Influence.',
+  quiet_round:'Quiet Round: no Skirmish this round, and Pressure rises by 2.',
+  reverse_draft:'Reverse Draft: the pick snake runs backwards this round.',
+};
+
 const RULES_HTML = `
   <div class="rules-panels">
     <section class="rules-panel active" id="rules-objective" role="tabpanel" aria-labelledby="rules-tab-objective">
@@ -409,23 +536,26 @@ const RULES_HTML = `
       <p class="rules-intro">Eight sites. Each has a free <b>Basic</b> tier and a pricier <b>Advanced</b> tier. Two sites sit unused every round — unless the Rift is open, which makes it <b>nine sites and six picks</b>. The Rift is announced at the start of every round from Round 3; its mutations are on the <b>Meltdown</b> tab.</p>
       <div class="rules-callout">
         <strong>Most sites also pay a bonus, and the two kinds run in opposite directions.</strong>
-        <b>Poverty</b> (Market, Quarry, Foundry, Bazaar): +1 Influence when the resource that
-        site works in is <b>gone</b> — an empty treasury, no Troops at all, no Ore, or no 2 Ore
-        to trade. Being rich earns nothing here; being broke earns standing.
+        <b>Poverty</b> (Market, Quarry, Foundry): +1 Influence when the pool that site works in is
+        <b>the smaller of the two</b> &mdash; fewer Credits than your opponent, a smaller army than theirs,
+        less Ore than theirs. It is a comparison, not a threshold: banking a pool makes you ineligible, so
+        hoarding pays nothing, and spending first (at the Outpost, the Bazaar, or an Advanced price) is how
+        you earn it. The <b>Bazaar</b> is the fourth member of the family but not the same rule: its +1 is
+        the consolation for a 2-Ore trade it could not make.
         <b>Army</b> (Garrison): +1 Influence per Troop you <b>already hold</b>, up to the tier's
-        cap. This is the one that makes <b>holding back</b> worth taking — the army you do not
+        cap. This is the one that makes <b>holding back</b> worth taking &mdash; the army you do not
         commit to a Skirmish keeps paying you, so spending it costs you next round.
       </div>
       <div class="rules-sites">
         <article class="rules-site">
           <h4>Market</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Credits, +1 Influence if you have no Credits</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Ore → +4 Credits, +1 Influence if you have no Credits</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Credits, +1 Influence if your opponent is 3+ Credits ahead of you</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Ore → +4 Credits, +1 Influence if your opponent is 3+ Credits ahead of you</span></div>
         </article>
         <article class="rules-site">
           <h4>Quarry</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Ore, +1 Troop, +1 Influence if you have no Troops</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Credit → +3 Ore, +2 Troops, +1 Influence if you have no Troops</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+2 Ore, +1 Troop, +1 Influence if your opponent has 3+ more Troops</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Credit → +3 Ore, +2 Troops, +1 Influence if your opponent has 3+ more Troops</span></div>
         </article>
         <article class="rules-site">
           <h4>Garrison</h4>
@@ -444,8 +574,8 @@ const RULES_HTML = `
         </article>
         <article class="rules-site">
           <h4>Foundry</h4>
-          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+1 Credit, +1 Ore, +1 Influence if you have no Ore</span></div>
-          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Troop → +3 Credits, +2 Ore, +1 Influence if you have no Ore</span></div>
+          <div class="rules-tier basic"><span class="rules-tier-tag">Basic</span><span>+1 Credit, +1 Ore, +1 Influence if your opponent is 3+ Ore ahead of you</span></div>
+          <div class="rules-tier advanced"><span class="rules-tier-tag">Adv</span><span>Pay 1 Troop → +3 Credits, +2 Ore, +1 Influence if your opponent is 3+ Ore ahead of you</span></div>
         </article>
         <article class="rules-site">
           <h4>Bazaar</h4>
@@ -549,14 +679,13 @@ const RULES_HTML = `
           <li><b>Gambler</b> — +1 to Wildcard &amp; Gambit</li>
         </ul>
       </div>
-      <div class="rules-extra">
+<div class="rules-extra">
         <h3 class="rules-h">Round Events</h3>
-        <p>Drawn each round from Round 3, applies to both players (shown under Board):</p>
+        <p>Drawn each round from Round 3 and applies to both players (shown under Board). There are only
+        three, and all three change a <b>rule</b> &mdash; none of them hands out a resource, because a pool
+        with a ceiling on it swallows a handout before it reaches your scoreboard:</p>
         <ul class="rules-inline-list">
-          <li><b>Windfall / Trade Winds / Recruitment</b> — resource bump</li>
-          <li><b>Council Session</b> — extra Tactic card</li>
-          <li><b>Skirmish Fever</b> — Influence cap 4 → 6</li>
-          <li><b>Quiet Round</b> — no Skirmish this round</li>
+          ${EVENTS.map(e=>`<li><b>${e.name}</b> &mdash; ${e.desc}</li>`).join('')}
         </ul>
       </div>
     </section>
@@ -944,17 +1073,6 @@ function getLeader(player){
   return LEADERS.find(l=>l.id===player.leaderId);
 }
 
-/* Round Events - a shared random modifier drawn fresh each round, applying
-   to both players equally. Keeps the optimal strategy shifting round to
-   round instead of every round playing out the same way. */
-const EVENTS = [
-  {id:'windfall_round',      name:'Windfall Round',      desc:'Both players immediately gain +2 Credits.'},
-  {id:'trade_winds',         name:'Trade Winds',         desc:'Both players immediately gain +1 Ore.'},
-  {id:'recruitment_drive',   name:'Recruitment Drive',   desc:'Both players immediately gain +1 Troop.'},
-  {id:'council_session',     name:'Council Session',     desc:'Both players immediately draw 1 extra Tactic card.'},
-  {id:'skirmish_fever',      name:'Skirmish Fever',      desc:'This round, the Skirmish Influence cap is raised from 4 to 6.'},
-  {id:'quiet_round',         name:'Quiet Round',         desc:'This round, no Skirmish may occur, no matter who takes the Garrison.'},
-];
 function getEvent(){
   return EVENTS.find(e=>e.id===state.currentEvent);
 }
@@ -1500,6 +1618,8 @@ function stakeReadoutHtml(){
 }
 
 function isFeverRound(){ return !!(state && state.currentEvent==='skirmish_fever'); }
+/* Reverse Draft reads the pick queue, not a resource: see EVENTS. */
+function isReverseDraftRound(){ return !!(state && state.currentEvent==='reverse_draft'); }
 
 /* ============================== THE STAKES ==============================
    The Influence cap used to be a clamp applied to a fight nobody had a say
@@ -2702,11 +2822,16 @@ function beginRound(){
 
   if(eventsUnlocked()){
     s.currentEvent = EVENTS[Math.floor(Math.random()*EVENTS.length)].id;
-    const eventDef = getEvent();
-    if(s.currentEvent==='windfall_round') s.players.forEach(p=>{ p.credits+=2; reportCaps(p, applyCaps(p)); });
-    if(s.currentEvent==='trade_winds') s.players.forEach(p=>{ p.ore+=1; reportCaps(p, applyCaps(p)); });
-    if(s.currentEvent==='recruitment_drive') s.players.forEach(p=>{ p.troops+=1; reportCaps(p, applyCaps(p)); });
-    if(s.currentEvent==='council_session') s.players.forEach(p=> log(`${esc(p.name)} studies Council Session -> ${drawLog(p, 1, drawCard(p,1), 'hand already at the limit')}`));
+    /* >>> D1: THE FOUR HANDOUTS ARE GONE. Windfall Round, Trade Winds,
+       Recruitment Drive and Council Session each read `if(s.currentEvent===…)
+       players.forEach(p=> p.credits+=2)` (or ore / troops / drawCard) and each
+       was paid into a pool with a hard ceiling, so it was discarded by
+       applyCaps on the way in and put 0 Influence into the attribution table
+       in every game. See EVENTS. Nothing is applied here any more: the three
+       survivors are RULES, and a rule is applied where it is read - the cap in
+       skirmishCap(), the silence in advanceDraftOrSkirmish(), the pick order
+       below. The hook still fires, because js/feature-wagers.js and
+       js/feature-chaos.js are entitled to see which event is live. */
     if(canRunExtensions()){
       OD.Ext.hooks.run('roundEventApplied', extCtx('draft', -1, {eventId: s.currentEvent}));
       OD.Ext.effects.run('roundEventApplied', extCtx('draft', -1, {eventId: s.currentEvent}));
@@ -2717,7 +2842,14 @@ function beginRound(){
 
   s.firstPlayerIdx = (s.round % 2 === 1) ? 0 : 1;
   const F = s.firstPlayerIdx, S = 1-F;
-  s.pickQueue = [F,S,S,F,F,S]; // 3 picks each, snake order
+  /* >>> REVERSE DRAFT: the same six picks in the opposite order. The queue is
+     read by currentPicker(), humanPick(), the bot tick and the harness's
+     advanceDraftOrSkirmish() seam, so reversing the ARRAY is the whole rule -
+     no branch anywhere downstream, and the invariant that it holds three
+     picks each is preserved by construction (it is the same multiset). The
+     player who drafts fourth under the ordinary snake drafts first here,
+     which is the only pick-order fact a player can act on. */
+  s.pickQueue = isReverseDraftRound() ? [S,F,F,S,S,F] : [F,S,S,F,F,S];
   s.phase = 'draft';
 
   /* >>> INTEGRATION (G5) - the escalation ramp. Written HERE, after every
@@ -2800,9 +2932,15 @@ function eventsUnlocked(){ return state.round >= 3; }
    (povertyInfluence / surplusInfluence, above) rather than a hand-tuned guess,
    so the bot's draft order cannot drift away from the thing a human reads on
    the tile. Note what is NOT here any more: a term for "this pool is full",
-   which is what used to make the Easy bot out-draft the Hard one. */
+   which is what used to make the Easy bot out-draft the Hard one.
+
+   >>> D2: `short(res)` is now a COMPARISON against the other seat, exactly as
+   the tile prints it, and the opponent is resolved ONCE here rather than inside
+   the Garrison case - three of the eight cases need it now. Each site asks
+   about its OWN pool, so the bot cannot be valuing the Market off Troops. */
 function baseLocationValue(loc, player){
-  const broke = (n)=> povertyInfluence(n) * 0.7;
+  const opp = state.players[1-state.players.indexOf(player)];
+  const short = (res)=> povertyInfluence(player[res], (opp ? opp[res] : 0)) * 0.7;
   switch(loc.id){
     /* >>> CHAOS (feature-chaos.js) — the Rift is worth a FLAT 1.15 on
        purpose. The mutation is public, but the bot does not read the
@@ -2810,11 +2948,10 @@ function baseLocationValue(loc, player){
        as knowledge. Flat is honest: the bot is genuinely uncertain, and a
        human who reads the announcement systematically out-drafts it. */
     case 'rift': return 1.3;
-    case 'market': return 1.5 + broke(player.credits);
-    case 'quarry': return 1.5 + broke(player.troops);
+    case 'market': return 1.5 + short('credits');
+    case 'quarry': return 1.5 + short('troops');
     case 'garrison': {
       const afterTroops = player.troops + 2;
-      const opp = state.players[1-state.players.indexOf(player)];
       /* The Garrison is worth an army, and an army is worth standing while you
          still have it - so the ARMY clause, plus the Aggressor option. This is
          what makes HOLD BACK worth taking. */
@@ -2822,7 +2959,7 @@ function baseLocationValue(loc, player){
     }
     case 'outpost': return (player.credits>=5 && player.ore>=3) ? 1.85 : ((player.credits>=3 && player.ore>=2) ? 1.4 : 0.5);
     case 'archive': return 1.15;
-    case 'foundry': return 1.5 + broke(player.ore);
+    case 'foundry': return 1.5 + short('ore');
     case 'bazaar': return player.ore>=2 ? 1.5 : 1.6;
     case 'shrine': return 1.0;
   }
@@ -2891,9 +3028,11 @@ function applyLocationEffect(playerIdx, locId, tier){
       const bonus = leader.id==='merchant' ? 1 : 0;
       const gain = (tier==='advanced' ? 4 : 2) + bonus;
       if(tier==='advanced') charged = takeCost(player, tierCost('market','advanced'));
-      /* POVERTY: read BEFORE the yield, so it is the empty treasury the Market
-         pays standing for, not the one it has just filled. */
-      const surplus = povertyInfluence(player.credits);
+      /* POVERTY: read BEFORE the yield, so it is the purse the Market is about
+         to refill that is measured, not the one it has just filled - and it is
+         measured against the OPPONENT's purse, which is what makes the clause a
+         choice (spend first, then draft the Market) instead of a coincidence. */
+      const surplus = povertyInfluence(player.credits, oppPool(player, 'credits'));
       player.credits += gain;
       if(surplus > 0) player.influence += surplus;
       log(`${esc(player.name)} works the <b>Market</b> (${tier}) -> +${gain} Credits${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Merchant)':''}${surplus>0?`, +${surplus} Influence`:''}.`);
@@ -2904,7 +3043,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       const bonus = leader.id==='engineer' ? 1 : 0;
       const oreGain = (tier==='advanced'?3:2) + bonus, troopGain = (tier==='advanced'?2:1);
       if(tier==='advanced') charged = takeCost(player, tierCost('quarry','advanced'));
-      const surplus = povertyInfluence(player.troops);
+      const surplus = povertyInfluence(player.troops, oppPool(player, 'troops'));
       player.ore += oreGain; player.troops += troopGain;
       if(surplus > 0) player.influence += surplus;
       log(`${esc(player.name)} works the <b>Quarry</b> (${tier}) -> +${oreGain} Ore, +${troopGain} Troop${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}${surplus>0?`, +${surplus} Influence`:''}.`);
@@ -2970,7 +3109,7 @@ function applyLocationEffect(playerIdx, locId, tier){
       const bonus = leader.id==='engineer' ? 1 : 0;
       const crGain = tier==='advanced'?3:1, oreGain = (tier==='advanced'?2:1) + bonus;
       if(tier==='advanced') charged = takeCost(player, tierCost('foundry','advanced'));
-      const surplus = povertyInfluence(player.ore);
+      const surplus = povertyInfluence(player.ore, oppPool(player, 'ore'));
       player.credits += crGain; player.ore += oreGain;
       if(surplus > 0) player.influence += surplus;
       log(`${esc(player.name)} runs the <b>Foundry</b> (${tier}) -> +${crGain} Credits, +${oreGain} Ore${tier==='advanced'?paidNote(charged):''}${bonus?' (+1 Engineer)':''}${surplus>0?`, +${surplus} Influence`:''}.`);
@@ -5900,6 +6039,17 @@ function srDeltas(){
     ? 'Meltdown: Advanced is free everywhere and holding the Garrison is compulsory.'
     : (srSeen.meltdown === 'true' ? 'Meltdown has passed.' : null)));
   out.push(srFact('round', `${r}|${heat}|${phaseKey()}`, `Round ${r} of ${TOTAL_ROUNDS}. ${heat}. ${phase}.`));
+  /* >>> D1: THE ROUND EVENT IS A RULE, SO IT IS ANNOUNCED AS ONE. The event
+     used to reach the log and #eventLine and nowhere else, which was survivable
+     while all six were passive "+2 Credits" handouts and not survivable now:
+     two of the three change whether a fight happens and what it may pay, and
+     the third changes who drafts first. A player who cannot see the board
+     cannot infer any of that. Keyed on the id, so it fires once per round the
+     event changes and never for an event that has been deleted - EVENT_SR has
+     exactly three keys and getEvent() can only return one of those three ids.
+     Placed immediately after the round fact because srWrite truncates the TAIL
+     at 120 characters, so earlier facts survive and later ones go. */
+  out.push(srFact('event', String(state.currentEvent), EVENT_SR[state.currentEvent] || null));
   out.push(srFact('rift', `${state.riftTarget}|${state.riftMut}|${state.riftContested}`, srRiftSentence()));
   out.push(srFact('lock', String(r), (r < 2) ? 'Advanced tiers are locked this round - they unlock in Round 2.' : null));
   /* >>> D4: THE CONTESTED FACT IS THE RIFT'S NOW. This used to read
